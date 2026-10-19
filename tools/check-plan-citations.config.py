@@ -9,9 +9,7 @@ SEARCH_ROOTS = ["tools", "docs",
                 "horde-ad/src", "horde-ad/test", "horde-ad/bench",
                 "horde-ad/example", "horde-ad/docs", "horde-ad/.claude", "."]
 PUBLISHED_REF = "origin/master"
-# GHC's permalinks are checked in horde-ad's GHC clone, the one holding every
-# commit the filed issues pin: ghc/, the GHC to build with, lacks 6913545fd3,
-# a commit of wip/T27737 that no remote holds, until that branch is fetched
-# into it. horde-ad's own permalinks are checked in its checkout.
-FOREIGN = {"https://gitlab.haskell.org/ghc/ghc/-/blob/": "horde-ad/ghc",
+# GHC's permalinks are checked in ghc/, the GHC to build with, and horde-ad's
+# own in its checkout.
+FOREIGN = {"https://gitlab.haskell.org/ghc/ghc/-/blob/": "ghc",
            "https://github.com/Mikolaj/horde-ad/blob/": "horde-ad"}
