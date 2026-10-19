@@ -1375,7 +1375,7 @@ def check(doc, do_restamp):
         if not pub:
             print(f"FAIL {path}#L{lo}-L{hi} @ {sha[:9]} --- UNPUBLISHED"
                   f" (resolves here but is not an ancestor of"
-                  f" {PUBLISHED_REF}, so the link 404s for everyone else)")
+                  f" {PUBLISHED_REF}, so the link may 404 for everyone else)")
             failures += 1
             continue
         span = f"L{lo}" if lo == hi else f"L{lo}-L{hi}"
@@ -1413,7 +1413,7 @@ def check(doc, do_restamp):
         if not foreign_published(clone, sha):
             print(f"FAIL {where} @ {sha[:9]} --- UNPUBLISHED (in {clone}, but"
                   f" no remote-tracking ref there holds it, so the link"
-                  f" 404s for everyone else)")
+                  f" may 404 for everyone else)")
             failures += 1
             continue
         print(f"ok   {where} @ {sha[:9]}"
