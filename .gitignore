@@ -21,3 +21,16 @@ cabal.project.local
 cabal.project.local~
 .HTF/
 .ghc.environment.*
+
+# The repositories checked out here, each with its own history; ~/slop
+# tracks only its own files beside them.
+/ghc/
+/ghc-fixes/
+/horde-ad/
+/LambdaHack/
+/lambdahack.github.io/
+/orthotope/
+/orthotope.canonical-dispatch/
+/orthotope.toVectorListT/
+/ox-arrays/
+__pycache__/
