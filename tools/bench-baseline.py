@@ -5,10 +5,11 @@ Usage: python3 tools/bench-baseline.py --baseline TSV JSON [JSON ...]
        python3 tools/bench-baseline.py --emit JSON [JSON ...]
        python3 tools/bench-baseline.py --self-test
 
-The JSONs are one collection, collected as tools/check-conv-bench-props.py's
-recipe collects them -- criterion --json, --regress allocated:iters and
-+RTS -T. --emit writes the rows to stdout instead of diffing, under a
-provenance header written by hand, which is how a baseline is regenerated.
+The JSONs are one collection, collected as
+horde-ad/tools/check-conv-bench-props.py's recipe collects them -- criterion
+--json, --regress allocated:iters and +RTS -T. --emit writes the rows to stdout
+instead of diffing, under a provenance header written by hand, which is how a
+baseline is regenerated.
 
 --baseline is required and has no default on purpose. The references under
 bench/ differ in which orthotope they link and in which suite they cover,
@@ -24,11 +25,12 @@ Naming it is the only guard there is:
   baseline-prod-released.tsv       shortProdForCI
   baseline-mnist-released.tsv      shortMnistForCI
   baseline-convvjp-2026-08-27.tsv  the preceding checkout build, kept as the
-                                   evidence for the regression bench/CLAUDE.md
-                                   records, not a diff target
+                                   evidence for the regression
+                                   horde-ad/bench/CLAUDE.md records, not a
+                                   diff target
   baseline-convvjp-ghc-head.tsv    convVjpBench   GHC 10.1.20260918 and the
   baseline-prod-ghc-head.tsv       shortProdForCI  checkout, a series of its
-  baseline-mnist-ghc-head.tsv      shortMnistForCI own (bench/CLAUDE.md)
+  baseline-mnist-ghc-head.tsv      shortMnistForCI own (horde-ad/bench/CLAUDE.md)
   baseline-convvjp-released-ghc-head.tsv  convVjpBench    GHC 10.1.20260918 and
   baseline-prod-released-ghc-head.tsv     shortProdForCI  released orthotope
   baseline-mnist-released-ghc-head.tsv    shortMnistForCI 0.1.8.0
@@ -58,7 +60,7 @@ default 0.5% tolerance is far above its jitter (a few hundred bytes in tens
 of megabytes, ~1e-5 relative) and anything it reports is real. Time is
 reported alongside but gates nothing: the position effect alone moves a
 time slope up to 10% without the program changing at all
-(docs/position-effect.md), which is why --time-tol defaults there.
+(horde-ad/docs/position-effect.md), which is why --time-tol defaults there.
 
 Exit 1 means allocation moved, not that anything regressed -- an improvement
 trips it just as a regression does, and the direction is in the output. Exit
@@ -72,27 +74,26 @@ Refresh a baseline only from a collection taken on a quiet machine,
 and in the commit that explains what moved, so the file and the reason for
 the move land together.
 
-Non-vacuity, 2026-08-28, on real data rather than perturbed copies -- the
-other collections are the live controls. Each of the four baselines is
-silent at exit 0 against the collection it was cut from. Against the
-preceding checkout build it exits 1 naming most of the suite, eleven past
-10% in allocation: the handwritten dInp execution variants at the larger
-sizes and all four fused-gather-* variants, the two families having moved
-in opposite directions, which is the regression and the lost control
-bench/CLAUDE.md records, recovered from the figures alone. That is also why
-the output is ordered by magnitude rather than by name: the median mover
-across that build change sat under 1% and buried both. Feeding a checkout
-collection to the released baseline exits 1 with -90% on the two-gather
-chains, which is the mismatched-reference hazard the required --baseline
-exists to stop and what it looks like when it happens. Feeding one suite's
-collection to another's baseline exits 2 on the coverage guard, as does
-omitting --baseline or passing an unknown flag. --self-test (2026-08-28)
-covers the rest of the usage table on synthetic collections: no argument
-and a flag missing its value exit 2 rather than 1 or a traceback, --emit
-round-trips through --baseline at exit 0, a baseline slope of 0
-reports movement instead of dividing by it -- --emit used to write
-allocation slopes as integers, so a slope under 0.5 became a 0 the next
-diff crashed on -- and an unreadable or malformed baseline or collection
+Non-vacuity, 2026-08-28, on real data rather than perturbed copies -- the other
+collections are the live controls. Each of the four baselines is silent at
+exit 0 against the collection it was cut from. Against the preceding checkout
+build it exits 1 naming most of the suite, eleven past 10% in allocation:
+the handwritten dInp execution variants at the larger sizes and all four
+fused-gather-* variants, the two families having moved in opposite directions,
+which is the regression and the lost control horde-ad/bench/CLAUDE.md
+records, recovered from the figures alone. That is also why the output is
+ordered by magnitude rather than by name: the median mover across that build
+change sat under 1% and buried both. Feeding a checkout collection to the
+released baseline exits 1 with -90% on the two-gather chains, which is the
+mismatched-reference hazard the required --baseline exists to stop and what
+it looks like when it happens. Feeding one suite's collection to another's
+baseline exits 2 on the coverage guard, as does omitting --baseline or passing
+an unknown flag. --self-test (2026-08-28) covers the rest of the usage table on
+synthetic collections: no argument and a flag missing its value exit 2 rather
+than 1 or a traceback, --emit round-trips through --baseline at exit 0, a
+baseline slope of 0 reports movement instead of dividing by it -- --emit used
+to write allocation slopes as integers, so a slope under 0.5 became a 0 the
+next diff crashed on -- and an unreadable or malformed baseline or collection
 exits 2. That the self-test bites is mutants.py's to show.
 """
 import json

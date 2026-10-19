@@ -32,7 +32,7 @@ a prediction of them (docs/perf-checklist.md, S2).
 This is what shows where a flag or pragma puts its compile-time cost. Taking
 `-fno-expose-overloaded-unfoldings` off `AstSimplify` left its own Core as it
 was and grew its importers' 2.3-fold, `AstVectorize`'s 37-fold, which timing
-the module itself cannot show (docs/overloaded-unfoldings.md).
+the module itself cannot show (horde-ad/docs/overloaded-unfoldings.md).
 
 Binding names are normalised as `-dsuppress-uniques` leaves them: the module
 qualifier and the numeric suffix GHC gives each specialisation or worker are

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check that paths, build targets, flags and links named in a document exist.
 
-Usage: python3 tools/check-doc-refs.py [DOC ...]
-DOC defaults to CLAUDE.md. Runs from anywhere in the repository.
+Usage: python3 ~/slop/tools/check-doc-refs.py [DOC ...]
+DOC defaults to CLAUDE.md. The repository checked is the one holding the
+documents, else the working directory's; runs from anywhere.
 
 This is pass 2 of the document-verification discipline (the
 `doc-verification` skill), mechanized. Pass 1
@@ -14,10 +15,11 @@ hand.
 Deliberately conservative: prose backticks hold a mix of paths, type
 names, identifiers and code fragments, and a checker that tried to resolve
 all of them would drown the real failures in noise and stop being read.
-The per-repo settings live in one block at the top: search roots, the
-options file, the owned module namespace, the makefile, the allowlist
-path. Porting this to another repository should mean editing that block
-and nothing else, and each setting may be left empty, which switches its
+The per-repo settings --- search roots, the options file, the owned module
+namespace, the makefile, the allowlist path --- live in the repository's
+`tools/check-doc-refs.config.py`, over the defaults in the block at the
+top. Porting this to another repository should mean writing that file and
+nothing else, and each setting may be left empty, which switches its
 check off rather than breaking the run.
 
 Only these unambiguous shapes are checked, and anything else is counted as
@@ -54,17 +56,17 @@ unclassified rather than guessed at:
            also use (`cabal test --enable-optimization`) are skipped
            rather than guessed at.
   flags    `--flag` anywhere in the document, resolved against the
-           `long "..."` options of OPTIONS_FILE. A flag that is not one of
-           ours but occurs somewhere else in the repo (a cabal or hlint
-           flag in a workflow) is reported as external; one found nowhere
-           is listed for eyeballing, never failed, because third-party
-           tools own flags this repo never mentions. That corroborating
-           grep skips this script as well as the documents: the
-           non-vacuity rows below name a bogus flag, and a checker that
-           reads its own documentation as evidence would call it real ---
-           as this one did until the recipe was first run. It skipped all
-           of tools/ until 2026-08-28, which left every flag of the
-           tools scripts in the eyeball list for good.
+           `long "..."` options of OPTIONS_FILE. A flag that is not one of ours
+           but occurs somewhere else in the repo (a cabal or hlint flag in a
+           workflow), or in a script under FLAG_ROOTS (a flag of the shared
+           tools in ~/slop/tools), is reported as external; one found nowhere
+           is listed for eyeballing, never failed, because third-party tools
+           own flags this repo never mentions. That corroborating grep skips
+           this script as well as the documents: the non-vacuity rows below
+           name a bogus flag, and a checker that reads its own documentation
+           as evidence would call it real --- as this one did until the recipe
+           was first run. It skipped all of tools/ until 2026-08-28, which left
+           every flag of the tools scripts in the eyeball list for good.
   cabal    `+name` against the flags declared in the repo's cabal
   flags    file(s). Upgrade-only like modules, because prose reaches for a
            leading plus too --- a size column reading "small (+spike)" must
@@ -115,14 +117,15 @@ lists globs to report as "allow" instead of failing. Every entry there
 carries its reason; an unexplained one hides the drift this checker
 exists to find. Pass -v to also list the unclassified backticks.
 
-Non-vacuity: run `python3 tools/check-doc-refs.py --self-test`. The scratch
-document and its expected verdicts live in the configuration block (the
-SELF_TEST_* settings), repo-specific like the rest of it; the engine below
-asserts the failure count, every FAIL and ok row, the unclassified tail, the
-missing-document exit, the --without-siblings degradation and the liveness of
-the absent-sibling stop. The link and Contents rows need nothing of this
-repository's tree, so they sit below the block, in anchors_self_test, on a
-scratch repository of their own.
+Non-vacuity: run `python3 ~/slop/tools/check-doc-refs.py --self-test` from
+horde-ad or LambdaHack. The scratch document and its expected verdicts live
+in the repository's settings (the SELF_TEST_* ones), repo-specific like the
+rest of them, and a repository whose file gives none is BLOCKED at 2; the
+engine below asserts the failure count, every FAIL and ok row, the
+unclassified tail, the missing-document exit, the --without-siblings
+degradation and the liveness of the absent-sibling stop. The link and
+Contents rows need nothing of a repository's tree, so they sit in this
+file, in anchors_self_test, on a scratch repository of their own.
 The controls matter as much as the failures: without
 them an extractor that silently matches nothing would look like a clean
 document. The two upstream rows prove the sibling policy resolves a real file
@@ -163,16 +166,11 @@ examining one of six `cabal test` lines in CLAUDE.md, since that
 document indents its blocks instead of fencing them. So the corpus is
 worth a look too, whatever the self-test says.
 
-Two of this repo's shapes cannot be exercised here, and say so rather
-than being quietly untested: there is no makefile, so the `make <target>`
-branch is off (MAKEFILE is ""), and no command-line parser, so every
-`--flag` falls through to the external and unknown buckets. Both are
-exercised by the LambdaHack copy of this script, which below the
-configuration block is meant to stay identical to this one (the sync
-session compares them with `tools/check-twin-sync.py`). What differs by
-design is the docstring and the configuration block, the self-test rows
-among them --- each repo's own --- so a reader syncing one file to the
-other syncs the code below the block and nothing else.
+Two shapes cannot be exercised by horde-ad's rows, and say so rather than
+being quietly untested: it has no makefile, so the `make <target>` branch
+is off (MAKEFILE is ""), and no command-line parser, so every `--flag`
+falls through to the external and unknown buckets. Both are exercised by
+LambdaHack's rows, run from that repository.
 """
 
 import concurrent.futures
@@ -195,98 +193,70 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
 # --- per-repo configuration -----------------------------------------
-# Porting this script to another repository should mean editing this
-# block and nothing else; everything below it is repo-agnostic. Each
+# The defaults, which the root's tools/check-doc-refs.config.py assigns
+# over (common.repo_config, run by configure() below): porting this checker
+# to another repository means writing that file and nothing else. Each
 # setting may be left empty, which switches its check off rather than
 # breaking the run.
-SEARCH_ROOTS = ["src", "test", "bench", "example", "tools", ".github"]
+# The directories a backticked path is resolved under; none means the root,
+# the whole of it, which in a repository holding others is slow.
+SEARCH_ROOTS = []
 # Where the executable's `long "..."` options are declared; "" if the repo
 # ships no command-line parser, in which case every `--flag` falls
 # through to the external/unknown buckets.
 OPTIONS_FILE = ""
 # Module prefix owned by this repo, the one namespace where an
 # unresolved module is a failure rather than a shrug; "" to disable.
-OUR_NAMESPACE = "HordeAd."
+OUR_NAMESPACE = ""
 # The file whose targets `make <target>` is resolved against; "" if the
 # repo has no makefile, which switches that check off.
 MAKEFILE = ""
 # Sibling checkouts whose files this repo's documents cite. They are
 # resolved for real whenever present --- see the sibling policy above --- and
 # their absence stops the run rather than degrading it. [] to disable.
-SIBLING_ROOTS = ["../ox-arrays", "../orthotope"]
+SIBLING_ROOTS = []
+# Directories outside the repository whose scripts' flags the documents
+# name as another tool's, the shared tools in `../tools` above all; [] to
+# search the repository alone.
+FLAG_ROOTS = []
 ALLOW_FILE = "tools/doc-refs-allow.txt"
 # --self-test rows: one scratch document exercising every branch against
-# this repo's real tree and siblings, with the expected verdicts beside
-# it. Repo-specific like the rest of this block; the engine below is not.
-SELF_TEST_DOC = """\
-`src/HordeAd/Core/NoSuchModule.hs` is unresolved local drift, and
-`cabal test noSuchSuite` an unknown target; `HordeAd.Core.NoSuch` is a
-missing module of our namespace and `../ox-arrays/no/such/file.hs` is
-missing in a live sibling: all four must fail, as must the
-wrapped-span row below.
-`--noSuchFlag` is listed, never failed, while `--restamp` is external,
-another tool's; `+noSuchFlag` stays unclassified.
-A span the formatter wrapped, `two words
-across a break`, must not hide `src/HordeAd/Core/NoSuchTwin.hs`, which
-fails like the first path.
-`Arith/Internal.hs` and `Data.Array.Strided.Arith` resolve in a
-sibling, by path and by module name.
-`Core/Ast.hs` and `bench/ConvVjpBench.hs` and `cabal test minimalTest`
-and `cabal build all` and `HordeAd.Core.Ops` and `HordeAd.ADEngine` and
-`+with_expensive_assertions` are passing controls.
-`Core/Ops.hs:297,1581` and `Core/Ops.hs:297` and `Core/Ops.hs:297-320`
-are pass 1's to check, while the malformed `Core/Ops.hs:297,` stays
-unclassified, which keeps the comma form from being a blanket accept.
-`GHC.TypeLits` and `X.replicate` are upgrade-only, unclassified.
-`blob/master` and `group/bench` and `tests` are prose;
-`.../ghc-9.12/...` is an elision, not a sibling path;
-`https://example.com/a/b.md` and `https://hackage.haskell.org/` are
-URLs. None of these may be read as a path.
-A tilde block showing a backtick fence must close only on a tilde fence:
-~~~
-```
-~~~
-so this prose line, cabal test noSuchProseSuite, is not a command, while
-a block after it still is:
-```
-cabal test noSuchFencedSuite
-```
-`../no-such-checkout/tools/t.py` names a checkout nobody configured:
-outside the repo, not checked.
-An indented fence line is code, not a fence:
-
-    ```
-
-so this prose line, cabal test noSuchIndentedSuite, is not a command.
-"""
-SELF_TEST_FAILURES = 6
-SELF_TEST_FAIL = ["NoSuchModule.hs", "NoSuchTwin.hs", "noSuchSuite",
-                  "HordeAd.Core.NoSuch", "../ox-arrays/no/such/file.hs",
-                  "noSuchFencedSuite"]
+# the repository's real tree and siblings, with the expected verdicts
+# beside it. None where the repository's file gives none, which the
+# self-test reports as a run that did not happen; horde-ad's and
+# LambdaHack's give one.
+SELF_TEST_DOC = None
+SELF_TEST_FAILURES = 0
+SELF_TEST_FAIL = []
 # Prose that a fence of the wrong kind once turned into command text: in no
 # FAIL, ok or allow line.
-SELF_TEST_PROSE = ["noSuchProseSuite", "noSuchIndentedSuite"]
+SELF_TEST_PROSE = []
 # A ../ path into a checkout SIBLING_ROOTS does not name: reported with the
 # `~` and `/` ones, never resolved against what happens to be mounted.
-SELF_TEST_EXTERNAL = ["../no-such-checkout/tools/t.py"]
-SELF_TEST_OK = ["Core/Ast.hs", "bench/ConvVjpBench.hs", "minimalTest",
-                "target cabal all",
-                "Arith/Internal.hs", "Data.Array.Strided.Arith",
-                "HordeAd.Core.Ops", "HordeAd.ADEngine",
-                "with_expensive_assertions", "--restamp"]
+SELF_TEST_EXTERNAL = []
+SELF_TEST_OK = []
 # Citation shapes pass 1 owns: skipped here, in no bucket and no row.
-SELF_TEST_SKIPPED = ["Core/Ops.hs:297,1581", "Core/Ops.hs:297",
-                     "Core/Ops.hs:297-320"]
-SELF_TEST_UNCLASSIFIED = ["+noSuchFlag", "Core/Ops.hs:297,", "GHC.TypeLits",
-                          "X.replicate", "blob/master", "group/bench",
-                          "tests", ".../ghc-9.12/...",
-                          "https://example.com/a/b.md",
-                          "https://hackage.haskell.org/"]
+SELF_TEST_SKIPPED = []
+SELF_TEST_UNCLASSIFIED = []
 # The one local-drift row that must degrade to SKIP with the siblings
 # off, and the failure count that survives the degradation.
-SELF_TEST_DEGRADED_FAILURES = 3
-SELF_TEST_DEGRADED_SKIP = "src/HordeAd/Core/NoSuchModule.hs"
+SELF_TEST_DEGRADED_FAILURES = 0
+SELF_TEST_DEGRADED_SKIP = ""
 # --- end per-repo configuration --------------------------------------
+SETTINGS = ("SEARCH_ROOTS", "OPTIONS_FILE", "OUR_NAMESPACE", "MAKEFILE",
+            "SIBLING_ROOTS", "FLAG_ROOTS", "ALLOW_FILE", "SELF_TEST_DOC",
+            "SELF_TEST_FAILURES", "SELF_TEST_FAIL", "SELF_TEST_PROSE",
+            "SELF_TEST_EXTERNAL", "SELF_TEST_OK", "SELF_TEST_SKIPPED",
+            "SELF_TEST_UNCLASSIFIED", "SELF_TEST_DEGRADED_FAILURES",
+            "SELF_TEST_DEGRADED_SKIP")
+
+
+def configure():
+    """The root's settings over the defaults above, for the run main()
+    makes once chdir_root has moved there."""
+    globals().update(common.repo_config(
+        "check-doc-refs", {k: globals()[k] for k in SETTINGS}))
+
 
 PATH_EXT = ("hs", "ts", "mjs", "py", "cabal", "html", "md", "yaml", "yml",
             "json", "sh", "txt", "c", "h")
@@ -666,10 +636,32 @@ def check_commands(text, flat, targets, stanzas, ours, allow_make,
 @functools.lru_cache(maxsize=None)
 def used_in_repo(flag, self_path):
     """Is --FLAG written in a tracked file but the documents and this
-    script? Computed once a run, however many documents name it."""
-    return subprocess.run(["git", "grep", "-qF", "--", "--" + flag,
-                           "--", ":!*.md", ":(top,exclude)" + self_path]
-                          ).returncode == 0
+    script, or in a script under FLAG_ROOTS? Computed once a run, however
+    many documents name it."""
+    # The settings file too, holding the self-test's scratch document.
+    me = [":(top,exclude)" + p
+          for p in (self_path, common.CONFIG_FILE % "check-doc-refs")]
+    if subprocess.run(["git", "grep", "-qF", "--", "--" + flag,
+                       "--", ":!*.md", *me]).returncode == 0:
+        return True
+    # In Python: the self-test runs this with a PATH holding git, bash and
+    # find alone. This script is skipped here too, by name, its docstring
+    # naming the self-test's bogus flag: a copy run elsewhere, as a mutant
+    # is, still meets the original under FLAG_ROOTS.
+    me = os.path.basename(__file__)
+    for r in FLAG_ROOTS:
+        for top, _, names in os.walk(r):
+            for name in names:
+                if not name.endswith((".py", ".sh")) or name == me:
+                    continue
+                try:
+                    with open(os.path.join(top, name), encoding="utf-8",
+                              errors="replace") as fh:
+                        if "--" + flag in fh.read():
+                            return True
+                except OSError:
+                    continue
+    return False
 
 
 def read_doc(doc):
@@ -954,6 +946,11 @@ def self_test():
     so the --without-siblings degradation and the absent-sibling stop can
     be exercised by flipping the same switches main() flips."""
     global SIBLING_ROOTS
+    if SELF_TEST_DOC is None:
+        print("BLOCKED --- this repository's tools/check-doc-refs.config.py"
+              " gives no self-test rows; run the self-test from one whose"
+              " file does, horde-ad or LambdaHack")
+        return 2
     missing = missing_siblings()
     if missing:
         print("BLOCKED --- sibling checkout(s) not available ("
@@ -1021,12 +1018,16 @@ def self_test():
 
         # The same document through main(), from a subdirectory: the
         # configuration's paths are root-relative, so a run from elsewhere
-        # used to report every sibling unmounted.
+        # used to report every sibling unmounted. A search root, this script
+        # living outside the repository it checks.
         script = os.path.abspath(__file__)
+        sub = next((r for r in SEARCH_ROOTS
+                    if r not in ("", ".") and os.path.isdir(r)), None)
         p = subprocess.run([sys.executable, script, doc],
-                           capture_output=True, text=True,
-                           cwd=os.path.dirname(script))
-        if p.returncode != 1 or f"{SELF_TEST_FAILURES} failed" not in p.stdout:
+                           capture_output=True, text=True, cwd=sub)
+        if sub is None:
+            bad.append("no search root is a directory to run from")
+        elif p.returncode != 1 or f"{SELF_TEST_FAILURES} failed" not in p.stdout:
             bad.append("run from a subdirectory: exit %d, %r" % (
                 p.returncode, p.stdout.strip().splitlines()[-1:]))
         with tempfile.TemporaryDirectory() as bindir:
@@ -1081,6 +1082,7 @@ def main():
     # dispatched first it reported BLOCKED from any subdirectory
     # (check-doc-refs-07).
     docs = common.chdir_root(args)
+    configure()
     if "--self-test" in sys.argv[1:]:
         return self_test()
     docs = docs or ["CLAUDE.md"]

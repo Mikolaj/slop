@@ -1,28 +1,27 @@
 # Haskell performance checklist
 
 The checks to run on Haskell code for its performance, each with what
-it catches, the case it came from, a recipe over horde-ad's `tools/` and how
+it catches, the case it came from, a recipe over ~/slop's `tools/` and how
 to read what comes back; then the measuring conditions every timing assumes,
 the rules for pragmas and flags, and the tools themselves. Distilled
 on 2026-10-07 from the orthotope work of 2026-09-30 to 2026-10-07, whose figures
 the cases quote, and the home of horde-ad's A/B rules, pragma and flag rules
-and tool reference. A session reaches it through the user-scope
+and the tools' reference. A session reaches it through the user-scope
 `haskell-perf-checklist` skill: asked to do the checklist on a project, it runs
 the whole list as the next section says; asked for one check by name ("check eta
 vs INLINE"), it runs that check's recipe rather than composing one.
 
 The tools the checks call resolve their arguments against the working directory,
 so they run from any project's root as `python3 $T/NAME.py`
-with `T=~/r/horde-ad/tools`, wherever the session's wrapper mounts
-`~/r/horde-ad`.
+with `T=~/slop/tools`.
 
 ## Running the checklist on a project
 
 1. Resolve the project's root, the base the work is measured against (`master`
    or the branch's merge base), the compiler and the client modules
    that exercise the library, its tests and benchmarks. The compiler is GHC
-   HEAD, `/home/mikolaj/r/horde-ad/ghc/_build/stage1/bin/ghc` with the project's
-   HEAD configuration (orthotope's is `cabal.project.local.head`), unless
+   HEAD, `/home/mikolaj/slop/ghc/_build/stage1/bin/ghc` with the project's HEAD
+   configuration (orthotope's is `cabal.project.local.head`), unless
    the project's notes name another; a released GHC is built only where a check
    says so.
 2. The static checks, which build nothing: A2, I4, W1, W3, W4, and the source
@@ -77,9 +76,10 @@ Not a check: the conditions every timing below assumes.
   of `BenchMnistTools` for a `contractAst` change --- the concrete pipeline
   never runs it), and/or a change-independent variant (e.g. `S-exec-raw`
   for a `contractAst` change: the raw artifact is contraction-independent ---
-  see the `vjpArtifact` cost fact in `.claude/rules/performance-model.md` ---
-  so it is identical across the toggle). The change's effect is the target's
-  per-pair ratio minus the control's.
+  see the `vjpArtifact` cost fact
+  in `horde-ad/.claude/rules/performance-model.md` --- so it is identical across
+  the toggle). The change's effect is the target's per-pair ratio minus
+  the control's.
 - **An A/B also needs the same benchmark selection in every run compared,
   and its decisive numbers taken one benchmark per process: a predecessor's
   leftover RTS pool state can shift a follower's time ~7--10% at the `-A32m`
@@ -87,7 +87,7 @@ Not a check: the conditions every timing below assumes.
   cannot catch it, both arms of a pair sharing their roster, and pinning alone
   is not sufficient when the compared builds change a predecessor's own
   allocation profile. Mechanism, evidence and the practical trade-offs
-  are in `docs/position-effect.md`.
+  are in `horde-ad/docs/position-effect.md`.
 - Build what is timed through `tools/align-as.py`, from a fresh build directory,
   with
   `LOOP_MAXSKIP=1 LOOP_LOOKTHROUGH=1 LOOP_DEADSPOT=1 LOOP_EXITSPAN=1 LOOP_SETTLED=1`
@@ -124,11 +124,12 @@ Not a check: the conditions every timing below assumes.
   under it. Profiles are the exception: under it a cost-centre profile recorded
   no ticks, and a `-hT` heap profile 3 samples where it took 12 without.
 - Ask for every GHC option a benchmark or probe build adds beyond the cabal
-  file's (`bench/CLAUDE.md`). Never `-fno-full-laziness` with `-fno-cse`, which
-  GHC [#27886](https://gitlab.haskell.org/ghc/ghc/-/work_items/27886)
-  miscompiles; keep iterations from sharing work by a NOINLINE `perturb i x`
-  instead, whose result depends on `i`: one ignoring `i` let 2000 iterations
-  share one call, allocating barely more than 100 did.
+  file's (`horde-ad/bench/CLAUDE.md`). Never `-fno-full-laziness`
+  with `-fno-cse`, which GHC
+  [#27886](https://gitlab.haskell.org/ghc/ghc/-/work_items/27886) miscompiles;
+  keep iterations from sharing work by a NOINLINE `perturb i x` instead, whose
+  result depends on `i`: one ignoring `i` let 2000 iterations share one call,
+  allocating barely more than 100 did.
 - Fusion and sharing can delete the work being measured: a `length` let fusion
   skip building the vector, a `take . generate` control fused, and four
   identical parts were computed once. Feed distinct inputs and consume the whole
@@ -247,7 +248,8 @@ throughout, its own flags reaching no user's build.
   and nothing measurable once a group of pragmas had gone, so price it on top
   of the pragmas it will live with.
 
-`docs/pragmas-and-flags.md` records one application of these rules, to horde-ad.
+`horde-ad/docs/pragmas-and-flags.md` records one application of these rules,
+to horde-ad.
 
 ### With `-fexpose-overloaded-unfoldings`
 
@@ -322,7 +324,7 @@ not for orthotope's fill, which had no pragma at all (S1's variant C).
   for itself or goes, as in the half above. Opting a module out
   of `-fexpose-overloaded-unfoldings` is itself such a trade: compile time saved
   where specialisation buys nothing, as horde-ad measured of its opt-out modules
-  (`docs/overloaded-unfoldings.md`).
+  (`horde-ad/docs/overloaded-unfoldings.md`).
 - **A removal shows in a caller's Core, not in the module's own:** the removing
   rule above reads the dumps of the project's tests and benchmarks, or
   of a probe client.
@@ -625,7 +627,7 @@ as in orthotope's Storable and Unboxed `vMap` and zips, marked as standing
 in for SpecConstr (W1); if it gives up fusion, its comment says so or says why
 not. `-fspec-constr` grew one test module's Core by 6 to 9%. Rewrite rules
 at orthotope's API that would fuse its operations are refuted
-(`.claude/rules/performance-model.md`).
+(`horde-ad/.claude/rules/performance-model.md`).
 
 ## L. Laziness and strictness
 
@@ -1014,9 +1016,9 @@ two of its list concern where loops happen to land: `align-as.py` keeps it out
 of that difference and `loop-offsets.py` determines it from a binary. Each
 of the others has a `--self-test` and exits 2 rather than 0 when its run did
 not happen, so that a build made without the needed flags cannot look like one
-where nothing changed. `docs/overloaded-unfoldings.md` shows `ab-time`,
+where nothing changed. `horde-ad/docs/overloaded-unfoldings.md` shows `ab-time`,
 `cachegrind-per-call`, `ticky-diff` and `core-diff` in use,
-and `docs/pragmas-and-flags.md` `pragma-calls`.
+and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
 
 - `tools/ab-time.py` runs the A/B procedure of M as a script over two or more
   builds' benchmark executables: interleaved rounds, the order rotated

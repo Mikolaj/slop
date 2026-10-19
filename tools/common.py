@@ -3,7 +3,11 @@
 Imported by its neighbours, never run: each puts its own directory first on
 sys.path, which running it does anyway and importing it by path does not.
 
-chdir_root serves the checkers whose configuration is root-relative;
+chdir_root serves the checkers whose configuration is root-relative, the
+root being the repository holding the documents named, since these tools
+live in ~/slop/tools and serve every repository in ~/slop from outside;
+repo_config reads that repository's settings for check-doc-refs.py and
+check-plan-citations.py, tools/check-doc-refs.config.py and its like;
 require_readable the four that kept a copy of it each, check-doc-examples.py,
 check-doc-refs.py, check-plan-citations.py and heading-outline.py; and
 fence_scan those that must tell fenced code from prose:
@@ -19,9 +23,10 @@ item, for check-doc-refs.py and check-doc-wrap.py: each had a reader of
 its own, and each lacked a case another had (heading-outline-07,
 check-doc-refs-14, check-doc-wrap-11).
 
-The criterion reader serves ab-time.py, bench-baseline.py and
-check-conv-bench-props.py, which each read a `--json` collection's
-regressions against the iteration count. A file that is not such a
+The criterion reader serves ab-time.py and bench-baseline.py, which each
+read a `--json` collection's regressions against the iteration count;
+horde-ad's check-conv-bench-props.py keeps a copy of it, CI checking that
+repository out alone. A file that is not such a
 collection raises CriterionError, which each turns into its own exit 2, the
 run not having happened; so does an estimate that is not a finite number,
 criterion writing a NaN as null. measured_env is the environment of a
@@ -129,21 +134,40 @@ def unwrapped(text):
 FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
 
 
+def toplevel(where="."):
+    """The toplevel of the repository holding the directory WHERE, or ""
+    outside one or with no git to ask."""
+    # answered dropped-status: an empty top is the failure, and each caller
+    # tests it
+    try:
+        return subprocess.run(["git", "-C", where, "rev-parse",
+                               "--show-toplevel"],
+                              capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return ""
+
+
 def chdir_root(paths=(), outside=False):
     """Run from the repository root whatever the cwd -- the configuration's
-    paths are root-relative -- and return PATHS rebased to it. Outside a
+    paths are root-relative -- and return PATHS rebased to it. The root is
+    the repository holding the documents named, else the cwd's: these tools
+    live in ~/slop/tools and serve every repository inside it, so the cwd
+    says nothing about which one a document is in. Documents in two
+    repositories exit 2, a root being one configuration. Outside a
     repository, or with no git to ask, exit 2, the run not happening: where
     nothing moved, check-plan-citations failed each citation of a repository
     file as unresolved, and check-doc-refs under --without-siblings resolved
     no path and exited 0 (check-plan-citations-12, check-doc-refs-12). With
     OUTSIDE, for a checker whose verdict needs no repository, nothing moves
     there instead."""
-    # answered dropped-status: an empty top is the failure, and the next line tests it
-    try:
-        top = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True).stdout.strip()
-    except OSError:
-        top = ""
+    tops = {t for t in (toplevel(os.path.dirname(os.path.abspath(p)))
+                        for p in paths) if t}
+    if len(tops) > 1:
+        print("the documents named sit in %d repositories (%s), and a run"
+              " reads one repository's settings: check each apart"
+              % (len(tops), ", ".join(sorted(tops))), file=sys.stderr)
+        sys.exit(2)
+    top = tops.pop() if tops else toplevel()
     if not top:
         if outside:
             return list(paths)
@@ -154,6 +178,38 @@ def chdir_root(paths=(), outside=False):
     paths = [os.path.relpath(os.path.abspath(p), top) for p in paths]
     os.chdir(top)
     return paths
+
+
+# A repository's settings for a checker here, root-relative: the checker's
+# per-repo block as it stood in the checker before the tools left the
+# repositories, assignments of upper-case names, comments and all.
+CONFIG_FILE = os.path.join("tools", "%s.config.py")
+
+
+def repo_config(checker, defaults):
+    """DEFAULTS, with the upper-case names the root's CONFIG_FILE for
+    CHECKER assigns over them; DEFAULTS alone where there is no such file.
+    Run after chdir_root. A file that cannot be run, or a name DEFAULTS
+    does not have, exits 2: a misspelt setting would otherwise leave its
+    default switched on without a word."""
+    path = CONFIG_FILE % checker
+    if not os.path.exists(path):
+        return dict(defaults)
+    ns = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            exec(compile(f.read(), path, "exec"), ns)
+    except Exception as e:
+        print(f"{path} cannot be run ({type(e).__name__}: {e}), so nothing"
+              f" was checked", file=sys.stderr)
+        sys.exit(2)
+    got = {k: v for k, v in ns.items() if k.isupper()}
+    unknown = sorted(set(got) - set(defaults))
+    if unknown:
+        print(f"{path} sets {', '.join(unknown)}, which {checker} does not"
+              f" have; nothing was checked", file=sys.stderr)
+        sys.exit(2)
+    return {**defaults, **got}
 
 
 def require_readable(paths):

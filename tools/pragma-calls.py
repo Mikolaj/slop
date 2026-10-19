@@ -26,7 +26,7 @@ the latter reaches. DEAD means only that the counts agree, which is weaker
 than identical Core: a pragma that changes what a class method's default
 receives, or a function's unfolding without its call sites, can read DEAD
 and still move a benchmark, as the `rsize` family behind `tsize` did
-(docs/pragmas-and-flags.md). And a DEAD verdict does not make a pragma
+(horde-ad/docs/pragmas-and-flags.md). And a DEAD verdict does not make a pragma
 removable: it may be dead only at today's inliner thresholds
 (docs/perf-checklist.md, P). A name the diff removes a pragma from in
 several modules is counted per module, `(per module)`, in the code alone,

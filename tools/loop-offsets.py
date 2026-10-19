@@ -73,7 +73,7 @@ is built beside the binary it explains, from the same source and shim:
 
     LOOP_MAXSKIP=1 cabal build micro --builddir=db-g3 \
       --ghc-options="-fspec-constr" --ghc-options="-g3" \
-      --ghc-options="-pgma $PWD/../../horde-ad/tools/align-as.py -fforce-recomp"
+      --ghc-options="-pgma $PWD/../../tools/align-as.py -fforce-recomp"
 
 and `rm -rf db-g3` with the binary afterwards, `.gitignore` covering the
 builddir but not a copied-out probe binary. **Matching its copies to the

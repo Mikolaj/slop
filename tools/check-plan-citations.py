@@ -1,16 +1,48 @@
 #!/usr/bin/env python3
 """Check that file:line citations and permalinks in a document still resolve.
 
-Usage: python3 tools/check-plan-citations.py [DOC ...]
-DOC defaults to CLAUDE.md. Runs from anywhere in the repository. --restamp takes one
-DOC, since the stamp it writes is that document's own.
+Usage: python3 ~/slop/tools/check-plan-citations.py [DOC ...]
+DOC defaults to CLAUDE.md. The repository checked is the one holding the
+documents, else the working directory's; runs from anywhere. --restamp
+takes one DOC, since the stamp it writes is that document's own.
 
 For every citation of the form `path/to/File.hs:12` or `File.hs:12-34`
 (also .ts, .py, .c, .h, .cabal, .mjs, .html, .md, .txt, .yaml/.yml and
 the Makefile --- documents cite each other and the tools), the script
 resolves the file, checks the line range exists, and prints the first
 cited line so a human can compare it against what the surrounding
-sentence claims. A `/.../` component in a cited path is treated as a
+sentence claims.
+
+A citation may name a text anchor instead of a line: `File.hs:some text`,
+in backticks or between `@` signs (haddock's code markup, for a document
+that drafts a module), where what follows the colon starts with neither
+a digit nor a space and runs to the closing delimiter. The anchor is a
+fixed string that exactly one line of the file must contain, runs of
+whitespace on either side counting as one space, since the formatter
+collapses them in prose; the script prints that line with its number,
+and fails ANCHOR-MISSING when no line carries it and ANCHOR-AMBIGUOUS
+when several do, listing them. An anchor also carries no word that
+would open a heading, a quote, a table row or a list item were a wrap
+to put it first on a line (`#ifdef`, `>=`, `|`, a bare `-` or `*`),
+because the formatter breaks inside backticks and such a paragraph does
+not survive its round trip; cite the words beside such a token instead.
+A slid line therefore never goes stale, a rewritten one fails loudly,
+and the document carries no stamp for such citations and never restamps
+--- which is why --restamp still counts only file:line citations and
+refuses a document holding none. An anchor can contain neither a backtick
+nor an `@`, whichever delimits it, so a line whose only unique text has one
+in it is cited by the text beside it. Into a `.md` file, the one target the
+numeric form refuses, an anchor is matched against paragraphs rather than
+lines --- the file read through `wrap80 --unwrap`, as check-doc-refs.py
+reads its spans --- because a wrap can fall inside any phrase and moves
+whenever a paragraph above is edited; the report then names the paragraph,
+and a run that finds no wrap80 to unwrap with stops at 2 rather than
+reporting every such anchor missing. The form was ruled on 2026-09-08 and
+first applied on 2026-09-14 to LambdaHack's
+docs/wasm-frontend-unified-plan.md, whose citation-repair commits it
+retired.
+
+A `/.../` component in a cited path is treated as a
 wildcard (the document uses it to abbreviate long paths). A citation may
 name several lines or ranges, comma-separated with no space
 (`Core/OpsConcrete.hs:222,1581`); each member is resolved and printed on
@@ -48,8 +80,10 @@ document is BLOCKED (exit 2, unless another document of the run failed)
 rather than degraded to the weaker check, as check-doc-refs.py does for
 an unmounted sibling.
 
-FOREIGN, in the per-repo block, maps the URL prefix of another repository's
-permalinks to a local clone of it, GHC's GitLab to `ghc` here, and such a
+FOREIGN, one of the repository's settings in its
+`tools/check-plan-citations.config.py` over the defaults in the block at the
+top, maps the URL prefix of another repository's permalinks to a local clone
+of it, GHC's GitLab to `ghc` in ~/slop's, and such a
 link is checked in the clone the same way: a GitLab range reads `#L12-34`, a
 link with no line names the whole file, and published means that one of the
 clone's remote-tracking refs holds the commit. A clone or a commit missing
@@ -58,7 +92,9 @@ saying which is missing. `--foreign=PREFIX=CLONE` adds a mapping for one
 run.
 
 A document's links are checked for their own claims too. A `[text][label]`
-with no definition renders as plain text and fails. A permalink's link text
+with no definition renders as plain text and fails, but for two bracketed
+numbers in a document defining no numeric label, which are sources cited
+footnote-style against a numbered list. A permalink's link text
 shaped like a path must be the end of its URL, and a `#L` one must continue
 the file the paragraph's last path-shaped one named. And of the names written
 beside a permalink in its clause --- backticked code, a `Note [...]`, a
@@ -86,7 +122,7 @@ repairs it. They still both set the exit status. For the same reason
 orphaned stamp left in place is strictly worse than an unpushed one -- and
 prints an advisory naming the push it depends on.
 
-Non-vacuity: run `python3 tools/check-plan-citations.py --self-test`. It
+Non-vacuity: run `python3 ~/slop/tools/check-plan-citations.py --self-test`. It
 builds a scratch git repository -- files, commits, an origin/master ref,
 an unpublished commit -- and a control document holding every failing kind
 beside its passing controls, asserts each verdict and the exact failure
@@ -263,15 +299,13 @@ first run of the hand recipe in the LambdaHack copy read five successes
 that were four refusals.
 
 AMBIGUOUS (a bare basename matching several files) needs the scratch
-repository, and deliberately: in this tree `test/CLAUDE.md` and
+repository, and deliberately: in horde-ad `test/CLAUDE.md` and
 `bench/CLAUDE.md` share the only duplicated basename under the search
 roots, and `resolve` returns at its `os.path.exists` check before
 reaching the ambiguity branch, so the root `CLAUDE.md` shadows the pair
 and `CLAUDE.md:1` resolves ok -- a live row needs a basename duplicated
 under the search roots with no copy at the repo root, which the
-self-test builds. The two copies of this script may differ only in the
-per-repo block; the sync session compares the rest with
-`tools/check-twin-sync.py`.
+self-test builds.
 """
 
 import collections
@@ -290,7 +324,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
 # --- per-repo configuration -----------------------------------------
-SEARCH_ROOTS = ["src", "test", "bench", "example", "tools", ".github", "."]
+# The defaults, which the root's tools/check-plan-citations.config.py
+# assigns over (common.repo_config, run by configure() below).
+# The directories a cited file is looked for under, the root included.
+SEARCH_ROOTS = ["."]
 # The ref a pinned commit has to be reachable from to count as published.
 # `git show` is an object-database lookup with no reachability requirement,
 # so without this a link or stamp naming an unpushed or squashed-away
@@ -299,19 +336,25 @@ PUBLISHED_REF = "origin/master"
 # Permalinks into another repository that a local clone can check, keyed by
 # the URL up to the commit: the clone's path from the root. A commit there
 # counts as published when one of the clone's remote-tracking refs holds it.
-FOREIGN = {"https://gitlab.haskell.org/ghc/ghc/-/blob/": "ghc"}
+FOREIGN = {}
 # --- end per-repo configuration --------------------------------------
+SETTINGS = ("SEARCH_ROOTS", "PUBLISHED_REF", "FOREIGN")
 # FOREIGN with this run's --foreign= additions, which main() sets.
 FOREIGN_RUN = dict(FOREIGN)
 
 # The extensions are check-doc-refs.py's PATH_EXT: that pass skips every
 # backticked `path:NN` token as this one's, so an extension missing here is
-# cited by nobody (check-plan-citations-07). Two twin-synced files, so the
-# list is written twice and each names the other.
+# cited by nobody (check-plan-citations-07). Two files, so the list is
+# written twice and each names the other.
+CITED_FILE = (r"(\.?[A-Za-z][A-Za-z0-9_./-]*"
+              r"\.(?:hs|ts|py|c|h|cabal|mjs|html|md|txt|yaml|yml|json|sh)|Makefile)")
 CITE_RE = re.compile(
-    r"`?(\.?[A-Za-z][A-Za-z0-9_./-]*"
-    r"\.(?:hs|ts|py|c|h|cabal|mjs|html|md|txt|yaml|yml|json|sh)|Makefile)"
-    r":(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)")
+    r"`?" + CITED_FILE + r":(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)")
+# The anchor form. The first character after the colon excludes a digit,
+# so the numeric form above keeps every match it had, and a space, so a
+# shell command's `file.hs: ` cannot start one; the closing delimiter
+# must repeat the opening one.
+ANCHOR_RE = re.compile(r"([`@])" + CITED_FILE + r":([^0-9\s`@][^`@\n]*)\1")
 URL_RE = re.compile(
     r"https://github\.com/([\w.-]+/[\w.-]+)/blob/([0-9a-f]{7,40})/"
     r"([A-Za-z0-9_./-]+)#L(\d+)(?:-L(\d+))?")
@@ -610,6 +653,14 @@ def check_links(text, own, foreign):
             if url is None:
                 label = m.group(2) or shown
                 url = defs.get(norm_label(label))
+                if url is None and shown.isdigit() \
+                        and (m.group(2) or "").isdigit() \
+                        and not any(k.isdigit() for k in defs):
+                    # Sources cited footnote-style, `[7][9]` against a
+                    # numbered list, in a document defining no numeric
+                    # label: they render as written, as LambdaHack's wasm
+                    # plan means them to.
+                    continue
                 if url is None:
                     print(f"FAIL [{shown}][{m.group(2)}] --- no definition"
                           f" of [{label}], so it renders as plain text")
@@ -835,7 +886,7 @@ def self_test():
             open("a.hs", "w").write("line one\nline two\nline three\n")
             os.makedirs("sub")
             open("sub/b.py", "w").write("print(1)\n")
-            open("note.md", "w").write("prose\n")
+            open("note.md", "w").write("prose that\nwraps here\n")
             open(".dot.yaml", "w").write("key: value\n")
             os.makedirs("test")
             os.makedirs("tools")
@@ -843,6 +894,7 @@ def self_test():
             open("tools/Dup.hs", "w").write("dup\n")
             open("d.json", "w").write("{}\n")
             open("s.sh", "w").write("true\n")
+            open("sp.hs", "w").write("double  spaced   words\n")
             git("add", "-A")
             git("commit", "-qm", "c1")
             c1 = head()
@@ -871,6 +923,22 @@ def self_test():
                      "OUT-OF-RANGE")
             p = run("ok.md", "bad.md", "--restamp")
             expect("restamp takes one document", p.returncode, 2)
+            # The root is the repository holding the document, the cwd
+            # outside every repository: these tools serve ~/slop's
+            # repositories from ~/slop/tools.
+            p = run(os.path.abspath("ok.md"), cwd=os.path.dirname(td))
+            expect("the document names the root", p.returncode, 0)
+            # The repository's settings file is read, and a name the
+            # checker lacks stops the run rather than going unread.
+            cfg = os.path.join("tools", "check-plan-citations.config.py")
+            open(cfg, "w").write('PUBLISHED_REF = "origin/nosuch"\n')
+            p = run("stop.md")
+            expect("a setting from the file is taken", p.returncode, 2)
+            open(cfg, "w").write("NOSUCH = 1\n")
+            p = run("ok.md")
+            expect("an unknown setting stops", p.returncode, 2)
+            contains("an unknown setting stops", p.stderr, "NOSUCH")
+            os.unlink(cfg)
 
             open("doc.md", "w").write(
                 "# control\n\n"
@@ -882,6 +950,12 @@ def self_test():
                 "`.dot.yaml:1` dotfile control, `.dot.yaml:999999` its"
                 " pair. `d.json:1` and `s.sh:1` are extensions once\n"
                 "cited by nobody.\n"
+                "`a.hs:line two` anchor control, @a.hs:line three@ its"
+                " haddock twin, `a.hs:no such text` missing,\n"
+                "`a.hs:line` ambiguous. `a.hs: line one` is a shell\n"
+                "command and not a citation. `sp.hs:double spaced words`\n"
+                "matches across a run of spaces. `note.md:that wraps`\n"
+                "spans a wrap and matches the paragraph.\n"
                 "%s#L1 pinned ok. %s#L99999 pinned range.\n"
                 "%s#L0 pinned zero. %s#L3-L1 pinned backwards.\n"
                 "https://github.com/ghc/ghc/blob/0123456789abcdef01234567"
@@ -901,14 +975,20 @@ def self_test():
                      "in ghc/ghc, another repository, not checked",
                      "ok   a.hs:1 |", "ok   .dot.yaml:1 |",
                      "ok   d.json:1 |", "ok   s.sh:1 |",
-                     "a.hs#L1 @", "13 failed", "a.hs:0-0 --- OUT",
+                     "ok   a.hs:2 <- 'line two'", "ok   a.hs:3 <- 'line three'",
+                     "ok   sp.hs:1 <- 'double spaced words'",
+                     "ok   note.md:paragraph 1 <- 'that wraps'",
+                     "ANCHOR-MISSING", "ANCHOR-AMBIGUOUS (lines 1, 2, 3, 4",
+                     "a.hs#L1 @", "15 failed", "a.hs:0-0 --- OUT",
                      "a.hs:3-2 --- OUT", "#L0-L0 @", "#L3-L1 @")
+            expect("a shell command's colon-space is not an anchor",
+                   "' line one'" in p.stdout, False)
             expect("continuation collapses with the plain row",
                    p.stdout.count("a.hs:999999"), 1)
             p = run("../doc.md", cwd="sub")
             expect("same verdict from a subdirectory", p.returncode, 1)
             contains("same verdict from a subdirectory", p.stdout,
-                     "13 failed")
+                     "15 failed")
 
             open("two.md", "w").write(
                 "`a.hs:1` cited.\n\n"
@@ -1051,6 +1131,7 @@ def self_test():
                 " a GitLab range, [src/M.hs#L4-5][f6] (`foo`).\n\n"
                 "A missing path [src/Nope.hs#L1][f3], a range [x][f4],"
                 " an unpublished commit [src/N.hs#L1][f5].\n\n"
+                "Sources [7][9], footnote-style.\n\n"
                 "An undefined label [y][nosuch]. Text naming another line,"
                 " [src/M.hs#L5][f1].\n\n"
                 "[src/M.hs#L4][f1] and then [#L1][f7], into another file.\n\n"
@@ -1072,11 +1153,20 @@ def self_test():
                      "[#L1] --- a continuation into src/N.hs",
                      "none of `baz`", "7 failed")
             for quiet in ("`Repro`", "none of `src/Words.hs`",
+                          "no definition of [9]",
                           f"#L{deep} @ {fa[:9]} --- none",
                           f"#L{note} @ {fa[:9]} --- none",
                           f"#L{hello} @ {fa[:9]} --- none"):
                 if quiet in p.stdout:
                     bad.append(f"foreign kitchen sink: {quiet!r} reported")
+            open("nd.md", "w").write(
+                "Sources [7][9], beside a numeric label.\n\n"
+                "[1]: https://example.com/\n")
+            p = run("nd.md")
+            expect("a numeric label defined makes [7][9] a link",
+                   p.returncode, 1)
+            contains("a numeric label defined makes [7][9] a link",
+                     p.stdout, "no definition of [9]")
             open("fb.md", "w").write(
                 f"[src/M.hs#L1][z]\n\n[z]: {pre}{'0' * 40}/src/M.hs#L1\n")
             p = run("fb.md", fmap)
@@ -1108,14 +1198,14 @@ def self_test():
 
 def main():
     global FOREIGN_RUN
-    FOREIGN_RUN = dict(FOREIGN)
+    extra = {}
     for a in sys.argv[1:]:
         if a.startswith("--foreign="):
             prefix, _, clone = a[len("--foreign="):].partition("=")
             if not prefix or not clone:
                 print("--foreign takes PREFIX=CLONE", file=sys.stderr)
                 sys.exit(2)
-            FOREIGN_RUN[prefix] = clone
+            extra[prefix] = clone
     flags = {a for a in sys.argv[1:]
              if a.startswith("--") and not a.startswith("--foreign=")}
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -1129,6 +1219,9 @@ def main():
     # checker here does: this one's self-test names no root-relative path,
     # but two siblings' did and reported wrongly from a subdirectory.
     docs = common.chdir_root(args)
+    globals().update(common.repo_config(
+        "check-plan-citations", {k: globals()[k] for k in SETTINGS}))
+    FOREIGN_RUN = {**FOREIGN, **extra}
     if "--self-test" in flags:
         return self_test()
     docs = docs or ["CLAUDE.md"]
@@ -1199,6 +1292,50 @@ def check(doc, do_restamp):
             continue
         span = f"{lo}" if lo == hi else f"{lo}-{hi}"
         print(f"ok   {name}:{span} | {lines[lo - 1].strip()[:80]}")
+    anchors = sorted({(m.group(2), m.group(3))
+                      for m in ANCHOR_RE.finditer(flat)})
+    for name, anchor in anchors:
+        path, err = resolve(name)
+        if err:
+            print(f"FAIL {name}:{anchor} --- {err}")
+            failures += 1
+            continue
+        text_ = open(path, encoding="utf-8", errors="replace").read()
+        unit = "line"
+        if name.endswith(".md"):
+            # Prose is matched per paragraph: a wrap can fall inside any
+            # phrase and moves with every edit above it, so the line is
+            # not the unit. wrap80 defines the paragraph, as it does for
+            # check-doc-refs.py; without it the run did not happen.
+            if not shutil.which("wrap80"):
+                print("stopping: wrap80 is not on PATH, so an anchor into"
+                      f" {name} cannot be matched per paragraph",
+                      file=sys.stderr)
+                sys.exit(2)
+            text_ = subprocess.run(["wrap80", "--unwrap"], input=text_,
+                                   text=True, capture_output=True,
+                                   check=True).stdout
+            unit = "paragraph"
+        lines_ = text_.splitlines()
+        # Whitespace runs collapse on both sides: the formatter collapses
+        # them in the document, and source aligns with them.
+        norm = " ".join(anchor.split())
+        hits = [i for i, ln in enumerate(lines_, 1)
+                if norm in " ".join(ln.split())]
+        if not hits:
+            print(f"FAIL {name}:{anchor} --- ANCHOR-MISSING (no {unit} of"
+                  f" {path} contains it)")
+            failures += 1
+            continue
+        if len(hits) > 1:
+            print(f"FAIL {name}:{anchor} --- ANCHOR-AMBIGUOUS ({unit}s"
+                  f" {', '.join(map(str, hits))} all contain it; lengthen"
+                  f" the anchor)")
+            failures += 1
+            continue
+        where = f"{hits[0]}" if unit == "line" else f"paragraph {hits[0]}"
+        print(f"ok   {name}:{where} <- {anchor!r}"
+              f" | {lines_[hits[0] - 1].strip()[:80]}")
     urlcites = sorted({(m.group(1).lower(), m.group(2), m.group(3),
                         int(m.group(4)), int(m.group(5) or m.group(4)))
                        for m in URL_RE.finditer(flat)})
@@ -1318,7 +1455,8 @@ def check(doc, do_restamp):
             print(f"note stamp @ {sha[:9]} --- not on {PUBLISHED_REF} yet;"
                   f" sound only if this branch is pushed without"
                   f" rewriting that commit")
-    print(f"\n{len(cites) + len(urlcites) + len(foreign)} citations checked,"
+    print(f"\n{len(cites) + len(anchors) + len(urlcites) + len(foreign)}"
+          f" citations checked,"
           f" {failures} failed"
           f" --- now eyeball the snippets against the document's claims.")
     if do_restamp:

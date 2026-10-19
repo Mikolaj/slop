@@ -20,16 +20,16 @@ and the median bytes allocated per iteration of the two. `--log` also writes
 every run, one line each. Run it from the directory the benchmark expects
 as its working directory: the MNIST suites read `samplesData/`.
 
-This is docs/perf-checklist.md's A/B procedure as a script: interleaved, so
-drift over the run cancels within each round, and the order rotated, so
-no build always runs first; one benchmark per process, so
-no predecessor's RTS pool state reaches the measured one
-(docs/position-effect.md); the median, because single pairs on a loaded or
-virtual machine scatter widely --- 0.42 to 1.36 around a true 1.00 on the
-VM docs/overloaded-unfoldings.md was measured on. Compare allocation first,
-which is exact, and back any time ratio that decides something with
-instructions or cycles (tools/perf-per-call.py, or
-tools/cachegrind-per-call.py where perf cannot run).
+This is docs/perf-checklist.md's A/B procedure as a script: interleaved,
+so drift over the run cancels within each round, and the order rotated, so
+no build always runs first; one benchmark per process, so no predecessor's
+RTS pool state reaches the measured one (horde-ad/docs/position-effect.md);
+the median, because single pairs on a loaded or virtual machine
+scatter widely --- 0.42 to 1.36 around a true 1.00 on the VM
+horde-ad/docs/overloaded-unfoldings.md was measured on. Compare allocation
+first, which is exact, and back any time ratio that decides something with
+instructions or cycles (tools/perf-per-call.py, or tools/cachegrind-per-call.py
+where perf cannot run).
 
 Exit 0 when every run happened, 2 when one did not: a run failing, taskset
 missing with `--cpu`, its JSON without one report carrying a time and an

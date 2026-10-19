@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check that a document's example code still matches the library.
 
-Usage: python3 tools/check-doc-examples.py [DOC ...]
-DOC defaults to README.md. Runs from anywhere in the repository.
+Usage: python3 ~/slop/tools/check-doc-examples.py [DOC ...]
+DOC defaults to README.md. The repository checked is the one holding the
+documents, else the working directory's; runs from anywhere.
 
 This covers what the other two checkers structurally cannot. They read
 *backticked* tokens and resolve paths, modules, targets and flags; a
@@ -58,9 +59,10 @@ in), matching the other checkers.
 
 Non-vacuity (per CLAUDE.md's "prove a checker non-vacuous"): run
 
-    python3 tools/check-doc-examples.py --self-test
+    python3 ~/slop/tools/check-doc-examples.py --self-test
 
-It builds the control document itself, against this repo's real source list,
+from horde-ad or LambdaHack. It builds the control document itself, against
+that repository's real source list,
 and confirms both branches fire -- one type finding, one output finding --
 while none of the passing controls is reported, that a source list naming
 nothing reads as none rather than as an empty corpus (added when a run from
@@ -110,12 +112,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
 # --- per-repo configuration -----------------------------------------
+# The defaults, which the root's tools/check-doc-examples.config.py assigns
+# over (common.repo_config, run by main()).
 # The fenced-block languages whose contents are read as this repo's
 # source language, and the command listing the sources to resolve
 # against. Empty either one to switch its check off.
 FENCE_LANGS = ("hs", "haskell")
 SOURCE_LIST = 'git ls-files "*.hs"'
 # --- end per-repo configuration --------------------------------------
+SETTINGS = ("FENCE_LANGS", "SOURCE_LIST")
 
 DECL_RE = re.compile(r"^(?:type|data|newtype|class)\s+([A-Z][A-Za-z0-9_]*)",
                      re.M)
@@ -410,10 +415,13 @@ def self_test():
     script = os.path.abspath(__file__)
     here = subprocess.run([sys.executable, script, "README.md"],
                           capture_output=True, text=True)
+    # A subdirectory of the root, this script living outside the
+    # repository it checks.
+    sub = next((d for d in sorted(os.listdir("."))
+                if os.path.isdir(d) and not d.startswith(".")), ".")
     there = subprocess.run([sys.executable, script,
                             os.path.join("..", "README.md")],
-                           capture_output=True, text=True,
-                           cwd=os.path.dirname(script))
+                           capture_output=True, text=True, cwd=sub)
     if (here.returncode, here.stdout.strip().splitlines()[-1:]) != \
             (there.returncode, there.stdout.strip().splitlines()[-1:]):
         ok = False
@@ -439,6 +447,8 @@ def main():
     # checker (check-doc-examples-04).
     args = [a for a in sys.argv[1:] if a != "--self-test"]
     docs = common.chdir_root(args)
+    globals().update(common.repo_config(
+        "check-doc-examples", {k: globals()[k] for k in SETTINGS}))
     if "--self-test" in sys.argv[1:]:
         return self_test()
     docs = docs or ["README.md"]

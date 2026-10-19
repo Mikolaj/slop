@@ -20,7 +20,7 @@ its specialisations nets out; what remains is a move between functions. A
 local closure, `f_sat_s1fhYi{v}`, carries its unique in its own name, and
 loses it too.
 That is what attributed a whole 31.5 MB difference on `100/grad k L` to
-`astTimesK` in one step (docs/overloaded-unfoldings.md).
+`astTimesK` in one step (horde-ad/docs/overloaded-unfoldings.md).
 
 Given one file it prints that run's total and its N closures that allocated
 most, with their entry counts: a closure where a join point was meant,
