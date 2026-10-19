@@ -34,3 +34,29 @@ cabal.project.local~
 /orthotope.toVectorListT/
 /ox-arrays/
 __pycache__/
+
+# Empty read-only placeholders Claude Code's sandbox puts in the directory
+# its sessions start in (CLAUDE.md's sandboxing notes).
+# .claude/settings.local.json is a real file, so it is not listed.
+/.bash_profile
+/.bashrc
+/.gitconfig
+/.gitmodules
+/.idea
+/.mcp.json
+/.profile
+/.ripgreprc
+/.vscode
+/.zprofile
+/.zshrc
+/.claude/agents
+/.claude/commands
+/.claude/hooks
+/.claude/launch.json
+/.claude/loop.md
+/.claude/output-styles
+/.claude/routines
+/.claude/scheduled_tasks.json
+/.claude/settings.json
+/.claude/skills
+/.claude/workflows
