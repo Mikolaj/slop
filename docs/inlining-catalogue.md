@@ -927,7 +927,7 @@ In `base`, `deep` keeps the call, `(case inlD deep1 y of { I# ds -> ...`; in `th
 
 **Seen.** `docs/perf-checklist.md` P, "Common principles": a phase control, `INLINE [n]`, kept to order inlining against rules or specialisation (horde-ad's `tscatterZRDict` and `tscatterZSDict`).
 
-**Repro** (`~/slop/dist-inlcat/cases/A10-activation-phases`, variant `base` with `-dverbose-core2core` and `-dinline-check inl`; then, from its `post` hook, `python3 phases.py`, which writes `~/slop/dist-inlcat/cases/A10-activation-phases/out/head/base/phases.txt`: for each `Simplifier` pass in `M.verbose-core2core`, the phase its header names and, for each caller and callee the table lists, whether the caller's right-hand side still names the callee): four functions with `[1]` and `[~1]` on INLINE and NOINLINE and one without a pragma, each called with a literal under a `case`, and an INLINE [1] function calling the INLINE [~1] one, `outer`, for U10's rule.
+**Repro** (`~/slop/dist-inlcat/cases/A10-activation-phases`, variant `base` with `-dverbose-core2core` and `-dinline-check inl`; then, from its `post` hook, `python3 phases.py`, which writes, for each `Simplifier` pass in `M.verbose-core2core`, the phase its header names and, for each caller and callee the table lists, whether the caller's right-hand side still names the callee): four functions with `[1]` and `[~1]` on INLINE and NOINLINE and one without a pragma, each called with a literal under a `case`, and an INLINE [1] function calling the INLINE [~1] one, `outer`, for U10's rule.
 
 ```haskell
 module M where
@@ -5806,7 +5806,7 @@ $wtotal = \ ww ww1 ww2 ww3 -> $wgo1 ($w$s$wtoListV ww ww1 ww2 ww3) 0.0##
 
 By `measure.sh 100000 100` (100 and 200 sums differenced), an element: `inline` 23.00 instructions and 0.00 bytes, `inlinable` 103.92 instructions and 96.00 bytes.
 
-**Repro** (`~/slop/dist-inlcat/cases/O07-vunsafeconcatn-out-of-line`, variants `pointfree`, `named` (`-DNAMED`), `banged` (`-DBANGED`) and `nopragma` (`-DNOPRAGMA`, with `-dinline-check` on the method); `post` counts the `fold/build` firings in each variant's `Main.dump-rule-firings` into `~/slop/dist-inlcat/cases/O07-vunsafeconcatn-out-of-line/out/head/VARIANT/rules.txt`; `measure.sh N` gives instructions and bytes a call of `ravel` from N and 2N iterations): the class with its one method, `genericUnsafeConcatN` as orthotope has it, the Unboxed instance in the four forms, and a client ravelling 25 rows of 8 Doubles.
+**Repro** (`~/slop/dist-inlcat/cases/O07-vunsafeconcatn-out-of-line`, variants `pointfree`, `named` (`-DNAMED`), `banged` (`-DBANGED`) and `nopragma` (`-DNOPRAGMA`, with `-dinline-check` on the method); `post` counts the `fold/build` firings in each variant's `Main.dump-rule-firings`; `measure.sh N` gives instructions and bytes a call of `ravel` from N and 2N iterations): the class with its one method, `genericUnsafeConcatN` as orthotope has it, the Unboxed instance in the four forms, and a client ravelling 25 rows of 8 Doubles.
 
 ```haskell
 {-# LANGUAGE BangPatterns, CPP, TypeFamilies #-}
@@ -6773,7 +6773,7 @@ main = do
 
 **Seen.** `docs/perf-checklist.md` A3: with orthotope's `unorderedRouteT` and `cellsRouteT` out of line, their workers returned a boxed `Route` at 18 and 45 client call sites (2026-10-11); with `readRangeT`, `sameRangeT` and `range3T` out of line, a boxed `Range` at 262 call sites (2026-10-12); and A3's statement that "GHC HEAD 10.1.20260918 returns no sum unboxed ... where worker/wrapper passes and returns a product unboxed". A3's other observation, a value built once in one binding and taken apart at several places through a join point whatever the pragmas (orthotope's `equalT`), is O16's.
 
-**Repro** (`~/slop/dist-inlcat/cases/O12-sum-returned-built`, variants `noinline` and `inline`, `inline` adding `-DINL`; `post` runs each variant's Main at 1000000 and 2000000 iterations and writes the bytes a call, differenced, to `~/slop/dist-inlcat/cases/O12-sum-returned-built/out/head/VARIANT/bytes.txt`): a three-constructor sum and a product, each returned by a function NOINLINE or INLINE and taken apart by a loop in `Main`.
+**Repro** (`~/slop/dist-inlcat/cases/O12-sum-returned-built`, variants `noinline` and `inline`, `inline` adding `-DINL`; `post` runs each variant's Main at 1000000 and 2000000 iterations and reports the bytes a call, differenced): a three-constructor sum and a product, each returned by a function NOINLINE or INLINE and taken apart by a loop in `Main`.
 
 ```haskell
 {-# LANGUAGE CPP #-}
@@ -8679,7 +8679,7 @@ Considering inlining: genericForce
   ANSWER = NO
 ```
 
-`~/slop/dist-inlcat/cases/O21-genericforce-inlinable-under-inline-wrapper/out/head/winline-gfinline/orthotope.txt`, from orthotope's binaries: `C8: Dynamic/force/small/dense/Unboxed ... 288` and `V3: ... 328`; C8 `15a17a8: add $0x38,%r12`, `15a17b5: movq $0x19a25d0,-0x30(%r12)` (`T_con_info`) and `15a17cd: movq $0x1a73108,-0x10(%r12)` (`A_con_info`); V3 `1871898: add $0x28,%r12`, `18718a9: movq $0x1871710,-0x20(%r12)`, the thunk's entry `1871719: movq $0x23ad398,-0x10(%rbp)` (`stg_upd_frame_info`), and `187192d: movq $0x1a75828,-0x10(%r12)` (`A_con_info`); `memcpy` sites, `C8: 1`, `V3: 2`.
+From orthotope's binaries: `C8: Dynamic/force/small/dense/Unboxed ... 288` and `V3: ... 328`; C8 `15a17a8: add $0x38,%r12`, `15a17b5: movq $0x19a25d0,-0x30(%r12)` (`T_con_info`) and `15a17cd: movq $0x1a73108,-0x10(%r12)` (`A_con_info`); V3 `1871898: add $0x28,%r12`, `18718a9: movq $0x1871710,-0x20(%r12)`, the thunk's entry `1871719: movq $0x23ad398,-0x10(%rbp)` (`stg_upd_frame_info`), and `187192d: movq $0x1a75828,-0x10(%r12)` (`A_con_info`); `memcpy` sites, `C8: 1`, `V3: 2`.
 
 `measure.sh forced 1000000` and `measure.sh summed 1000000`:
 
@@ -8698,7 +8698,7 @@ ns-winline-gfinline summed: 970.7 instructions, 488.0 bytes a call
 ns-winline-gfinlinable summed: 959.7 instructions, 488.0 bytes a call
 ```
 
-The `ns-` pair is V3 against C8: 40 bytes a call forced and none summed, from `genericForce`'s pragma alone, under the INLINE wrapper, and one copy of `genericForce`'s copy in the row worker against two (`post` counting the lines holding `copyByteArray#` in `$wf` in the `Main.dump-simpl` of `ns-winline-gfinline` and of `ns-winline-gfinlinable`, into `~/slop/dist-inlcat/cases/O21-genericforce-inlinable-under-inline-wrapper/out/head/ns-winline-gfinlinable/copies.txt`), as C8's one `memcpy` against V3's two. The INLINABLE wrapper's 32 bytes summed are O22's.
+The `ns-` pair is V3 against C8: 40 bytes a call forced and none summed, from `genericForce`'s pragma alone, under the INLINE wrapper, and one copy of `genericForce`'s copy in the row worker against two (`post` counting the lines holding `copyByteArray#` in `$wf` in the `Main.dump-simpl` of `ns-winline-gfinline` and of `ns-winline-gfinlinable`), as C8's one `memcpy` against V3's two. The INLINABLE wrapper's 32 bytes summed are O22's.
 
 **Reproduces small:** in part: the 40-byte thunk, its cause in the nullary join point's `TagDunno`, and V3's pattern, 40 bytes forced and none summed from `genericForce` INLINABLE under the INLINE wrapper, reproduce, and the thunk is located in V3's binary, absent from C8's; but the model shows the pragma's effect only with Main's specialiser off, its calls of `genericForce` sitting too deep in cases for the size test before the specialiser replaces them, and V3, unlike the model, inlines the unspecialised unfolding at one outcome before the specialiser runs. In V3's Core (`OpsDynamic.dump-simpl`) the Dynamic Unboxed `force` row's worker `$wlvl744` holds two `copyByteArray#`, two outcomes of `forceT`'s one `vForce (wholeOrSliceT ao n v)`, each from a different unfolding (a rebuild of V3 tracing `OpsDynamic`, its Tidy Core with V3's binders and right-hand-side sizes). The slice's, in the nullary join point `$j31`, is `genericForce`'s unspecialised unfolding, inlined in the gentle run before the specialiser runs, `case depth = 1 ... adjusted size = 90 ANSWER = YES`, once in each of the eleven Unboxed `force` rows: the simplifier statistics' `11 Data.Array.Internal.genericForce`, beside `22 SPEC/OpsDynamic genericForce @Vector @Double` and `6 $w$sgenericForce`. The whole vector's, in the `1#` alternative, is refused there, `case depth = 3 ... adjusted size = 98 ANSWER = NO`, becomes a call of the specialisation by its rule and of its worker after worker/wrapper, and is inlined in the final simplifier, after CSE, `guidance IF_ARGS [0 0 0] 126 0 case depth = 2 inline depth = 1 depth based penalty = 0 adjusted size = 86 ANSWER = YES`. In the simplifier after worker/wrapper the worker's guidance is `UnfNever`, while its body still holds both `error` calls, whose string literals alone size 1100 against `-funfolding-creation-threshold`, 750 (`litSize`, [compiler/GHC/Core/Unfold.hs#L772][g462]; `TooBig -> UnfNever`, [compiler/GHC/Core/Unfold.hs#L351][g463]). In a model with the wrapper INLINE and the specialiser on (`~/slop/dist-inlcat/cases/O21-vecelem-route`), no call of `genericForce` is inlined before the specialiser, both outcomes become worker calls, and at the rows, at case depth 4, A09's penalty puts them over the threshold, `depth based penalty = 8 adjusted size = 94 ANSWER = NO`.
 
@@ -9320,14 +9320,14 @@ main = do
   print (go n 0)
 ```
 
-`Main.dump-simpl`, whitespace collapsed, the row's head: `guard-pointfree` `$wrow = \ y -> case lvl18 of { False -> case ss of wild1 { __DEFAULT -> case ds of { (s, ss1) -> case s of { I# ipv ->`; `guard-banged` `$wrow = \ y -> case lvl18 of { False -> case ds of { (s, ss1) -> case s of { I# ipv -> case ss of wild1 { __DEFAULT ->`; `~/slop/dist-inlcat/cases/O24-vgenerate-bang-evaluation-order/out/head/guard-banged/diff.txt` `Main.dump-simpl against guard-pointfree: 4 diff lines`, and `split-banged`'s `0 diff lines`. `Main.dump-asm`: `guard-pointfree` `movq %rbx,96(%rsp) movq %rcx,%rbx movq 96(%rsp),%rcx` before a compare where `guard-banged` has `cmpq %rax,%rdx` alone; and in another block three moves against four, as in orthotope's hottest block:
+`Main.dump-simpl`, whitespace collapsed, the row's head: `guard-pointfree` `$wrow = \ y -> case lvl18 of { False -> case ss of wild1 { __DEFAULT -> case ds of { (s, ss1) -> case s of { I# ipv ->`; `guard-banged` `$wrow = \ y -> case lvl18 of { False -> case ds of { (s, ss1) -> case s of { I# ipv -> case ss of wild1 { __DEFAULT ->`; `guard-banged`'s `Main.dump-simpl against guard-pointfree: 4 diff lines`, and `split-banged`'s `0 diff lines`. `Main.dump-asm`: `guard-pointfree` `movq %rbx,96(%rsp) movq %rcx,%rbx movq 96(%rsp),%rcx` before a compare where `guard-banged` has `cmpq %rax,%rdx` alone; and in another block three moves against four, as in orthotope's hottest block:
 
 ```
 guard-pointfree: movq %rax,104(%rsp)  movq %rbx,%rax  movq 104(%rsp),%rbx
 guard-banged:    movq %rax,96(%rsp)  movq %rcx,%rax  movq %rbx,%rcx  movq 96(%rsp),%rbx
 ```
 
-`~/slop/dist-inlcat/cases/O24-vgenerate-bang-evaluation-order/out/head/guard-banged/orthotope.txt`, from orthotope's binaries, where NBg3 is labelled N3: `C8: 396.0 instructions a call`, `N3: 398.0 instructions a call`, and the hottest block, `C8 13cc884 mov %rax,0x68(%rsp) ... C8 13cc891 mov %rax,%rdi` against `N3 13ccb4c mov %rax,0x60(%rsp) N3 13ccb51 mov %rcx,%rax N3 13ccb54 mov %rbx,%rcx N3 13ccb57 mov 0x60(%rsp),%rbx N3 13ccb5c mov %rcx,%rdi`.
+From orthotope's binaries, where NBg3 is labelled N3: `C8: 396.0 instructions a call`, `N3: 398.0 instructions a call`, and the hottest block, `C8 13cc884 mov %rax,0x68(%rsp) ... C8 13cc891 mov %rax,%rdi` against `N3 13ccb4c mov %rax,0x60(%rsp) N3 13ccb51 mov %rcx,%rax N3 13ccb54 mov %rbx,%rcx N3 13ccb57 mov 0x60(%rsp),%rbx N3 13ccb5c mov %rcx,%rdi`.
 
 `measure.sh 2000000`:
 
@@ -9342,7 +9342,7 @@ guard-banged: 388.9 instructions, 56.0 bytes a call
 
 The guard pair costs 4 instructions a call at equal bytes, orthotope's pair 2; where in the row the 4 are executed was not measured.
 
-A second repro (`~/slop/dist-inlcat/cases/O24-equal-core-unique-order`, variants `fwd` (`vGenerate` as at C8), `rev` (the same with `-dinitial-unique=1099511627776 -dunique-increment=-1`, the order of uniques reversed), `fwd-od` and `rev-od` (each with `-fobject-determinism`) and `bang` (`-DBANG`, NBg3's bang in `vGenerate`); `post` compares the pairs' Core, Cmm and assembly with labels and local names numbered out, into `~/slop/dist-inlcat/cases/O24-equal-core-unique-order/out/head/fwd/same.txt`; `measure.sh N` gives instructions and bytes a call from N and 2N iterations): orthotope's generic `generateT`, its `getStridesT` and the boxed instance's `vGenerate`, the benchmark's summed row at the empty size `[0, 3]`.
+A second repro (`~/slop/dist-inlcat/cases/O24-equal-core-unique-order`, variants `fwd` (`vGenerate` as at C8), `rev` (the same with `-dinitial-unique=1099511627776 -dunique-increment=-1`, the order of uniques reversed), `fwd-od` and `rev-od` (each with `-fobject-determinism`) and `bang` (`-DBANG`, NBg3's bang in `vGenerate`); `post` compares the pairs' Core, Cmm and assembly with labels and local names numbered out; `measure.sh N` gives instructions and bytes a call from N and 2N iterations): orthotope's generic `generateT`, its `getStridesT` and the boxed instance's `vGenerate`, the benchmark's summed row at the empty size `[0, 3]`.
 
 ```haskell
 {-# LANGUAGE BangPatterns #-}
