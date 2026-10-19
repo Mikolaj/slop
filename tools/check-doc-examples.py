@@ -57,39 +57,37 @@ Exit 1 if anything is unresolved, 2 if the run did not happen (a document
 that cannot be read, a source list naming no file, or no repository to run
 in), matching the other checkers.
 
-Non-vacuity (per CLAUDE.md's "prove a checker non-vacuous"): run
+Non-vacuity: run
 
     python3 ~/slop/tools/check-doc-examples.py --self-test
 
 from horde-ad or LambdaHack. It builds the control document itself, against
-that repository's real source list,
-and confirms both branches fire -- one type finding, one output finding --
-while none of the passing controls is reported, that a source list naming
-nothing reads as none rather than as an empty corpus (added when a run from
-`docs/` was found to hang on the old `cat $(...)` and, with stdin closed, to
-fail every name), and that a run from a subdirectory reports what one from the
-root does, the root run having happened: agreement at exit 2 is two runs that
-did not. Exit 0 on PASS, 1 on FAIL. Building it beats writing one out by hand,
-which gets skipped, or assembled a little differently each time and then proves
-whatever that day's document happened to hold.
+that repository's real source list, and confirms both branches fire -- one type
+finding, one output finding -- while none of the passing controls is reported,
+that a source list naming nothing reads as none rather than as an empty corpus
+(added when a run from `docs/` was found to hang on the old `cat $(...)` and,
+with stdin closed, to fail every name), and that a run from a subdirectory
+reports what one from the root does, the root run having happened: agreement at
+exit 2 is two runs that did not. Exit 0 on PASS, 1 on FAIL. Building it beats
+writing one out by hand, which gets skipped, or assembled a little differently
+each time and then proves whatever that day's document happened to hold.
 
 That the self-test bites is mutants.py's to show: a control that cannot fail
 proves nothing, self-tests included.
 
-Both branches also have live documents here. The LambdaHack copy has
+Both branches also have live documents in horde-ad. LambdaHack has
 fenced Haskell but no `>>>` block in any document, so there the outputs
 branch rests on the self-test alone.
 
-Live is not the same as checked, though, so the controls carry numbers.
-README.md is the one document holding either shape, and it holds both:
-thirteen Haskell fences yielding thirteen capitalised names, and six
-`>>>` lines, measured 2026-07-31. The count is the thing to check
-rather than the verdict, since
-"0 unresolved" reads the same whether the extractor works or finds
-nothing to work on. The counts are not printed -- load the module and
-call `strip_comments`/`NAME_RE` over the bodies `fenced_bodies` returns -- and they move
-whenever a document gains or loses a fence, so re-take them with the edit
-rather than reading a stale one as a pass.
+Live is not the same as checked, though, so the controls carry numbers. On
+2026-07-31 horde-ad's README.md was the one document there holding either
+shape, and it held both: thirteen Haskell fences yielding thirteen capitalised
+names, and six `>>>` lines. The count is the thing to check rather than the
+verdict, since "0 unresolved" reads the same whether the extractor works or
+finds nothing to work on. The counts are not printed -- load the module and
+call `strip_comments`/`NAME_RE` over the bodies `fenced_bodies` returns -- and
+they move whenever a document gains or loses a fence, so re-take them with the
+edit rather than reading a stale one as a pass.
 
 Widening this is the standing temptation, and the measured reason not to:
 before comments were stripped and doc-local constructors recognised, the

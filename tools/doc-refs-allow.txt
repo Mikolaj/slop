@@ -9,13 +9,13 @@
 # Adding an entry is also the easy way to silently defang the checker, so
 # re-run its docstring's non-vacuity test after touching this file.
 #
-# `.mcp.json` is a name whose existence depends on who is looking: the
-# inner sandbox bind-mounts /dev/null over eleven dotfile names in the
-# session's own working directory, which is ~/slop (CLAUDE.md's sandboxing
-# notes), so `os.path.exists` answers yes from a sandboxed session rooted
-# here and no from an unsandboxed run. Pinning it makes the verdict the same
+# `.mcp.json` is a name whose existence depends on who is looking: the inner
+# sandbox bind-mounts /dev/null over eleven dotfile names in the session's
+# own working directory, which is ~/slop (CLAUDE.md's sandboxing notes),
+# so `os.path.exists` returns True from a sandboxed session rooted here
+# and False from an unsandboxed run. Pinning it makes the verdict the same
 # everywhere. Of the eleven only this one needs it -- the rest carry no
-# extension this checker reads as a path, so they stay unclassified.
+# extension this checker treats as a path, so they stay unclassified.
 .mcp.json
 # Two files written in a working checkout, by Claude Code and by cabal, and
 # ignored by git, so a fresh clone lacks them; pinned, as `.mcp.json` is, so

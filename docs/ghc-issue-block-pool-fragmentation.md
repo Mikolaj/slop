@@ -1,6 +1,6 @@
 # GHC issue: pinned-allocation spray doubles the block pool
 
-Filed as [GHC work item 27601](https://gitlab.haskell.org/ghc/ghc/-/work_items/27601); this file stays as the filed record, the text from "## Summary" down being the filed body. Title: **The block allocator never recovers from a short burst of small pinned allocations: retained memory doubles for the process lifetime and later code runs slower**. The prose is ASD-STE100 Simplified Technical English. The full analysis of the originating case is in [position-effect.md](../horde-ad/docs/position-effect.md); the filed body is self-contained.
+Filed as [GHC work item 27601](https://gitlab.haskell.org/ghc/ghc/-/work_items/27601); this file stays as the filed record, the text from "## Summary" down being the filed body. Title: **The block allocator never recovers from a short burst of small pinned allocations: retained memory doubles for the process lifetime and later code runs slower**. The prose is ASD-STE100 Simplified Technical English. The full analysis of the originating case is in horde-ad's [position-effect.md](https://github.com/Mikolaj/horde-ad/blob/master/docs/position-effect.md); the filed body is self-contained.
 
 ## Summary
 

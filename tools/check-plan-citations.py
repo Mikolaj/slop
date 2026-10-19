@@ -202,7 +202,7 @@ citing nothing but those reported a clean zero. CONTINUATION: extraction
 took only the first number of a comma-continued citation, which left
 seven sub-references unchecked in a LambdaHack planning document while
 the run reported a clean count over the rest -- a silent search of
-exactly the kind CLAUDE.md's portable notes warn about, invisible in the
+exactly the kind CLAUDE.md warns about, invisible in the
 exit status by construction. The leading dot: until it was allowed into
 CITE_RE, `.hlint.yaml:22` was extracted as `hlint.yaml` and reported
 UNRESOLVED, which from the outside read as a document being unable to

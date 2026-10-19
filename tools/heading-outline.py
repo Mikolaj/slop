@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Print the heading outline of Markdown files, for the heading-scope check
-in the `doc-verification` skill, which CLAUDE.md's standing checks name.
+in the `doc-verification` skill.
 
 Handles both ATX headings (`## Foo`) and Setext headings (a text line
 underlined with `===` for level 1 or `---` for level 2), and ignores
@@ -18,18 +18,17 @@ heading's words describe what sits under it. A section passes while its
 title fits only its first paragraph. No outline can catch that; it
 belongs to the reading step above, which is a human's.
 
-Non-vacuity (per CLAUDE.md's "prove a checker non-vacuous"): the ATX
-branch and the level indentation have live controls -- run it on
-CLAUDE.md and confirm all three levels appear, `###` nested under its
-`##`. The other two branches have nothing in this repo to exercise them:
-no document here uses Setext headings (README.md was restyled to ATX in
-9ac80ee8a), and no document fences a `#`, `===` or `---` line. So use a
-scratch file holding an ATX heading, a `===`-underlined line, a
-`---`-underlined line, a fenced block containing a `#` line and a `===`
-line, a `---` rule right after the closing fence, a list item with a
-`---` rule under it, and one more ATX heading after it; confirm four
-headings, the Setext pair among them at levels 1 and 2, and nothing
-from inside or right after the fence or under the item.
+Non-vacuity: the ATX branch and the level indentation have live controls
+-- run it on horde-ad's CLAUDE.md and confirm all three levels appear,
+`###` nested under its `##`. The other two branches have nothing in
+horde-ad to exercise them: no document there uses Setext headings
+(README.md was restyled to ATX in 9ac80ee8a), and no document fences a
+`#`, `===` or `---` line. So use a scratch file holding an ATX heading, a
+`===`-underlined line, a `---`-underlined line, a fenced block containing
+a `#` line and a `===` line, a `---` rule right after the closing fence, a
+list item with a `---` rule under it, and one more ATX heading after it;
+confirm four headings, the Setext pair among them at levels 1 and 2, and
+nothing from inside or right after the fence or under the item.
 Reproduced 2026-07-28 by hand; since 2026-08-28 `--self-test` builds
 that document and asserts it, the rule after the fence being the row added
 then: a closing fence is not a heading's text, and the outline reported
@@ -37,8 +36,8 @@ then: a closing fence is not a heading's text, and the outline reported
 That the self-test bites is mutants.py's to show.
 
 Indented code blocks need no such guard: an ATX heading is indented at
-most three spaces, as in CommonMark, so a `#` comment inside one cannot
-be read as a heading. That matters here, where CLAUDE.md indents its
+most three spaces, as in CommonMark, so a `#` comment inside one cannot be
+read as a heading. That matters in horde-ad, whose CLAUDE.md indents its
 blocks rather than fencing them.
 
 The frontmatter skip has a live control even here, where no tracked
@@ -50,11 +49,11 @@ prescribes this very pass, since a closing `---` under a `description:`
 line is indistinguishable from a Setext heading except by knowing it
 closes a block.
 
-Until 2026-07-28 this recipe named README.md's Setext headings as its
-control. It was true when written in a775875e0 and false two commits
-later, 9ac80ee8a restyling that file the same day -- a checker's own
-proof drifting exactly as the documents it checks do, and going five
-days unnoticed because a recipe nobody runs reports nothing.
+Until 2026-07-28 this recipe named the Setext headings of horde-ad's
+README.md as its control. It was true when written in a775875e0 and
+false two commits later, 9ac80ee8a restyling that file the same day -- a
+checker's own proof drifting exactly as the documents it checks do, and
+going five days unnoticed because a recipe nobody runs reports nothing.
 """
 import os
 import re
