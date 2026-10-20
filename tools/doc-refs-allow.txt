@@ -33,6 +33,10 @@ ReproLib.hs
 # Filed GHC issues name their second module `Lib.hs` too, and their
 # documents are the filed bodies, so the name stays as filed.
 Lib.hs
+# A Claude Code issue comment names `.claude.json`, the file its
+# reproduction sets up in a fresh HOME, and its document is the posted
+# body, so the name stays as posted.
+.claude.json
 # CLAUDE.md's coding style names a repository's `.hlint.yaml` in general,
 # and ~/slop, a repository of tools and documents, has none.
 .hlint.yaml
