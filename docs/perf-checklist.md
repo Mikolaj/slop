@@ -397,6 +397,10 @@ the client uses. Then count:
 of the module with its count and terms,
 and `python3 $T/core-diff.py dist-dump-BASE dist-dump-TIP --module MODULE`
 those whose count differs between two builds.
+With `-fexpose-overloaded-unfoldings` on, as it is at `-O` on a GHC carrying
+[!16684](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16684), bindings
+floated out of a specialisation are named after it, `$s$wrotateN` where without
+it they are `lvlN`, so a count by name includes them.
 
 **Read:** investigate a gap either way. The recorded fix for type-level keys
 is an INLINE wrapper turning them into values over a worker that specialises
