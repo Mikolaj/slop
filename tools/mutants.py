@@ -1844,6 +1844,11 @@ MUTANTS = [
     ('check-plan-citations ambiguous anchor accepted', 'check-plan-citations.py',
      '        if len(hits) > 1:\n            print(f"FAIL {name}:{anchor} --- ANCHOR-AMBIGUOUS ({unit}s"\n',
      '        if False:\n            print(f"FAIL {name}:{anchor} --- ANCHOR-AMBIGUOUS ({unit}s"\n', ST),
+    # check-plan-citations: an @ inside a backticked anchor refused again, so
+    # the citation goes unread (check-plan-citations-22)
+    ('check-plan-citations backticked anchor refuses an @', 'check-plan-citations.py',
+     'ANCHOR_RE = re.compile(r"`" + CITED_FILE + r":([^0-9\\s`][^`\\n]*)`"\n',
+     'ANCHOR_RE = re.compile(r"`" + CITED_FILE + r":([^0-9\\s`@][^`@\\n]*)`"\n', ST),
     # check-plan-citations: two bracketed numbers exempt beside a numeric
     # label, where they are a link with its label undefined
     ('check-plan-citations footnote pair exempt beside a numeric label', 'check-plan-citations.py',

@@ -7621,6 +7621,28 @@
    }
   },
   {
+   "id": "check-plan-citations-22",
+   "program": "check-plan-citations.py",
+   "name": "a backticked anchor holding an @ was not read as a citation, ANCHOR_RE refusing an @ inside either delimiter, so it was neither checked nor reported",
+   "family": "vacuous-check",
+   "fix_rev": "self",
+   "trigger": "`a.hs:x @y` in a document, a.hs holding no line that carries x @y",
+   "ok": "FAIL a.hs:x @y --- ANCHOR-MISSING, exit 1",
+   "bug": "0 citations checked, exit 0",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Met 2026-10-21 while converting horde-ad's line citations: anchors drafted on lines carrying haddock's @...@ markup were skipped, and only a count of the citations against the checker's own count showed it. The @-delimited form keeps its exclusion, an @ being its closing delimiter.",
+   "plant_cmd": "git init -q . && printf 'x = y\\n' > a.hs && printf '%s\\n' 'See `a.hs:x @y`.' > d.md",
+   "invoke": [
+    "d.md"
+   ],
+   "expect_exit": 1,
+   "expect_text": "ANCHOR-MISSING",
+   "bug_exit": 0,
+   "bug_text": "0 citations checked"
+  },
+  {
    "id": "check-doc-examples-10",
    "program": "check-doc-examples.py",
    "name": "the pattern for a data declaration's constructors ran its lazy `.*?=` past a declaration with no `=`, a GADT's, to the next `=` anywhere, so capitalised names in a later definition were taken for the document's own and never checked",

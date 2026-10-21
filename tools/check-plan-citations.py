@@ -21,14 +21,14 @@ table row or a list item were a wrap to put it first on a line (`#ifdef`,
 `>=`, `|`, a bare `-` or `*`), because the formatter breaks inside backticks
 and such a paragraph does not survive its round trip; cite the words
 beside such a token instead. A slid line therefore never goes stale, and a
-rewritten one fails loudly. An anchor can contain neither a backtick nor
-an `@`, whichever delimits it, so a line whose only unique text has one in
-it is cited by the text beside it. Into a `.md` file an anchor is matched
-against paragraphs rather than lines --- the file read through `wrap80
---unwrap`, as check-doc-refs.py reads its spans --- because a wrap can fall
-inside any phrase and moves whenever a paragraph above is edited; the report
-then names the paragraph, and a run that finds no wrap80 to unwrap with
-stops at 2 rather than reporting every such anchor missing.
+rewritten one fails loudly. An anchor holds no backtick, and one between `@`
+signs no `@`, so a line whose only unique text has such a character in it is
+cited by the text beside it. Into a `.md` file an anchor is matched against
+paragraphs rather than lines --- the file read through `wrap80 --unwrap`,
+as check-doc-refs.py reads its spans --- because a wrap can fall inside any
+phrase and moves whenever a paragraph above is edited; the report then names
+the paragraph, and a run that finds no wrap80 to unwrap with stops at 2
+rather than reporting every such anchor missing.
 
 A citation by line number --- `File.hs:12`, a range `File.hs:12-34` or
 a list `File.hs:12,34` --- fails as LINE-NUMBER whether or not the line
@@ -189,11 +189,15 @@ CITED_FILE = (r"(\.?[A-Za-z][A-Za-z0-9_./-]*"
               r"\.(?:hs|ts|py|c|h|cabal|mjs|html|md|txt|yaml|yml|json|sh)|Makefile)")
 CITE_RE = re.compile(
     r"`?" + CITED_FILE + r":(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)")
-# The anchor form. The first character after the colon excludes a digit, so
-# the numeric form above, which is refused, keeps every match it had, and
-# a space, so a shell command's `file.hs: ` cannot start one; the closing
-# delimiter must repeat the opening one.
-ANCHOR_RE = re.compile(r"([`@])" + CITED_FILE + r":([^0-9\s`@][^`@\n]*)\1")
+# The anchor form, in either delimiter: backticks, inside which an @ is text
+# like any other (check-plan-citations-22), or haddock's @ signs, between
+# which it cannot be. The first character after the colon excludes a digit,
+# so the numeric form above, which is refused, keeps every match it had, and
+# a space, so a shell command's `file.hs: ` cannot start one. One pattern
+# for both, so a match of one form takes the text the other might find
+# inside it.
+ANCHOR_RE = re.compile(r"`" + CITED_FILE + r":([^0-9\s`][^`\n]*)`"
+                       r"|@" + CITED_FILE + r":([^0-9\s`@][^`@\n]*)@")
 URL_RE = re.compile(
     r"https://github\.com/([\w.-]+/[\w.-]+)/blob/([0-9a-f]{7,40})/"
     r"([A-Za-z0-9_./-]+)#L(\d+)(?:-L(\d+))?")
@@ -629,6 +633,7 @@ def self_test():
             open("d.json", "w").write("{}\n")
             open("s.sh", "w").write("true\n")
             open("sp.hs", "w").write("double  spaced   words\n")
+            open("at.hs", "w").write("x = y @z\n")
             git("add", "-A")
             git("commit", "-qm", "c1")
             c1 = head()
@@ -684,7 +689,8 @@ def self_test():
                 " haddock twin, `a.hs:no such text` missing,\n"
                 "`a.hs:line` ambiguous. `a.hs: line one` is a shell\n"
                 "command and not a citation. `sp.hs:double spaced words`\n"
-                "matches across a run of spaces. `note.md:that wraps`\n"
+                "matches across a run of spaces. `at.hs:y @z` holds an @\n"
+                "inside backticks. `note.md:that wraps`\n"
                 "spans a wrap and matches the paragraph.\n"
                 "%s#L1 pinned ok. %s#L99999 pinned range.\n"
                 "%s#L0 pinned zero. %s#L3-L1 pinned backwards.\n"
@@ -708,6 +714,7 @@ def self_test():
                      "ok   d.json:1 <- '{}'", "ok   s.sh:1 <- 'true'",
                      "ok   a.hs:2 <- 'line two'", "ok   a.hs:3 <- 'line three'",
                      "ok   sp.hs:1 <- 'double spaced words'",
+                     "ok   at.hs:1 <- 'y @z'",
                      "ok   note.md:paragraph 1 <- 'that wraps'",
                      "ANCHOR-MISSING", "ANCHOR-AMBIGUOUS (lines 1, 2, 3, 4",
                      "a.hs#L1 @", "13 failed", "#L0-L0 @", "#L3-L1 @")
@@ -901,7 +908,8 @@ def check(doc):
         print(f"FAIL {cite} --- LINE-NUMBER (cite a text anchor, or a"
               f" permalink pinned to the tree the sentence describes)")
         failures += 1
-    anchors = sorted({(m.group(2), m.group(3))
+    anchors = sorted({(m.group(1), m.group(2)) if m.group(1) else
+                      (m.group(3), m.group(4))
                       for m in ANCHOR_RE.finditer(flat)})
     for name, anchor in anchors:
         path, err = resolve(name)
