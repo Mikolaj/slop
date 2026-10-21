@@ -6,11 +6,10 @@ DOC defaults to CLAUDE.md. The repository checked is the one holding the
 documents, else the working directory's; runs from anywhere.
 
 This is pass 2 of the document-verification discipline (the
-`doc-verification` skill), mechanized. Pass 1
-(`check-plan-citations.py`) resolves `file:line` citations; this one
-resolves the things named *without* a line number, which is most of what
-a document says about the repo. Pass 3, the quantified-claims grep, is by
-hand.
+`doc-verification` skill), mechanized. Pass 1 (`check-plan-citations.py`)
+resolves citations of code lines, by text anchor or permalink; this one
+resolves the things named *without* a line, which is most of what a document
+says about the repo. Pass 3, the quantified-claims grep, is by hand.
 
 Deliberately conservative: prose backticks hold a mix of paths, type
 names, identifiers and code fragments, and a checker that tried to resolve

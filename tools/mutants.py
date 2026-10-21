@@ -247,31 +247,19 @@ MUTANTS = [
     ('check-doc-wrap repository tracking no Markdown reported as 0 of 0 failed', 'check-doc-wrap.py',
      '        print("BLOCKED: git tracks no Markdown file here, nothing checked")\n        return 2\n',
      '        pass\n', ST),
-    # check-plan-citations: "disabling the PROSE-LINE refusal" (2026-08-14)
-    ('check-plan-citations PROSE-LINE refusal disabled', 'check-plan-citations.py',
-     '        if name.endswith(".md"):\n            print(f"FAIL {name}:{lo}-{hi} --- PROSE-LINE',
-     '        if False:\n            print(f"FAIL {name}:{lo}-{hi} --- PROSE-LINE', ST),
+    # check-plan-citations: the line-number refusal disabled
+    ('check-plan-citations LINE-NUMBER refusal disabled', 'check-plan-citations.py',
+     '    for cite in numbers:\n        print(f"FAIL {cite} --- LINE-NUMBER',
+     '    for cite in []:\n        print(f"FAIL {cite} --- LINE-NUMBER', ST),
     # check-plan-citations: "short-circuiting the publication test"
     ('check-plan-citations publication test short-circuited', 'check-plan-citations.py',
      "    return reachable_from(sha, PUBLISHED_REF)\n", "    return True\n", ST),
-    # check-plan-citations: a stamp the formatter wrapped inside a blockquote
-    # read as no stamp at all -- --restamp refused it and its orphan and
-    # publication checks passed in silence (2026-09-04)
-    ('check-plan-citations stamp regex misses a wrapped line', 'check-plan-citations.py',
-     '    r"((?:`|\\*\\*)[\\s>]*\\()(\\d{4}-\\d{2}-\\d{2})(\\))")\n',
-     '    r"((?:`|\\*\\*)\\s*\\()(\\d{4}-\\d{2}-\\d{2})(\\))")\n', ST),
-    # check-plan-citations: "disabling the dirty-cited-file refusal"
-    ('check-plan-citations dirty-cited-file refusal disabled', 'check-plan-citations.py',
-     "        if dirty:\n", "        if False:\n", ST),
-    # check-plan-citations: a failed git status read as clean (check-plan-citations-05)
-    ('check-plan-citations reads a failed git status as clean', 'check-plan-citations.py',
-     "        if p.returncode != 0:\n            print(f\"\\nnot restamping {doc}: git status could not be read\"\n",
-     "        if False:\n            print(f\"\\nnot restamping {doc}: git status could not be read\"\n", ST),
-    # check-plan-citations: "line-zero, backwards-range ... rows" (2026-08-28); the bare
-    # condition occurs twice, so the anchor carries the print line
-    ('check-plan-citations line zero and backwards range accepted', 'check-plan-citations.py',
-     '        if lo < 1 or lo > hi or hi > len(lines):\n            print(f"FAIL {name}:{lo}-{hi} --- OUT-OF-RANGE "\n',
-     '        if hi > len(lines):\n            print(f"FAIL {name}:{lo}-{hi} --- OUT-OF-RANGE "\n', ST),
+    # check-plan-citations: a permalink's line zero and backwards range
+    # accepted; the anchor carries the print line, the foreign check holding
+    # the same bounds
+    ('check-plan-citations permalink line zero and backwards range accepted', 'check-plan-citations.py',
+     '        if lo < 1 or lo > hi or hi > len(lines):\n            print(f"FAIL {path}#L{lo}-L{hi} @ {sha[:9]} --- OUT-OF-RANGE "\n',
+     '        if hi > len(lines):\n            print(f"FAIL {path}#L{lo}-L{hi} @ {sha[:9]} --- OUT-OF-RANGE "\n', ST),
     # check-plan-citations: "second-document row" -- until 2026-08-28 only the first
     # document was checked
     ('check-plan-citations only the first document checked', 'check-plan-citations.py',
@@ -350,8 +338,9 @@ MUTANTS = [
      '    docs = common.chdir_root(args)\n    globals().update(common.repo_config(\n        "check-doc-examples", {k: globals()[k] for k in SETTINGS}))\n    if "--self-test" in sys.argv[1:]:\n        return self_test()\n',
      '    if "--self-test" in sys.argv[1:]:\n        return self_test()\n    docs = common.chdir_root(args)\n    globals().update(common.repo_config(\n        "check-doc-examples", {k: globals()[k] for k in SETTINGS}))\n',
      IN_HORDE_SUB % 'check-doc-examples.py'),
-    # check-plan-citations: CITE_RE misses json and sh (check-plan-citations-07)
-    ('check-plan-citations CITE_RE misses json and sh', 'check-plan-citations.py',
+    # check-plan-citations: CITED_FILE misses json and sh, so an anchor into
+    # either goes unchecked
+    ('check-plan-citations CITED_FILE misses json and sh', 'check-plan-citations.py',
      '              r"\\.(?:hs|ts|py|c|h|cabal|mjs|html|md|txt|yaml|yml|json|sh)|Makefile)")\n',
      '              r"\\.(?:hs|ts|py|c|h|cabal|mjs|html|md|txt|yaml|yml)|Makefile)")\n', ST),
     # bench-baseline: an unreadable baseline tracebacks at exit 1 again (bench-baseline-03)
@@ -1875,7 +1864,7 @@ MUTANTS = [
      '    if unknown:\n        print(f"{path} sets', '    if False:\n        print(f"{path} sets',
      'cd {dir} && python3 check-plan-citations.py --self-test'),
     # check-doc-refs: FLAG_ROOTS unsearched, so a flag of the shared tools a
-    # document names, `--restamp` among them, reads as unknown
+    # document names, `--foreign` among them, reads as unknown
     ('check-doc-refs searches no FLAG_ROOTS', 'check-doc-refs.py',
      '    for r in FLAG_ROOTS:\n', '    for r in []:\n',
      IN_HORDE % 'check-doc-refs.py'),

@@ -290,25 +290,6 @@
    }
   },
   {
-   "id": "check-plan-citations-01",
-   "program": "check-plan-citations.py",
-   "name": ":0 indexed the file's last line and a backwards range printed its first line as ok",
-   "family": "domain-unchecked",
-   "fix_rev": "d6a0c4bde",
-   "trigger": "a citation `file:0` or `file:20-10`",
-   "ok": "OUT-OF-RANGE, exit 1",
-   "bug": "a line printed as though the citation resolved",
-   "proved": "asserted",
-   "harm": "latent",
-   "discovery": "review",
-   "notes": "Seeded 2026-09-02 from the docstring.",
-   "fix_in": {
-    "repo": "horde-ad",
-    "branch": "post-inlining-catalogue",
-    "path": "tools/check-plan-citations.py"
-   }
-  },
-  {
    "id": "check-plan-citations-02",
    "program": "check-plan-citations.py",
    "name": "given several documents only the first was checked, the rest reporting nothing while the run exited 0",
@@ -324,44 +305,6 @@
    "fix_in": {
     "repo": "horde-ad",
     "branch": "post-inlining-catalogue",
-    "path": "tools/check-plan-citations.py"
-   }
-  },
-  {
-   "id": "check-plan-citations-03",
-   "program": "check-plan-citations.py",
-   "name": "a dotfile citation such as .hlint.yaml:22 was extracted as hlint.yaml",
-   "family": "scan-for-parse",
-   "fix_rev": "5c250ee85",
-   "trigger": "a citation into a dotfile",
-   "ok": "the dotfile resolves",
-   "bug": "a citation into a file that does not exist, failed",
-   "proved": "asserted",
-   "harm": "latent",
-   "discovery": "review",
-   "notes": "Seeded 2026-09-02 from the docstring.",
-   "fix_in": {
-    "repo": "horde-ad",
-    "branch": "master",
-    "path": "tools/check-plan-citations.py"
-   }
-  },
-  {
-   "id": "check-plan-citations-04",
-   "program": "check-plan-citations.py",
-   "name": "a document quoting another's stamps failed the plain pass three times over",
-   "family": "scan-for-parse",
-   "fix_rev": "7e5091a00",
-   "trigger": "a document that quotes a stamp line rather than carrying one",
-   "ok": "quotations are not this document's stamp",
-   "bug": "three failures for stamps that were never the document's",
-   "proved": "asserted",
-   "harm": "latent",
-   "discovery": "review",
-   "notes": "Seeded 2026-09-02 from the docstring, which dates the fix 2026-07-31; the commit is dated the day before.",
-   "fix_in": {
-    "repo": "horde-ad",
-    "branch": "master",
     "path": "tools/check-plan-citations.py"
    }
   },
@@ -425,37 +368,6 @@
     "repo": "horde-ad",
     "branch": "post-inlining-catalogue",
     "path": "tools/check-doc-wrap.py"
-   }
-  },
-  {
-   "id": "check-plan-citations-05",
-   "program": "check-plan-citations.py",
-   "name": "a git status that failed read as no dirty file, so --restamp went ahead having verified nothing about the cited files",
-   "family": "error-as-value",
-   "fix_rev": "8b7468c59",
-   "trigger": "--restamp with a git whose status command fails",
-   "ok": "not restamping, git status could not be read, exit 2",
-   "bug": "the empty output of the failed status read as clean and the stamp was rewritten, exit 0",
-   "proved": "ran",
-   "harm": "latent",
-   "discovery": "lint",
-   "notes": "Raised by defect-lint.py's dropped-status rule on 2026-09-02, the one of its twelve questions here that was a defect; the shim in the case fails git status alone and hands everything else to the real git.",
-   "plant_cmd": "git init -q . && printf 'line one\\nline two\\n' > a.hs && printf '%s\\n' '`a.hs:1` cited.' '' 'Citations were verified against the tree at commit `0000000aa` (2020-01-01).' > r.md && git add a.hs r.md && git -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm base && mkdir shim && printf '#!/bin/sh\\ncase \"$*\" in *status*) exit 128;; esac\\nexec /usr/bin/git \"$@\"\\n' > shim/git && chmod +x shim/git",
-   "env": {
-    "PATH": "{tmp}/shim:/usr/bin:/bin"
-   },
-   "invoke": [
-    "r.md",
-    "--restamp"
-   ],
-   "expect_exit": 2,
-   "expect_text": "could not be read",
-   "bug_exit": 0,
-   "bug_text": "->",
-   "fix_in": {
-    "repo": "horde-ad",
-    "branch": "post-inlining-catalogue",
-    "path": "tools/check-plan-citations.py"
    }
   },
   {
@@ -633,65 +545,6 @@
    }
   },
   {
-   "id": "check-plan-citations-06",
-   "program": "check-plan-citations.py",
-   "name": "a stamp the formatter wrapped inside a blockquote read as no stamp, so --restamp refused it and the stamp's own orphan and publication checks passed in silence",
-   "family": "scan-for-parse",
-   "fix_rev": "adc3447e7",
-   "trigger": "a stamp whose hash ends one line and whose date opens the next behind a blockquote `>`",
-   "ok": "the stamp is found, checked and rewritten, its line break preserved",
-   "bug": "no stamp found, exit 1, and the stamp itself never validated",
-   "proved": "ran",
-   "harm": "latent",
-   "discovery": "in-use",
-   "notes": "Found in LambdaHack while restamping its documents, two of its five stamped ones being in that shape, so their stamps had never been checked for orphaning or publication at all. Which break lands where moves whenever a paragraph above is edited, so no document can be kept out of the shape. Ported on 2026-09-04; this copy carried the defect until the port commit, so the audit replays the bug direction here.",
-   "plant": "a blockquoted stamp wrapped so the hash ends one line and the date opens the next behind a `>`",
-   "plant_cmd": "git init -q . && printf 'line one\\nline two\\n' > a.hs && printf '%s\\n' '`a.hs:1` cited.' '' '> Citations were verified against the tree at commit **0000000aa**' '> (2020-01-01).' > r.md && git add a.hs r.md && git -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm base",
-   "invoke": [
-    "r.md",
-    "--restamp"
-   ],
-   "expect_exit": 0,
-   "expect_text": "0000000aa (2020-01-01) ->",
-   "bug_exit": 1,
-   "bug_text": "no stamp",
-   "fix_in": {
-    "repo": "horde-ad",
-    "branch": "post-inlining-catalogue",
-    "path": "tools/check-plan-citations.py"
-   }
-  },
-  {
-   "id": "check-plan-citations-07",
-   "program": "check-plan-citations.py",
-   "name": "CITE_RE listed neither json nor sh, and check-doc-refs skips every backticked path:NN token as pass 1's, so a citation into a .json or .sh file was checked by neither tool",
-   "family": "vacuous-check",
-   "fix_rev": "adc3447e7",
-   "trigger": "`d.json:9999` and `s.sh:3` in backticks, both out of range",
-   "ok": "both extracted and failed OUT-OF-RANGE",
-   "bug": "0 citations checked, exit 0, and check-doc-refs' 0 failed beside it",
-   "proved": "ran",
-   "harm": "latent",
-   "discovery": "review",
-   "notes": "check-doc-refs' PATH_EXT already carried both extensions; the two lists live in two twin-synced files and cannot be one constant, so each names the other. Ported from LambdaHack on 2026-09-04, where a code review found it; this copy carried the defect until the port commit, so the audit replays the bug direction here.",
-   "plant_cmd": "git init -q . && printf '{}\\n' > d.json && printf 'a\\nb\\n' > s.sh && printf '%s\\n' 'See `d.json:9999` and `s.sh:3` and `s.sh:1`.' > r.md && git add -A && git -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm c",
-   "invoke": [
-    "r.md"
-   ],
-   "expect_exit": 1,
-   "expect_text": [
-    "OUT-OF-RANGE",
-    "ok   s.sh:1"
-   ],
-   "bug_exit": 0,
-   "bug_text": "0 citations checked",
-   "fix_in": {
-    "repo": "horde-ad",
-    "branch": "post-inlining-catalogue",
-    "path": "tools/check-plan-citations.py"
-   }
-  },
-  {
    "id": "check-plan-citations-08",
    "program": "check-plan-citations.py",
    "name": "all_files_named spawned one find over the source roots per citation that did not resolve directly, 1.1 s against 0.3 s on the wasm plan",
@@ -827,7 +680,7 @@
    ],
    "expect_exit": 1,
    "expect_text": [
-    "OUT-OF-RANGE",
+    "LINE-NUMBER",
     "does not exist here"
    ],
    "bug_exit": 2,
@@ -5932,32 +5785,6 @@
     "repo": "horde-ad",
     "branch": "post-inlining-catalogue",
     "path": "tools/check-doc-refs.py"
-   }
-  },
-  {
-   "fix_rev": "439f950cbfc8",
-   "proved": "ran",
-   "harm": "latent",
-   "discovery": "review",
-   "id": "check-plan-citations-13",
-   "program": "check-plan-citations.py",
-   "name": "a stamp wrapped between verified and against was not found, STAMP_RE wanting one space there, so an orphaned stamp passed",
-   "family": "scan-for-parse",
-   "trigger": "Citations were verified, a line break, against the tree at commit `<c1>`, c1 amended away",
-   "ok": "FAIL stamp ORPHANED, exit 1",
-   "bug": "no stamp read, exit 0",
-   "plant_cmd": "g() { git -c user.email=t@t -c user.name=t -c commit.gpgsign=false \"$@\"; } && git init -q . && printf 'x\\n' > a.hs && git add a.hs && g commit -qm one && c1=$(git rev-parse --short=9 HEAD) && g commit -q --amend -m two && printf 'Citations were verified\\nagainst the tree at commit `%s` (2026-01-01).\\n\\n`a.hs:1` cited.\\n' \"$c1\" > d.md",
-   "invoke": [
-    "d.md"
-   ],
-   "expect_exit": 1,
-   "expect_text": "ORPHANED",
-   "bug_exit": 0,
-   "bug_absent": "ORPHANED",
-   "fix_in": {
-    "repo": "horde-ad",
-    "branch": "post-inlining-catalogue",
-    "path": "tools/check-plan-citations.py"
    }
   },
   {
