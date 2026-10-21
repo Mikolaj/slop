@@ -30,6 +30,8 @@ Repro.hs
 # A reproducer that needs a second module, because the defect is between
 # modules, names that module `ReproLib.hs` on the same terms.
 ReproLib.hs
+# A wasm reproducer's Node driver is `run.mjs` on the same terms.
+run.mjs
 # Filed GHC issues name their second module `Lib.hs` too, and their
 # documents are the filed bodies, so the name stays as filed.
 Lib.hs
