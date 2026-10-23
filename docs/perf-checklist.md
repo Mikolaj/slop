@@ -35,7 +35,8 @@ with `T=~/slop/tools`.
    and W2, and any reading a Core check raised.
 6. Report one verified line per check, naming what was run and what it found,
    or why it did not run. A check needing a GHC option the cabal file lacks
-   waits for Mikolaj's approval of that option.
+   waits for Mikolaj's approval of that option, but `-fspec-constr` needs none
+   where a recipe names or implies it.
 
 **D. The dump build.** One build feeds `spec-audit`, `pragma-calls`,
 `core-diff`, `rules-diff`, `captured-unbox`, `box-audit` and `ctime-diff`, each
@@ -126,8 +127,8 @@ Not a check: the conditions every timing below assumes.
   under it. Profiles are the exception: under it a cost-centre profile recorded
   no ticks, and a `-hT` heap profile 3 samples where it took 12 without.
 - Ask for every GHC option a benchmark or probe build adds beyond the cabal
-  file's (`horde-ad/bench/CLAUDE.md`). Never `-fno-full-laziness`
-  with `-fno-cse`, which GHC
+  file's (`horde-ad/bench/CLAUDE.md`), but `-fspec-constr` where a recipe names
+  or implies it. Never `-fno-full-laziness` with `-fno-cse`, which GHC
   [#27886](https://gitlab.haskell.org/ghc/ghc/-/work_items/27886) miscompiles;
   keep iterations from sharing work by a NOINLINE `perturb i x` instead, whose
   result depends on `i`: one ignoring `i` let 2000 iterations share one call,
@@ -623,7 +624,7 @@ lost a duplicated consumer, so read it against `core-diff.py`.
   `transform/unstream [New]`).
 - In the source, the vector functions inside each chain that fires,
   and the callers of vector's `map`, `zipWith` and `concat` in hot code.
-- A probe of each such chain at `-O1` and at `-O1 -fspec-constr` (ask), compared
+- A probe of each such chain at `-O1` and at `-O1 -fspec-constr`, compared
   by `ab-time.py`, allocation first. What `-fspec-constr` removes
   is SpecConstr's cost, not a bug.
 
@@ -938,7 +939,7 @@ function allocated less. Every moved row landed on Unboxed's figure.
 
 - Build the benchmark against the stock and the fixed dependency, the fix being
   a patched copy named by `packages:` in a project file, each at `-O1`
-  and at `-O1 -fspec-constr` (ask).
+  and at `-O1 -fspec-constr`.
 - `python3 $T/ab-time.py --cpu 3 STOCK FIXED STOCK_SC FIXED_SC 2 NAME...`
   reports allocation per benchmark. The rows that move with the fix
   are the issue's sites. The probe must be a criterion benchmark, which is what
