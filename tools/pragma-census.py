@@ -60,7 +60,8 @@ forwards to one needing it: its body calls that binding, by its name in its
 own module, in one it imports unqualified or through a qualified alias, a
 module defining no such name followed through its unqualified imports as a
 facade re-exports them, or through a class method one of whose instances it
-is, and its type shares a list type with it, or, where the callee's INLINE
+is, and its type shares a list type with it, the names of type variables
+aside, or, where the callee's INLINE
 stands on a comment giving P's reason that cites no F1, the call heads the
 right-hand side of its first equation, constructors applied to it aside. A
 directly fusing binding, and an INLINE binding whose comment above it gives
@@ -715,7 +716,9 @@ def module_info(text):
 
 
 def lists_of(ty):
-    """The list types a type holds, promoted lists left out."""
+    """The list types a type holds, promoted lists left out, each with its
+    type variables renamed in order of first occurrence, so that two list
+    types alike but for those names compare equal (pragma-census-26)."""
     out = set()
     for start in (i for i, ch in enumerate(ty)
                   if ch == '[' and ty[i - 1:i] != "'"):
@@ -725,7 +728,10 @@ def lists_of(ty):
             depth -= ty[end] == ']'
             if depth == 0:
                 break
-        out.add(' '.join(ty[start:end + 1].split()))
+        names = {}
+        out.add(re.sub(r"(?<![\w'.])[a-z_][\w']*",
+                       lambda m: names.setdefault(m.group(0), f't{len(names)}'),
+                       ' '.join(ty[start:end + 1].split())))
     return out
 
 
@@ -864,12 +870,30 @@ def own_start(lines, start, name, names):
     return start
 
 
+def infix_equation(line, name):
+    """The equation an infix definition of name on line gives, its operands
+    as patterns, each parenthesised where it holds a space, and the rest after
+    them, or None where line is no such definition."""
+    end = pattern_end(line)
+    m = INFIX_OP.match(line, end) if end else None
+    if not m or m.group(1).strip('`') != name:
+        return None
+    rest = line[m.end():].lstrip()
+    end2 = pattern_end(rest)
+    if end2 is None:
+        return None
+    par = [p if ' ' not in p else '(' + p + ')'
+           for p in (line[:end].strip(), rest[:end2].strip())]
+    return ' ' + ' '.join(par) + rest[end2:]
+
+
 def equations(lines, start, name):
     """[(argument patterns, rest)] of the equations of name from line start:
     each one's left side split at depth 0 into its patterns, and the guards,
     right-hand side and where clause after them, string literals and
     comments blanked; a pragma or a comment at column 0 between them is
-    passed over."""
+    passed over.  An equation defining name infix, `l op r rest`, gives the
+    patterns l and r, as method_name reads it (pragma-census-25)."""
     head = re.compile(r"\(?" + re.escape(name) + r"\)?(?![\w'])")
     eqs, j = [], start
     while j < len(lines):
@@ -885,9 +909,10 @@ def equations(lines, start, name):
             j += 1
             continue
         m = head.match(line)
-        if not m:
+        e = line[m.end():] if m else infix_equation(line, name)
+        if e is None:
             break
-        eqs.append(line[m.end():])
+        eqs.append(e)
         j += 1
     out = []
     for e in eqs:
@@ -2016,7 +2041,15 @@ def self_test_rule():
             'instance VL Vector where\n'
             '  vfl _ xs = V.fromList (map id xs)\n'
             'fl :: VL v => [a] -> v a\n'
-            'fl xs = vfl 3 xs\n')
+            'fl xs = vfl 3 xs\n'
+            # A list type alike but for its type variables' names
+            # (pragma-census-26).
+            '-- INLINE: F1, directly fusing: it consumes its list once, by a foldr.\n'
+            '{-# INLINE gw #-}\n'
+            'gw :: [(Int, T w b)] -> Int\n'
+            'gw ps = foldr (\\ (i, _) r -> i + r) 0 ps\n'
+            'gv :: [(Int, T v a)] -> Int\n'
+            'gv qs = gw qs + 1\n')
     fac = ('module Fac(module L) where\n'
            'import Low as L\n')
     api = ('module Api where\n'
@@ -2139,7 +2172,10 @@ def self_test_rule():
              '  -- INLINE: GHC HEAD 10.1.20260918, 2026-10-13: measured.\n'
              '  {-# INLINE szz #-}\n'
              '  szz :: Int -> Int\n'
-             '  szz x = x + x * 2\n')
+             '  szz x = x + x * 2\n'
+             # A method defined infix (pragma-census-25).
+             'instance Eq (Bx a) where\n'
+             '  x == y = unBx x == unBx y\n')
     want = ['== pragma unlike the rule and no comment above in its form'
             ' (file:line name: has -> wants [why])',
             '  Api.hs top: none -> INLINE [forwards to Mid.mid]',
@@ -2201,6 +2237,7 @@ def self_test_rule():
             '  Th.hs th16: none -> INLINE [thin wrapper]',
             '  Th.hs Sz.szz: none -> INLINE [thin wrapper]',
             '  Th.hs Sz.szz: INLINE -> none [no class constraint]',
+            '  Th.hs Eq.==: none -> INLINE [thin wrapper]',
             '  U.hs u1: none -> INLINE [takes or returns Rt (A3)]',
             '  U.hs u11: none -> INLINE [takes or returns Mb (A3)]',
             '  U.hs u12: none -> INLINE [takes or returns Ml (A3)]',
@@ -2213,6 +2250,7 @@ def self_test_rule():
             '  W.hs Ord.compare: none -> INLINE [forwards to W.cmpT]',
             '  W.hs VL.vfl: none -> INLINE [directly fusing (F1)]',
             '  W.hs fl: none -> INLINE [forwards to W.VL.vfl]',
+            '  W.hs gv: none -> INLINE [forwards to W.gw]',
             '== recursive and INLINE: an INLINE wrapper over a recursive'
             ' worker instead (file:line name)',
             '  R.hs f14',
@@ -2281,7 +2319,7 @@ def self_test_rule():
                 fh.write(text)
         got, nbad, _ = report_rule(td)
         got = [re.sub(r'^(  \S+\.hs):\d+', r'\1', x) for x in got]
-        if got != want or nbad != 82:
+        if got != want or nbad != 84:
             bad.append(f'--rule ({nbad}):\n  ' + '\n  '.join(got))
         if main(['--rule', td]) != 1:
             bad.append('--rule with findings did not exit 1')
@@ -2290,7 +2328,7 @@ def self_test_rule():
         SKIP = frozenset(['U.hs'])
         got, nbad, _ = report_rule(td)
         SKIP = frozenset()
-        if in_u == 0 or any('U.hs' in x for x in got) or nbad != 82 - in_u:
+        if in_u == 0 or any('U.hs' in x for x in got) or nbad != 84 - in_u:
             bad.append(f'--skip U.hs left it in ({nbad}): '
                        + '; '.join(x for x in got if 'U.hs' in x))
         if main(['--rule', '--skip', 'Nope.hs', td]) != 2:

@@ -7149,6 +7149,61 @@
    "expect_text": "['((a)']"
   },
   {
+   "id": "pragma-census-25",
+   "program": "pragma-census.py",
+   "name": "equations() read only equations opening with the name, so a method defined infix, x == y = ..., had none and was never judged a thin wrapper",
+   "family": "two-spellings",
+   "fix_rev": "self",
+   "trigger": "instance Eq W whose (==), INLINABLE, is x == y = unW x == unW y, unW a newtype field",
+   "ok": "Eq.== listed as INLINABLE -> INLINE [thin wrapper], exit 1",
+   "bug": "Eq.== listed as INLINABLE -> none [no class constraint], exit 1",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on orthotope (2026-10-23): the generic wrappers' (==), x == y = unA x == unA y, each listed INLINE -> INLINABLE [class constraint], where the prefix form (==) x y = ... was read as a thin wrapper. method_name already read the infix form; equations() now reads it through the same pattern_end and INFIX_OP.",
+   "plant_cmd": "mkdir -p S && cat > S/M.hs <<'EOF'\nmodule M where\n\nnewtype W = W { unW :: Int }\n\ninstance Eq W where\n  {-# INLINABLE (==) #-}\n  x == y = unW x == unW y\nEOF",
+   "invoke": [
+    "--rule",
+    "{tmp}/S"
+   ],
+   "expect_exit": 1,
+   "expect_text": "  M.hs:7 Eq.==: INLINABLE -> INLINE [thin wrapper]",
+   "bug_exit": 1,
+   "bug_text": "  M.hs:7 Eq.==: INLINABLE -> none [no class constraint]"
+  },
+  {
+   "id": "pragma-census-26",
+   "program": "pragma-census.py",
+   "name": "forwarding() compared list types as text, so a method handing its [(Int, T v a)] to a fusing binding of [(Int, T w a)] was not read as forwarding its list",
+   "family": "two-spellings",
+   "fix_rev": "self",
+   "trigger": "class C v with cat :: [(Int, T v a)] -> Int, instance C [] with cat xs = gcat xs + 1, and gcat :: [(Int, T w a)] -> Int directly fusing under a comment citing F1",
+   "ok": "C.cat listed as none -> INLINE [forwards to M.gcat], exit 1",
+   "bug": "nothing listed, exit 0",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on orthotope (2026-10-23): the vector instances' vUnsafeConcatViewsN and vConcatPadN, handing their lists of T v a to genericUnsafeConcatViewsN and genericConcatPadN, whose lists are of T w a, each listed INLINE -> INLINABLE [class constraint]. lists_of now renames each list type's type variables in order of first occurrence.",
+   "plant_cmd": "mkdir -p S && cat > S/M.hs <<'EOF'\nmodule M where\n\ndata T v a = T (v a)\n\nclass C v where\n  cat :: [(Int, T v a)] -> Int\n\n-- INLINE: F1, directly fusing: it consumes its list once, by a foldr.\n{-# INLINE gcat #-}\ngcat :: [(Int, T w a)] -> Int\ngcat xs = foldr (\\ (i, _) r -> i + r) 0 xs\n\ninstance C [] where\n  cat xs = gcat xs + 1\nEOF",
+   "invoke": [
+    "--rule",
+    "{tmp}/S"
+   ],
+   "expect_exit": 1,
+   "expect_text": "  M.hs:14 C.cat: none -> INLINE [forwards to M.gcat]",
+   "bug_exit": 0,
+   "bug_absent": "C.cat"
+  },
+  {
+   "id": "pragma-census-list-types-renamed-not-unified",
+   "program": "pragma-census.py",
+   "name": "lists_of renames the type variables of each list type, so [a] and [b] are one type, and leaves [x] apart from [(Int, a)], which only unification would join",
+   "kind": "control",
+   "notes": "Added 2026-10-23 with pragma-census-26: the control says which reading was chosen.",
+   "unit": "sorted(lists_of('[(Int, T w a)] -> [b] -> [(Int, x)]'))",
+   "expect_text": "['[(Int, T t0 t1)]', '[(Int, t0)]', '[t0]']"
+  },
+  {
    "id": "box-audit-01",
    "program": "box-audit.py",
    "name": "a top-level binding's lambda was found by the first `= \\` anywhere in its right-hand side, so a binding that is no lambda but defines one locally had that lambda's binders read as its own arguments",

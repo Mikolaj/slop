@@ -1668,6 +1668,15 @@ MUTANTS = [
      "                              or name in bound or name in fields\n"
      "                              or name == 'coerce')\n",
      "                              or name in bound or name in fields)\n", ST),
+    # pragma-census-25 and -26 (2026-10-23): each watched failing its
+    # self-test.
+    ('pragma-census an infix definition read as no equation', 'pragma-census.py',
+     '        e = line[m.end():] if m else infix_equation(line, name)\n',
+     '        e = line[m.end():] if m else None\n', ST),
+    ('pragma-census list types compared with their variables named',
+     'pragma-census.py',
+     "                       lambda m: names.setdefault(m.group(0), f't{len(names)}'),\n",
+     '                       lambda m: m.group(0),\n', ST),
     # hssource-03 (2026-10-17): the block comment scanner pragma-census
     # shares, judged by its self-test, which caught it.
     ('hssource a pragma inside a block comment closing it', 'hssource.py',
