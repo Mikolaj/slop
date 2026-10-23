@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Interleaved wall time and allocation of criterion benchmarks across builds.
+"""Interleaved wall time and allocation of benchmarks across builds.
 
-Usage: python3 tools/ab-time.py [--log TSV] [--cpu CPU]
+Usage: python3 tools/ab-time.py [--log TSV] [--cpu CPU] [--iters N]
                                 BIN BIN [BIN ...] ROUNDS NAME [NAME ...]
        python3 tools/ab-time.py --self-test
 
@@ -20,6 +20,11 @@ and the median bytes allocated per iteration of the two. `--log` also writes
 every run, one line each. Run it from the directory the benchmark expects
 as its working directory: the MNIST suites read `samplesData/`.
 
+With `--iters N` the benchmark is not criterion's but one of N calls of the
+benchmark named, as in orthotope's specialisation benchmark: each process
+runs `BIN --iters N -m glob NAME`, and the last line it prints, `NAME TIME
+BYTES`, gives the time and the bytes allocated a call in place of the slopes.
+
 This is docs/perf-checklist.md's A/B procedure as a script: interleaved,
 so drift over the run cancels within each round, and the order rotated, so
 no build always runs first; one benchmark per process, so no predecessor's
@@ -33,7 +38,8 @@ where perf cannot run).
 
 Exit 0 when every run happened, 2 when one did not: a run failing, taskset
 missing with `--cpu`, its JSON without one report carrying a time and an
-allocation regression or with a time slope not above zero, or a `--log`
+allocation regression or with a time slope not above zero, with `--iters`
+its last line not `NAME TIME BYTES` with a time above zero, or a `--log`
 that cannot be written.
 """
 
@@ -52,11 +58,33 @@ import common  # noqa: E402
 from common import measured_env  # noqa: E402
 
 
-def command(binary, name, path, cpu):
-    """The run of one benchmark, pinned to cpu unless it is None."""
-    return ((['taskset', '-c', cpu] if cpu is not None else [])
-            + [binary, '-m', 'glob', name, '--regress', 'allocated:iters',
-               '--json', path, '+RTS', '-T'])
+def command(binary, name, path, cpu, iters=None):
+    """The run of one benchmark, pinned to cpu unless it is None: criterion's,
+    or with iters one of that many calls."""
+    pin = ['taskset', '-c', cpu] if cpu is not None else []
+    if iters is not None:
+        return pin + [binary, '--iters', str(iters), '-m', 'glob', name]
+    return pin + [binary, '-m', 'glob', name, '--regress', 'allocated:iters',
+                  '--json', path, '+RTS', '-T']
+
+
+def counted(binary, name, cpu, iters):
+    """Time and bytes allocated a call of one benchmark run iters times in a
+    fresh process, from the line `NAME TIME BYTES` it prints last."""
+    r = subprocess.run(command(binary, name, None, cpu, iters),
+                       capture_output=True, text=True, env=measured_env())
+    if r.returncode != 0:
+        raise ValueError(f'{binary} on {name} exited {r.returncode}: '
+                         + r.stderr[-500:])
+    f = (r.stdout.splitlines() or [''])[-1].split()
+    if len(f) != 3 or f[0] != name:
+        raise ValueError(f'{binary} on {name}: its last line is not'
+                         f' `{name} TIME BYTES`: {r.stdout[-200:]!r}')
+    t, a = float(f[1]), float(f[2])
+    if t <= 0:
+        raise ValueError(f'{binary} on {name}: a time of {t}, so no time'
+                         ' was measured')
+    return t, a
 
 
 def slopes(binary, name, cpu):
@@ -90,7 +118,7 @@ def slopes(binary, name, cpu):
     return t, common.slope(path, name, regs['allocated'])
 
 
-def rounds(bins, n, name, cpu, log):
+def rounds(bins, n, name, cpu, log, iters=None):
     """Per BIN after the first: (median time ratio to the first, lowest,
     highest, median allocation of the first, median allocation)."""
     times = [[None] * n for _ in bins]
@@ -98,7 +126,8 @@ def rounds(bins, n, name, cpu, log):
     for r in range(n):
         for i in range(len(bins)):
             j = (i + r) % len(bins)
-            t, a = slopes(bins[j], name, cpu)
+            t, a = (slopes(bins[j], name, cpu) if iters is None
+                    else counted(bins[j], name, cpu, iters))
             times[j][r], allocs[j][r] = t, a
             if log:
                 log.write(f'{name}\t{r}\t{chr(ord("A") + j)}\t{t:.6e}'
@@ -133,6 +162,24 @@ else:
                      'regCoeffs': {{'iters': {{'estPoint': {alloc!r}}}}}}})
     reps = [{{'reportName': name, 'reportAnalysis': {{'anRegress': regs}}}}]
 json.dump(['criterion', '1.6', reps], open(out, 'w'))
+'''
+
+# A benchmark of N calls, as orthotope's specialisation benchmark runs one:
+# a line of its own, then `NAME TIME BYTES`, under the name given or another.
+FAKE_COUNTED = '''#!/usr/bin/env python3
+import os, sys
+if os.environ.get('GHCRTS', '').split()[-1:] != ['-V0']:
+    sys.exit(3)
+a = sys.argv
+if a[1:2] != ['--iters'] or a[3:5] != ['-m', 'glob']:
+    sys.exit(4)
+name = a[5]
+with open({calls!r}, 'a') as fh:
+    fh.write({tag!r} + ' ' + name + chr(10))
+n = sum(1 for _ in open({calls!r}))
+secs = {secs!r}
+print('not the last line')
+print({shown!r} or name, secs[n % len(secs)], {alloc!r})
 '''
 
 
@@ -180,6 +227,31 @@ def self_test():
         with mock.patch.dict(os.environ, GHCRTS='-V1'):
             if measured_env()['GHCRTS'] != '-V1 -V0':
                 bad.append("-V0 not after the caller's GHCRTS")
+        ccalls = os.path.join(td, 'ccalls')
+
+        def fake_counted(tag, secs, alloc, shown=''):
+            p = os.path.join(td, 'counted-' + tag)
+            with open(p, 'w') as fh:
+                fh.write(FAKE_COUNTED.format(secs=secs, calls=ccalls,
+                                             tag=tag, alloc=alloc,
+                                             shown=shown))
+            os.chmod(p, 0o755)
+            return p
+        # As above, two builds: B makes calls 2, 3 and 6 of the rotated
+        # rounds A B, B A, A B.
+        cbins = [fake_counted('A', [1.0], 100),
+                 fake_counted('B', [9, 9, 1.5, 1.2, 9, 9, 0.8], 50)]
+        got = rounds(cbins, 3, 'g/x', None, None, 5)
+        if got != [(1.2, 0.8, 1.5, 100.0, 50.0)]:
+            bad.append(f'--iters medians and ranges: {got}')
+        if command('x', 'g/x', None, None, 5) != [
+                'x', '--iters', '5', '-m', 'glob', 'g/x']:
+            bad.append('--iters not passed as the counted run takes it')
+        other = fake_counted('O', [1.0], 100, shown='g/y')
+        if main(['--iters', '5', cbins[0], other, '1', 'g/x']) != 2:
+            bad.append('a last line naming another benchmark did not exit 2')
+        if main(['--iters', '0', cbins[0], cbins[1], '1', 'g/x']) != 2:
+            bad.append('--iters 0 did not exit 2')
     for b in bad:
         print('FAIL', b)
     print('self-test', 'FAILED' if bad else 'passed')
@@ -189,15 +261,21 @@ def self_test():
 def main(argv):
     if argv == ['--self-test']:
         return self_test()
-    log_path = cpu = None
-    while argv[:1] in (['--log'], ['--cpu']):
+    log_path = cpu = iters = None
+    while argv[:1] in (['--log'], ['--cpu'], ['--iters']):
         if len(argv) < 2:
             print(f'{argv[0]} needs a value', file=sys.stderr)
             return 2
         if argv[0] == '--log':
             log_path = argv[1]
-        else:
+        elif argv[0] == '--cpu':
             cpu = argv[1]
+        elif not argv[1].isdigit() or int(argv[1]) < 1:
+            print(f'--iters needs a count above zero, not {argv[1]}',
+                  file=sys.stderr)
+            return 2
+        else:
+            iters = int(argv[1])
         argv = argv[2:]
     k = next((i for i, a in enumerate(argv) if a.isdigit()), None)
     if k is None or k < 2 or int(argv[k]) < 1 or k == len(argv) - 1:
@@ -215,7 +293,7 @@ def main(argv):
         log = open(log_path, 'w') if log_path else None
         for name in names:
             for j, (med, lo, hi, a0, aj) in enumerate(
-                    rounds(bins, n, name, cpu, log), start=1):
+                    rounds(bins, n, name, cpu, log, iters), start=1):
                 print(f'{name:60s} {chr(ord("A") + j)}/A time {med:.4f}'
                       f'  range {lo:.3f}..{hi:.3f}'
                       f'  allocated {aj:.6g} against {a0:.6g} bytes/iter',

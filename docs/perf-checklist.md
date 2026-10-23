@@ -99,9 +99,11 @@ Not a check: the conditions every timing below assumes.
   reading which loops cross a cache line too simplistic a model to check by.
 - Run `tools/machine-busy.sh` before timing. Time
   with `python3 $T/ab-time.py --cpu 3 BIN_A BIN_B ROUNDS NAME...`, reading
-  allocation first. Back any time ratio that decides something
-  with instructions, `python3 $T/perf-per-call.py --cpu 3 BIN_A BIN_B NAME N`,
-  which code placement does not move.
+  allocation first, and with `--iters N` added where the benchmark
+  is not criterion's but runs N calls of one cell, as orthotope's specialisation
+  benchmark does. Back any time ratio that decides something with instructions,
+  `python3 $T/perf-per-call.py --cpu 3 BIN_A BIN_B NAME N`, which code placement
+  does not move.
 - A time difference under about 10% decides nothing without instruction counts:
   an unchanged row's ratio ranged from 0.86 to 0.98 across pairs of builds.
 - An instruction count decides only at the cells it counts: count the large size
@@ -1029,10 +1031,11 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   builds' benchmark executables: interleaved rounds, the order rotated
   from round to round, one benchmark per process, optionally pinned to one CPU,
   and for each build after the first the median of its per-round ratios
-  of criterion's time slope to the first's, beside both builds' allocation per
-  iteration. Single pairs on a loaded or virtual machine scatter far more
-  than the effect under test --- 0.42 to 1.36 around a true 1.00 in that study
-  --- so read only the median, and only after allocation has been compared.
+  of criterion's time slope to the first's, or with `--iters` of the time a call
+  the benchmark prints, beside both builds' allocation per iteration. Single
+  pairs on a loaded or virtual machine scatter far more than the effect
+  under test --- 0.42 to 1.36 around a true 1.00 in that study --- so read only
+  the median, and only after allocation has been compared.
 - `tools/perf-per-call.py` gives instructions and cycles per call of one
   benchmark in each of several builds, from `perf stat` runs at `--iters 2N`
   and `--iters N`, interleaved, rotated and optionally pinned, over a few
