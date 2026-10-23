@@ -4712,6 +4712,23 @@
    }
   },
   {
+   "id": "hascallstack-03",
+   "program": "hascallstack.py",
+   "name": "an error's message was read as the first token after `error`, so a message opening with a name passed in, `error $ name ++ \": violated contract: ...\"`, was read as no contract's and its function given a stack",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "e name [] = error $ name ++ \": violated contract: empty\", called as e \"m\"",
+   "ok": "no function takes a stack, the contract read in the literal after ++",
+   "bug": "e takes a stack, its message read as the identifier name",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on orthotope (2026-10-23): Internal's extremumT, whose callers pass \"maximumT\" and \"minimumT\", was listed as wanting HasCallStack and its error as worded as neither an argument's nor a contract's.",
+   "unit": "sorted(n for _, n in verdict(dict(own='T', mods=['A'], internal='A'), {'A': 'module T.A where\\nm :: [Int] -> Int\\nm = e \"m\"\\ne :: String -> [Int] -> Int\\ne name [] = error $ name ++ \": violated contract: empty\"\\ne _ xs = maximum xs\\n'})[0])",
+   "expect_text": "[]",
+   "bug_text": "['e']"
+  },
+  {
    "fix_rev": "3df7113625f7",
    "proved": "ran",
    "harm": "latent",

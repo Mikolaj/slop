@@ -1176,14 +1176,14 @@ MUTANTS = [
     # hascallstack (2026-10-08): each watched failing its self-test before
     # it was written down here.
     ('hascallstack contract wording ignored', 'hascallstack.py',
-     "         if any(CONTRACT not in msg for _, msg in d['errors'])}\n",
-     "         if d['errors']}\n", ST),
+     "    return [e for e in d['errors'] if CONTRACT not in e[1]]\n",
+     "    return list(d['errors'])\n", ST),
     ('hascallstack delegation disabled', 'hascallstack.py',
-     "               if g not in v and f in v and f[1] == g[1] and f[0] != g[0]}\n",
-     "               if False}\n", ST),
+     "        if f[1] == g[1] and f[0] != g[0]:\n",
+     "        if False:\n", ST),
     ('hascallstack delegation under any name', 'hascallstack.py',
-     "               if g not in v and f in v and f[1] == g[1] and f[0] != g[0]}\n",
-     "               if g not in v and f in v and f[0] != g[0]}\n", ST),
+     "        if f[1] == g[1] and f[0] != g[0]:\n",
+     "        if f[0] != g[0]:\n", ST),
     ('hascallstack unused import kept', 'hascallstack.py',
      "    elif has and not uses:\n", "    elif False:\n", ST),
     ('hascallstack comments counted as uses', 'hascallstack.py',
@@ -1195,6 +1195,31 @@ MUTANTS = [
      "            if UNWORDED.search(line) or (k[0] == cfg['internal']\n"
      "                                         and CONTRACT not in msg):\n",
      "            if UNWORDED.search(line):\n", ST),
+    # hascallstack-03 and ruling 93 (2026-10-23): the message read whole, the
+    # names in errors checked and followed; each watched failing its
+    # self-test before it was written down here.
+    ('hascallstack message read from its first token', 'hascallstack.py',
+     "    return ' '.join(lits), name\n",
+     "    return (e.group(1) if e else ''), name\n", ST),
+    ("hascallstack a helper's error naming its caller not passed on",
+     'hascallstack.py',
+     "        return (g[1] in names\n",
+     "        return (False\n", ST),
+    ('hascallstack a name passed in not followed', 'hascallstack.py',
+     "                or any(isinstance(n, tuple) for n in names)\n",
+     "                or False\n", ST),
+    ('hascallstack an unexported function named', 'hascallstack.py',
+     "                  and k[1] not in exports[k[0]]):\n",
+     "                  and False):\n", ST),
+    ('hascallstack an error naming a stranger accepted', 'hascallstack.py',
+     "            elif n is not None and n != k[1] and n != cfg.get(\n",
+     "            elif False and n != cfg.get(\n", ST),
+    ('hascallstack a call passing no name accepted', 'hascallstack.py',
+     "                    if not (passes(texts, g, lns) or any(\n",
+     "                    if not (True or any(\n", ST),
+    ("hascallstack a class's name not allowed", 'hascallstack.py',
+     "                    'classes', {}).get(k[0]) and n not in {\n",
+     "                    'classes', {}).get('') and n not in {\n", ST),
     # pragma-census (2026-10-10): each watched failing its self-test before
     # it was written down here.
     ('pragma-census HasCallStack taken for a class', 'pragma-census.py',

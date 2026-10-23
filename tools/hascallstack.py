@@ -5,21 +5,33 @@ Usage: python3 tools/hascallstack.py ROOT [--fix] [--list]
        python3 tools/hascallstack.py --self-test
 
 ROOT is an orthotope checkout, of which Data.Array.Internal, the modules
-under it and Data.Array.Convert are read. The rule, ruled 2026-10-08, rests
-on the contract policy that orthotope's README states: an operation's error
-on an argument that has no result names the operation, while a check of a
-contract that the operations establish says "violated contract". A function
-takes HasCallStack exactly when it calls `error` with a message that is
-not a violated contract's, or calls a function of the same name in another
-module that takes it, as a wrapper of a generic module does, so that the
-error shows the line the operation was called from. A contract check guards
-against a bug in orthotope and adds no stack, nor does an assert, and class
-methods take none, a stack on one binding every instance.
+under it and Data.Array.Convert are read. The rule, ruled 2026-10-23 in place
+of that of 2026-10-08, rests on the error policy that orthotope's README
+states. An argument error names an exported operation whose documentation
+says when it fails: its own function, or, in a helper checking an operation's
+argument, that operation, the one name the helper serves or a name its caller
+passes; never a function its module does not export. A contract check names
+the function whose contract it is and says "violated contract". An error
+reflecting a type's numbers names the class, Shape. A function takes
+HasCallStack exactly when an argument error naming it, or naming the function
+of the same name in another module that it wraps, can be raised in its code
+or in a function it calls, which takes one too, so that the error shows
+the line the operation was called from: a callee's argument errors count
+as a caller's where their message opens with the caller's name, or with
+a name passed in and the call passes the caller's name as a literal. A contract
+check guards against a bug in orthotope and adds no stack, nor does an assert,
+and class methods take none, a stack on one binding every instance.
 
-The rule reads the wording, so the wording is checked too: an error
-in Data.Array.Internal that does not say "violated contract", and one
-anywhere that says "impossible" or "shouldn't happen", are findings. So is
-a stack-taking function that calls itself, each level of which would push
+An error's message is every string literal on its line from `error` on,
+and its name the word before the first literal's colon, or the name its
+message opens with where that is passed in. The rule reads the wording, so
+the wording is checked too: an error in Data.Array.Internal that does not say
+"violated contract", and one anywhere that says "impossible" or "shouldn't
+happen", are findings. So are an error naming neither its function nor
+a caller of it, an argument error naming its own function where its module
+does not export it, a call of a function whose errors open with a name passed
+in that passes neither the caller's name nor a name of the caller's own,
+and a stack-taking function that calls itself, each level of which would push
 a frame of its own where a stack-free local worker pushes none.
 
 Reports each signature the rule would change and each module whose
@@ -45,12 +57,15 @@ ORTHOTOPE = dict(
     path={m: 'Data/Array/%s.hs' % m if m in ('Internal', 'Convert')
           else 'Data/Array/Internal/%s.hs' % m for m in MODS},
     # Whose every error checks a contract.
-    internal='Internal')
+    internal='Internal',
+    # A module whose errors may name a class rather than a function.
+    classes={'Shape': 'Shape'})
 
 SIG = re.compile(r"^([a-z][\w']*) ::(.*)$")
 END = re.compile(r"^([a-z][\w']* ::|[a-z][\w']*\s*$|-- \||\{-#|"
                  r"(instance|class|data|newtype|type|deriving)\b)")
 MESSAGE = re.compile(r'\berror\b\s*\$?\s*\(?\s*("[^"]*"|[a-zA-Z_][\w.]*)')
+LEAD = re.compile(r"\s*([A-Za-z_][\w']*)\s*:")
 CONTRACT = 'violated contract'
 UNWORDED = re.compile(r'"[^"]*(impossible|shouldn.t happen)')
 
@@ -69,8 +84,10 @@ def unquote(line):
 def parse(cfg, texts):
     """{(module, name): sig, body, hcs, errors, occ}, and each module's
     imports of the others: {qualifier: module} and 'unqual': [modules].
-    errors lists the message of each `error` call in the body, the literal
-    or the name it is built from."""
+    errors lists each `error` call in the body as its line's index, its
+    message, every literal on the line from `error` on, and its name: the
+    word before the first literal's colon, a pair ('passed', NAME) where the
+    message opens with a name, or None."""
     own = re.escape(cfg['own'])
     funs, imports = {}, {}
     for m in cfg['mods']:
@@ -113,8 +130,7 @@ def parse(cfg, texts):
                                        r"([a-z_][\w']*)(?![\w'])", l):
                     occ.setdefault((q, f), []).append(i)
                 if re.search(r'\berror\b', l):
-                    e = MESSAGE.search(lines[i])
-                    errors.append((i, e.group(1) if e else ''))
+                    errors.append((i,) + message(lines[i]))
             funs[(m, name)] = dict(
                 sig=(k, sig_end), body=(sig_end, j),
                 hcs='HasCallStack' in ' '.join(lines[k:sig_end]),
@@ -144,16 +160,48 @@ def graph(funs, imports):
     return edges
 
 
+def message(line):
+    """(message, name) of the `error` call on the line."""
+    tail = line[line.index('error') if 'error' in line else 0:]
+    lits = re.findall(r'"((?:[^"\\]|\\.)*)"', tail)
+    e = MESSAGE.search(line)
+    if e and not e.group(1).startswith('"'):
+        name = ('passed', e.group(1))
+    else:
+        lead = LEAD.match(lits[0]) if lits else None
+        name = lead.group(1) if lead else None
+    return ' '.join(lits), name
+
+
+def passes(texts, g, lns):
+    """Whether g's calls on lns pass g's own name as a literal."""
+    lines = texts[g[0]].split('\n')
+    return any('"%s"' % g[1] in lines[i] for i in lns)
+
+
+def argument_errors(d):
+    return [e for e in d['errors'] if CONTRACT not in e[1]]
+
+
 def verdict(cfg, texts):
     """The functions the rule gives HasCallStack, with the parse and the
     call graph."""
     funs, imports = parse(cfg, texts)
     edges = graph(funs, imports)
-    v = {k for k, d in funs.items()
-         if any(CONTRACT not in msg for _, msg in d['errors'])}
+    v = {k for k, d in funs.items() if argument_errors(d)}
+
+    def serves(g, f, lns):
+        """Whether f's argument errors are g's to show: f is the function
+        of g's name that g wraps, or an error of f names g."""
+        if f[1] == g[1] and f[0] != g[0]:
+            return True
+        names = [n for _, _, n in argument_errors(funs[f])]
+        return (g[1] in names
+                or any(isinstance(n, tuple) for n in names)
+                and passes(texts, g, lns))
     while True:
-        new = {g for g, f in edges
-               if g not in v and f in v and f[1] == g[1] and f[0] != g[0]}
+        new = {g for (g, f), lns in edges.items()
+               if g not in v and f in v and serves(g, f, lns)}
         if not new:
             return v, funs, edges
         v |= new
@@ -203,6 +251,17 @@ def drop_hcs(sig):
     if new == ctx:
         new = re.sub(r',\s*HasCallStack', '', ctx, count=1)
     return head + new + rest
+
+
+def exported(s):
+    """The names a module's export list gives, or None where it exports
+    all of itself."""
+    m = re.search(r'^module\s+([\w.]+)\s*(\(.*?\))?\s*where',
+                  strip_comments(s), re.S | re.M)
+    if not m or m.group(2) is None or re.search(
+            r'\bmodule\s+%s\b' % re.escape(m.group(1)), m.group(2)):
+        return None
+    return set(re.findall(r"(?<![\w'.])([a-z_][\w']*)", m.group(2)))
 
 
 def stack_import(s):
@@ -262,6 +321,7 @@ def name(k):
 def check(cfg, texts):
     """The findings, one line each, and the verdict."""
     v, funs, edges = verdict(cfg, texts)
+    exports = {m: exported(texts[m]) for m in cfg['mods']}
     out = []
     for k, d in sorted(funs.items()):
         where = '%s:%d' % (cfg['path'][k[0]], d['sig'][0] + 1)
@@ -270,13 +330,31 @@ def check(cfg, texts):
                        % ('add' if k in v else 'drop', name(k), where))
         if k in v and (k, k) in edges:
             out.append('calls itself with a stack: %s (%s)' % (name(k), where))
-        for i, msg in d['errors']:
-            line = texts[k[0]].split('\n')[i]
+        lines = texts[k[0]].split('\n')
+        callers = {g: lns for (g, f), lns in edges.items() if f == k}
+        for i, msg, n in d['errors']:
+            line = lines[i]
+            at = '%s (%s:%d): %s' % (name(k), cfg['path'][k[0]], i + 1,
+                                     line.strip()[:60])
             if UNWORDED.search(line) or (k[0] == cfg['internal']
                                          and CONTRACT not in msg):
-                out.append('error worded as neither: %s (%s:%d): %s'
-                           % (name(k), cfg['path'][k[0]], i + 1,
-                              line.strip()[:60]))
+                out.append('error worded as neither: ' + at)
+            if isinstance(n, tuple):
+                for g, lns in sorted(callers.items()):
+                    if not (passes(texts, g, lns) or any(
+                            isinstance(m, tuple)
+                            for _, _, m in funs[g]['errors'])):
+                        out.append('a call passes no name of its caller: %s'
+                                   ' calls %s' % (name(g), at))
+            elif n is not None and n != k[1] and n != cfg.get(
+                    'classes', {}).get(k[0]) and n not in {
+                        g[1] for g in callers}:
+                out.append('error names %s, neither its function nor a'
+                           ' caller: %s' % (n, at))
+            elif (n == k[1] and CONTRACT not in msg
+                  and exports[k[0]] is not None
+                  and k[1] not in exports[k[0]]):
+                out.append('error names an unexported function: ' + at)
     for m in cfg['mods']:
         has, uses = stack_import(texts[m])
         if bool(has) != uses:
@@ -353,6 +431,7 @@ long n = if n < 0 then error "long: negative" else n
     'B': '''module Lib.B where
 
 import qualified Lib.A as A
+import qualified Lib.D as D
 
 build :: Int -> [Int]
 build = A.build
@@ -362,6 +441,9 @@ twice = A.twice
 
 size :: Int -> Int
 size n = length (A.build n)
+
+op :: [Int] -> [Int]
+op = D.op
 ''',
     'C': '''module Lib.C where
 
@@ -377,15 +459,58 @@ bad i = if i < 0 then error "impossible" else i
 
 half :: Int -> Int
 half i = if odd i then error "half: odd" else i `div` 2
+''',
+    'D': '''module Lib.D(op, op2, op3, wrap, maxi, stray, refl) where
+
+import GHC.Stack(HasCallStack)
+
+op :: (HasCallStack) => [Int] -> [Int]
+op xs = checked xs
+
+checked :: (HasCallStack) => [Int] -> [Int]
+checked xs = if any (< 0) xs then error "op: negative" else xs
+
+op2 :: (HasCallStack) => Int -> [Int]
+op2 n = outer "op2" n
+
+op3 :: Int -> [Int]
+op3 n = outer "op2" n
+
+outer :: (HasCallStack) => String -> Int -> [Int]
+outer name n | n < 0 = error $ name ++ ": negative"
+             | otherwise = inner name n
+
+inner :: (HasCallStack) => String -> Int -> [Int]
+inner name n = if n > 9 then error $ name ++ ": too big" else [n]
+
+hidden :: Int -> Int
+hidden n = if n < 0 then error "hidden: negative" else n
+
+wrap :: Int -> Int
+wrap = hidden
+
+maxi :: [Int] -> Int
+maxi = extreme "maxi"
+
+extreme :: String -> [Int] -> Int
+extreme name [] = error $ name ++ ": violated contract: empty"
+extreme _ xs = maximum xs
+
+stray :: (HasCallStack) => Int -> Int
+stray n = if n < 0 then error "elsewhere: negative" else n
+
+refl :: (HasCallStack) => Int -> Int
+refl n = if n < 0 then error "Klass: negative" else n
 '''}
 
 
 def self_test():
-    """The fixture above: the verdict, the wording and recursion findings,
-    the rewrite and its fixed point, and the exit codes."""
+    """The fixture above: the verdict, the wording, name and recursion
+    findings, the rewrite and its fixed point, and the exit codes."""
     import tempfile
-    cfg = dict(own='Lib', mods=['A', 'B', 'C'],
-               path={m: 'Lib/%s.hs' % m for m in 'ABC'}, internal='C')
+    cfg = dict(own='Lib', mods=['A', 'B', 'C', 'D'],
+               path={m: 'Lib/%s.hs' % m for m in 'ABCD'}, internal='C',
+               classes={'D': 'Klass'})
     bad = []
 
     def kinds(out, kind):
@@ -393,7 +518,7 @@ def self_test():
                       if o.startswith(kind))
     out, v = check(cfg, FIXTURE)
     if kinds(out, 'add') != ['A.build', 'A.grow', 'A.long', 'B.build',
-                             'C.bad', 'C.half']:
+                             'B.op', 'C.bad', 'C.half', 'D.hidden']:
         bad.append('adds %s' % kinds(out, 'add'))
     if kinds(out, 'drop') != ['A.total', 'C.at']:
         bad.append('drops %s' % kinds(out, 'drop'))
@@ -401,6 +526,16 @@ def self_test():
         bad.append('recursion %s' % kinds(out, 'calls itself'))
     if kinds(out, 'error worded') != ['C.bad', 'C.half']:
         bad.append('wording %s' % kinds(out, 'error worded'))
+    if kinds(out, 'error names') != ['D.hidden', 'D.stray']:
+        bad.append('names %s' % kinds(out, 'error names'))
+    if kinds(out, 'error names an unexported') != ['D.hidden']:
+        bad.append('unexported %s' % kinds(out, 'error names an unexported'))
+    if kinds(out, 'a call passes') != ['D.op3']:
+        bad.append('passed names %s' % kinds(out, 'a call passes'))
+    if sorted(n for m, n in v if m == 'D') != [
+            'checked', 'hidden', 'inner', 'op', 'op2', 'outer', 'refl',
+            'stray']:
+        bad.append("D's stacks %s" % sorted(n for m, n in v if m == 'D'))
     new = rewrite(cfg, FIXTURE, v)
     want = ['build :: (HasCallStack) => Int -> [Int]',
             'total :: [Int] -> Int', 'twice :: Int -> [Int]',
@@ -408,21 +543,27 @@ def self_test():
             'size :: Int -> Int',
             'import GHC.Stack(HasCallStack)\nimport qualified Lib.A as A\n',
             'at :: Int -> Int']
-    text = '\n'.join(new[m] for m in 'ABC')
+    text = '\n'.join(new[m] for m in 'ABCD')
     bad += ['rewrite lacks %r' % w for w in want if w not in text]
     if new['C'].count('import GHC.Stack') != 1:
         bad.append('C keeps one import, bad taking the stack')
     out, _ = check(cfg, new)
     rest = sorted(o.split(':')[0] for o in out)
-    if rest != ['calls itself with a stack', 'error worded as neither',
-                'error worded as neither']:
+    if rest != ['a call passes no name of its caller',
+                'calls itself with a stack',
+                'error names an unexported function',
+                'error names elsewhere, neither its function nor a caller',
+                'error worded as neither', 'error worded as neither']:
         bad.append('after the rewrite: %s' % out)
     clean = dict(FIXTURE)
     clean['A'] = re.sub(r'grow ::.*?\n\n', '', clean['A'], flags=re.S)
     clean['C'] = clean['C'][:clean['C'].index('bad ::')]
+    for f in ('op3', 'hidden', 'wrap', 'stray'):
+        clean['D'] = re.sub(r'\n%s ::.*?\n\n' % f, '\n', clean['D'],
+                            flags=re.S)
     with tempfile.TemporaryDirectory() as td:
         os.makedirs(os.path.join(td, 'Lib'))
-        for m in 'ABC':
+        for m in 'ABCD':
             with open(os.path.join(td, 'Lib', m + '.hs'), 'w') as fh:
                 fh.write(clean[m])
         if main([td], cfg) != 1:

@@ -748,8 +748,10 @@ it sat on most of Dynamic's operations and on few of Ranked's or Shaped's.
 **Recipe:** `python3 $T/hascallstack.py ROOT` reports the signatures
 and `GHC.Stack` imports that disagree with the rule its docstring states,
 the errors worded as neither an argument's nor a violated contract's, which
-the rule reads, and the stack-taking functions that call themselves; `--fix`
-rewrites the signatures and imports, and `--list` prints the verdict.
+the rule reads, the errors naming a function the rule does not allow them
+to and the calls passing a name-taking function no name of their caller's,
+and the stack-taking functions that call themselves; `--fix` rewrites
+the signatures and imports, and `--list` prints the verdict.
 
 **Read:** a stack-taking function that calls itself pushes a frame at every
 level, so recurse through a local worker that takes none.
