@@ -25,7 +25,12 @@ count as `other`. Symbols are BIN's text symbols, from `nm -n`, an address
 belonging to the nearest at or before it, and their z-encoded unit prefix
 --- the package, its version and its hash or `inplace` component, any of
 them, such as `orthotopezm0zi2zi0zi0zminplace_` --- is stripped, so that
-one function of two builds whose unit ids differ carries one name.
+one function of two builds whose unit ids differ carries one name. A
+module-internal procedure has a symbol only in a build given GHC's
+-fexpose-internal-symbols, `_UNIT_Module_name_UNIQUE_entry`, read as
+`Module_name_entry`, its unique dropped as the unit is; elsewhere GHC labels
+it `.L`, its instructions count under the symbol before it, and a note on
+stderr says so of each binary that carries no such symbol.
 
 Counts are over N, so one run's figures are high by (N + 2)/N where, as in
 orthotope's specialisation benchmark, the harness evaluates a row twice
@@ -99,6 +104,13 @@ GAP = 256
 # a lower-case letter, as base, ghczminternal and most packages', or any
 # holding a `zm`, an encoded dash, which no module name carries.
 UNIT = re.compile(r'^(?:[a-z][a-z0-9]*|[A-Za-z0-9]*zm[A-Za-z0-9]*)_(?=[A-Z])')
+# A module-internal procedure's symbol past its `_` and its unit: the module,
+# the name, the unique and the suffix, the z-encoding leaving no other `_`.
+INTERNAL = re.compile(
+    r'^([A-Z][A-Za-z0-9]*_[A-Za-z0-9]+)_[A-Za-z0-9]+_([a-z]+)$')
+NOTE = ("{} carries no symbol of a module-internal procedure, so each one's"
+        ' instructions count under the symbol before it;'
+        ' -fexpose-internal-symbols gives them symbols')
 INSN = re.compile(r'\s+([0-9a-f]+):\s+(.*)')
 BUMP = re.compile(r'add\s+\$(-?0x[0-9a-f]+),%r12$')
 INFO = re.compile(r'movq\s+\$(0x[0-9a-f]+),(?:-?0x[0-9a-f]+)?\(%r12\)')
@@ -110,7 +122,17 @@ class Unreadable(Exception):
     """The run cannot happen; the message says why."""
 
 
-def strip_unit(name):
+def internal(name):
+    """The INTERNAL match of a module-internal procedure's symbol, or None."""
+    return INTERNAL.match(UNIT.sub('', name[1:])) if name[:1] == '_' else None
+
+
+def stable_name(name):
+    """The name one function carries in every build: without its unit prefix,
+    and an internal procedure's without its leading `_` and its unique."""
+    m = internal(name)
+    if m:
+        return f'{m.group(1)}_{m.group(2)}'
     return UNIT.sub('', name)
 
 
@@ -240,7 +262,7 @@ class Binary:
                 self.hi = self.lo + int(f[2], 16)
         if self.lo is None:
             raise Unreadable(f'{path}: objdump -h lists no .text section')
-        self.syms, self.exact = [], {}
+        self.syms, self.exact, self.internal = [], {}, False
         for line in tool([NM, '-n', path]).splitlines():
             p = line.split()
             if len(p) == 3:
@@ -248,6 +270,8 @@ class Binary:
                 self.exact[a] = p[2]
                 if p[1] in ('T', 't', 'W', 'w'):
                     self.syms.append((a, p[2]))
+                    if p[1] == 't' and internal(p[2]):
+                        self.internal = True
         if not self.syms:
             raise Unreadable(f'{path}: nm lists no text symbol; stripped?')
         self.syms.sort()
@@ -262,7 +286,7 @@ class Binary:
         i = bisect.bisect_right(self.addrs, a) - 1
         if i < 0 or not self.inside(a):
             return 'other', 0
-        return strip_unit(self.syms[i][1]), a - self.syms[i][0]
+        return stable_name(self.syms[i][1]), a - self.syms[i][0]
 
     def place(self, a):
         s, off = self.owner(a)
@@ -272,7 +296,7 @@ class Binary:
         """[lo, hi) of the code from the symbol named sym, by its full or
         stripped name or a suffix of exactly one, to the next symbol."""
         names = sorted({n for _, n in self.syms})
-        hit = [n for n in names if sym in (n, strip_unit(n))]
+        hit = [n for n in names if sym in (n, stable_name(n))]
         if not hit:
             hit = [n for n in names if n.endswith(sym)]
         if len(hit) != 1:
@@ -348,7 +372,7 @@ def allocs(b, cnt, n, least=0.5):
             bumps.append((b.place(a), x, c / n))
         mi = INFO.match(ins)
         if mi and int(mi.group(1), 16) in b.exact:
-            objs[strip_unit(b.exact[int(mi.group(1), 16)])] += c / n
+            objs[stable_name(b.exact[int(mi.group(1), 16)])] += c / n
     return total, bumps, sorted(objs.items(), key=lambda kv: -kv[1])
 
 
@@ -418,9 +442,17 @@ def option(argv, flag, kind, default):
     return default, argv
 
 
-def run(argv):
-    """The subcommand's lines to print and its exit status."""
-    get = binaries()
+def run(argv, notes=None):
+    """The subcommand's lines to print and its exit status, and in notes,
+    where given, a line on each binary whose internal procedures count under
+    the symbols before them."""
+    cached, made = binaries(), []
+
+    def get(path):
+        b = cached(path)
+        if b not in made:
+            made.append(b)
+        return b
     cmd, argv = argv[0], argv[1:]
     out = []
     if cmd == 'allocs':
@@ -491,7 +523,7 @@ def run(argv):
             if lo <= c <= hi:
                 k += 1
                 m = IMM.search(ins) if raw else None
-                name = strip_unit(b.exact.get(int(m.group(1), 16), '')) \
+                name = stable_name(b.exact.get(int(m.group(1), 16), '')) \
                     if m else ''
                 out.append(f'{a:#x} {c:7.2f} {ins}' + (f'  {name}' if name
                                                         else ''))
@@ -512,6 +544,8 @@ def run(argv):
         return out, 1 if miss else 0
     else:
         raise Unreadable(f'no subcommand {cmd}')
+    if notes is not None:
+        notes += [NOTE.format(b.path) for b in made if not b.internal]
     return out, 0
 
 
@@ -565,6 +599,23 @@ BASE = 0x401000
 RUN_A = {0x000: 1, 0x100: 10, 0x110: 10, 0x120: 10, 0x140: 10, 0x150: 5,
          0x160: 10, 0x170: 10, 0x200: 10, 0x210: 10, 0x300: 1, 0x400: 3}
 OUTSIDE = 0x7000000
+# A module-internal procedure as -fexpose-internal-symbols names it, the
+# unique filled in apart, two builds of one function differing there.
+INTERNAL_FIXTURE = r'''
+        .text
+        .globl _start
+_start:
+        ret
+        .org 0x100, 0x90
+        .globl pkgzm1zi0zminplace_ModA_foo_info
+pkgzm1zi0zminplace_ModA_foo_info:
+        ret
+        .org 0x180, 0x90
+_pkgzm1zi0zminplace_ModA_zdwh_UNIQUE_entry:
+        add $0x10, %r12
+        .org 0x190, 0x90
+        ret
+'''
 
 
 def write_run(path, fix, offsets, outside=50, scale=1,
@@ -591,6 +642,22 @@ def write_run(path, fix, offsets, outside=50, scale=1,
     return path
 
 
+def assemble(td, name, text):
+    """The fixture text assembled and linked as td/name, or None where as or
+    ld failed, which it prints."""
+    src, obj, out = (os.path.join(td, name + x) for x in ('.s', '.o', ''))
+    with open(src, 'w') as fh:
+        fh.write(text)
+    for cmd in (['as', '-o', obj, src],
+                ['ld', '-static', f'-Ttext={BASE:#x}', '-e', '_start',
+                 '-o', out, obj]):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f'{" ".join(cmd)} failed: {r.stderr.strip()}')
+            return None
+    return out
+
+
 def checks(bad, td):
     """The self-test's cases, each failure appended to bad; a status
     to exit with where the fixtures cannot be built."""
@@ -599,22 +666,16 @@ def checks(bad, td):
         if shutil.which(t) is None:
             print(f'{t} is not on PATH; the fixture cannot be built')
             return 2
-    src, obj, fix = (os.path.join(td, f) for f in ('fix.s', 'fix.o', 'fix'))
-    with open(src, 'w') as fh:
-        fh.write(FIXTURE)
-    for cmd in (['as', '-o', obj, src],
-                ['ld', '-static', f'-Ttext={BASE:#x}', '-e', '_start',
-                 '-o', fix, obj]):
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f'{" ".join(cmd)} failed: {r.stderr.strip()}')
-            return 2
+    fix = assemble(td, 'fix', FIXTURE)
+    if fix is None:
+        return 2
+    src, obj = fix + '.s', fix + '.o'
     b = Binary(fix)
     if b.region('foo_info') != (BASE + 0x100, BASE + 0x200):
         bad.append(f'region of foo: {b.region("foo_info")}')
     if (b.lo, b.hi) != (BASE, BASE + 0x401):
         bad.append(f'text bounds {b.lo:#x} {b.hi:#x}')
-    names = sorted(strip_unit(n) for _, n in b.syms)
+    names = sorted(stable_name(n) for _, n in b.syms)
     if not {'ModA_foo_info', 'ModA_bar_info', 'GHCziBase_baz_info',
             'stg_gc_noregs'} <= set(names):
         bad.append(f'unit prefixes not stripped: {names}')
@@ -637,12 +698,30 @@ def checks(bad, td):
     # B runs foo's mov twice a call and bar three times.
     rb = {**RUN_A, 0x160: 20, 0x200: 30, 0x210: 30}
     bcg = write_run(os.path.join(td, 'b.cg'), fix, rb)
-    out, rc = run(['bysym', fix, a, fix, bcg, '10'])
+    notes = []
+    out, rc = run(['bysym', fix, a, fix, bcg, '10'], notes)
     if rc != 0 or out[:3] != [
             'total 5.00',
             '     4.00  A      2.00  B      6.00  ModA_bar_info',
             '     1.00  A      6.50  B      7.50  ModA_foo_info']:
         bad.append(f'bysym output: {out[:3]}')
+    if notes != [NOTE.format(fix)]:
+        bad.append(f'the note on a binary without internal symbols: {notes}')
+    i1, i2 = (assemble(td, f'int{k}', INTERNAL_FIXTURE.replace('UNIQUE', u))
+              for k, u in ((1, 'r13A'), (2, 'r9Zq')))
+    if i1 is None or i2 is None:
+        return 2
+    c1 = write_run(os.path.join(td, 'c1.cg'), i1,
+                   {0x100: 10, 0x180: 10, 0x190: 10})
+    c2 = write_run(os.path.join(td, 'c2.cg'), i2,
+                   {0x100: 10, 0x180: 20, 0x190: 20})
+    notes = []
+    out, rc = run(['bysym', i1, c1, i2, c2, '10'], notes)
+    if rc != 0 or notes or out[:3] != [
+            'total 2.00',
+            '     2.00  A      2.00  B      4.00  ModA_zdwh_entry',
+            '     0.00  A      1.00  B      1.00  ModA_foo_info']:
+        bad.append(f'an internal procedure of two builds: {out[:3]} {notes}')
     a2 = write_run(os.path.join(td, 'a2.cg'), fix, RUN_A, scale=2)
     b2 = write_run(os.path.join(td, 'b2.cg'), fix, rb, scale=2)
     out, rc = run(['incr', fix, a, a2, fix, bcg, b2, '10'])
@@ -764,13 +843,16 @@ def main(argv):
     if not argv:
         print(__doc__.split('\n\n')[1], file=sys.stderr)
         return 2
+    notes = []
     try:
-        out, rc = run(argv)
+        out, rc = run(argv, notes)
     except Unreadable as e:
         print(f'cg-read: {e}', file=sys.stderr)
         return 2
     for line in out:
         print(line)
+    for line in notes:
+        print(f'cg-read: note: {line}', file=sys.stderr)
     return rc
 
 

@@ -1725,6 +1725,18 @@ MUTANTS = [
     ('cg-read relative positions accepted', 'cg-read.py',
      "            elif line[:1] in ('+', '-', '*'):\n",
      '            elif False:\n', ST),
+    # cg-read-03 (2026-10-23): a module-internal procedure booked under the
+    # symbol before it, silently; each watched failing its self-test before
+    # it was written down here.
+    ('cg-read no note on a binary without internal symbols', 'cg-read.py',
+     '        notes += [NOTE.format(b.path) for b in made if not b.internal]\n',
+     '        pass\n', ST),
+    ('cg-read internal symbols not recognised', 'cg-read.py',
+     '                        self.internal = True\n',
+     '                        pass\n', ST),
+    ("cg-read an internal procedure's unique kept", 'cg-read.py',
+     "        return f'{m.group(1)}_{m.group(2)}'\n",
+     "        return UNIT.sub('', name)\n", ST),
     # cachegrind-per-call-01 (2026-10-17): cg-percall.sh's shell division
     # truncated; the cells mode that replaces it, each watched failing its
     # self-test before it was written down here.

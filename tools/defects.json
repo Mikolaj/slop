@@ -6241,6 +6241,37 @@
    }
   },
   {
+   "id": "cg-read-03",
+   "program": "cg-read.py",
+   "name": "a module-internal procedure, which GHC labels .L and so leaves without a symbol in the binary unless built with -fexpose-internal-symbols, was booked under the global symbol before it, and nothing in the output said so",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "a procedure labelled .L after a global symbol, with no symbol of its own",
+   "ok": "the booking as before, and a note on stderr that the binary carries no symbol of a module-internal procedure and that -fexpose-internal-symbols gives them one",
+   "bug": "foo's 1.00 a call and the internal procedure's 2.00 printed as ModA_foo_info's 3.00, with nothing saying so",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on orthotope's specialisation benchmark (2026-10-19 and 2026-10-23): no local symbol of its binary names a GHC procedure, and $w$s$w$ccompare1_info's symbol spans about 600 KB of OpsDynamic's code, so incr booked 7.5M instructions a call of a rerank2 row, and a fall of 0.16M between two builds, to a comparison the row does not make. -fexpose-internal-symbols gives each internal procedure a local symbol, _UNIT_Module_name_UNIQUE_entry, and in a probe left every code byte as it was; cg-read now books such a symbol as Module_name_entry, its leading underscore and unique dropped so that one function of two builds carries one name.",
+   "plant_cmd": "cat > fix.s <<'EOF_FIX_S'\n        .text\n        .globl _start\n_start:\n        nop\n        ret\n        .org 0x100, 0x90\n        .globl pkgzm1zi0zminplace_ModA_foo_info\npkgzm1zi0zminplace_ModA_foo_info:\n        ret\n        .org 0x180, 0x90\n        # A module-internal procedure as GHC labels it without\n        # -fexpose-internal-symbols: .L, so no symbol in the binary.\n.LModA_internal:\n        add $0x10, %r12\n        .org 0x190, 0x90\n        ret\nEOF_FIX_S\nas -o fix.o fix.s && ld -static -Ttext=0x401000 -e _start -o fix fix.o\ncat > a.cg <<'EOF_A_CG'\n# callgrind format\nversion: 1\ncreator: callgrind-3.22.0\ncmd: ./fix --iters 10\npart: 1\n\npositions: instr line\nevents: Ir\nsummary: 1\n\nob=(2) fix\nfl=???\nfn=foo\n0x401100 0 10\n0x401180 0 10\n0x401190 0 10\nEOF_A_CG",
+   "invoke": [
+    "bysym",
+    "{tmp}/fix",
+    "{tmp}/a.cg",
+    "{tmp}/fix",
+    "{tmp}/a.cg",
+    "10"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "     0.00  A      3.00  B      3.00  ModA_foo_info",
+    "carries no symbol of a module-internal procedure"
+   ],
+   "bug_exit": 0,
+   "bug_text": "     0.00  A      3.00  B      3.00  ModA_foo_info",
+   "bug_absent": "carries no symbol of a module-internal procedure"
+  },
+  {
    "id": "cachegrind-per-call-01",
    "program": "cachegrind-per-call.py",
    "name": "exact instructions a call by callgrind were divided in shell integers, truncating, and the large ravel cell was run at 20 calls, few enough for a collection to move its count",

@@ -881,7 +881,8 @@ element's evaluation, evaluated already or not, is GHC
   the dump labels `.L` has no symbol in the binary, and callgrind books its code
   under the nearest global symbol before it in the dump, so `seq` runs
   over that symbol, and the return point is the one whose loads match
-  the offsets listed.
+  the offsets listed; a build given `-fexpose-internal-symbols` gives
+  the procedure its own symbol.
 - A count by `perf-per-call.py` decides.
 
 **Read:** a loop costs only as often as it runs, so read the ranked list
@@ -1054,19 +1055,23 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
 - `tools/cg-read.py` reads a benchmark binary's callgrind runs, made with
   `valgrind --tool=callgrind --dump-instr=yes --compress-strings=no --compress-pos=no`,
   against the binary's symbols and disassembly, each symbol's z-encoded unit
-  prefix stripped so that a function keeps its name across builds: `bysym` gives
-  instructions a call by symbol in two runs, `incr` the same between N and 2N
-  calls of each of two binaries, which cancels the process's setup, `allocs`
-  the heap-pointer bumps executed at least half as often as the calls
-  and the info pointers stored into the memory they allocate, `region`
-  the executed instructions of one symbol's code in two runs, diffed, and `seq`
-  one run's, filtered by count a call. Its disassembly restarts at every
-  executed address a sweep did not decode: a linear sweep through one of GHC's
-  info tables falls out of step with the code after it, dropping executed
-  instructions and printing the table's bytes as code. In orthotope's
-  specialisation benchmark a run of N calls executes the row N + 2 times, so one
-  run's counts over N are high by (N + 2)/N, and `incr`'s are not. `sweep`
-  reports whether every `perf record` sample of a range decodes
+  prefix stripped so that a function keeps its name across builds,
+  and a module-internal procedure's unique with it. Such a procedure has
+  a symbol only in a build given `-fexpose-internal-symbols`, which
+  in a one-module probe on GHC 10.1.20261019 changed no code byte; elsewhere
+  its instructions count under the symbol before it, which the tool notes
+  on stderr. `bysym` gives instructions a call by symbol in two runs, `incr`
+  the same between N and 2N calls of each of two binaries, which cancels
+  the process's setup, `allocs` the heap-pointer bumps executed at least half
+  as often as the calls and the info pointers stored into the memory they
+  allocate, `region` the executed instructions of one symbol's code in two runs,
+  diffed, and `seq` one run's, filtered by count a call. Its disassembly
+  restarts at every executed address a sweep did not decode: a linear sweep
+  through one of GHC's info tables falls out of step with the code after it,
+  dropping executed instructions and printing the table's bytes as code.
+  In orthotope's specialisation benchmark a run of N calls executes the row N +
+  2 times, so one run's counts over N are high by (N + 2)/N, and `incr`'s
+  are not. `sweep` reports whether every `perf record` sample of a range decodes
   as an instruction start in a linear sweep from the range's start; settle
   that before reading a hot loop off the samples and objdump at the hot
   addresses, and where it reports a miss, read the loop from `seq` instead.
