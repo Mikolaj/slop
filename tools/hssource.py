@@ -7,7 +7,8 @@ directory first on sys.path, as for common.py.
 
 hs_paths walks a tree's .hs files in sorted order, the build directories,
 dist and dist-*, and hidden ones passed over. imports returns a module's
-aliases and the modules it imports unqualified.
+aliases and the modules it imports unqualified, and exported the names its
+export list gives, None where it has none or names the module itself.
 
 strip_comments blanks comments but keeps pragmas and every line break, so
 a line number still names its line; an operator holding dashes, such as
@@ -65,6 +66,17 @@ def imports(src):
         if not (m.group(1) or m.group(3)) and (m.group(5) or not m.group(6)):
             opens.append(m.group(2))
     return aliases, opens
+
+
+def exported(s):
+    """The names a module's export list gives, or None where it exports
+    all of itself."""
+    m = re.search(r'^module\s+([\w.]+)\s*(\(.*?\))?\s*where',
+                  strip_comments(s), re.S | re.M)
+    if not m or m.group(2) is None or re.search(
+            r'\bmodule\s+%s\b' % re.escape(m.group(1)), m.group(2)):
+        return None
+    return set(re.findall(r"(?<![\w'.])([a-z_][\w']*)", m.group(2)))
 
 
 # What a scan for comments steps over whole, so that a {- or -- inside

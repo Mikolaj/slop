@@ -377,6 +377,11 @@ MUTANTS = [
     # bang-lazy-check: an unrecognised flag read as a ROOT (bang-lazy-check-03)
     ('bang-lazy-check unrecognised flag read as a ROOT', 'bang-lazy-check.py',
      "    if not args or unknown:\n", "    if not args:\n", ST),
+    # bang-lazy-check: a binding its module does not export, missing from the
+    # demand dump, put down to INLINE again (bang-lazy-check-08)
+    ('bang-lazy-check unexported binding put down to INLINE', 'bang-lazy-check.py',
+     "            if names is not None and cand['name'] not in names:\n",
+     "            if False:\n", ST),
     # bench-baseline: a regression missing a field tracebacks at 1 again
     # (bench-baseline-04)
     ('bench-baseline malformed regression tracebacks instead of exit 2', 'common.py',

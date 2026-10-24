@@ -6761,6 +6761,30 @@
    }
   },
   {
+   "id": "bang-lazy-check-08",
+   "program": "bang-lazy-check.py",
+   "name": "a top-level binding absent from its dumped module's demand signatures was put down to INLINE, though the dump lists exported bindings alone, so a binding the module does not export, its Core kept, was sent to look for an INLINE pragma it does not carry",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "module M (g) where, f !x 0 = x and f x _ = 1 NOINLINE and not exported, and a demand dump naming M.g alone",
+   "ok": "f's verdict says M does not export it",
+   "bug": "f's verdict asks whether it was inlined away",
+   "proved": "ran",
+   "harm": "fired",
+   "harm_count": 1,
+   "discovery": "in-use",
+   "notes": "Fired on orthotope (2026-10-24), on a snapshot of pr-mikolaj-toVectorListT: bench/Summed.hs's sumView, which Summed does not export and whose copies its Core keeps. Watched the same day on GHC HEAD 10.1.20261019 and 9.12.4: a NOINLINE f that M does not export stays in M's Core and is missing from M.dump-dmd-signatures. The case's dump is written by hand in that format.",
+   "plant_cmd": "mkdir S && printf 'module M (g) where\\n\\nf :: Int -> Int -> Int\\nf !x 0 = x\\nf x _ = 1\\n{-# NOINLINE f #-}\\n\\ng :: Int -> Int\\ng y = f y y\\n' > S/M.hs && printf '\\n==================== Demand signatures ====================\\n\\nM.g: <1L>\\n' > M.dump-dmd-signatures",
+   "invoke": [
+    "{tmp}/S",
+    "--dumps",
+    "{tmp}/*.dump-dmd-signatures"
+   ],
+   "expect_text": "not exported",
+   "expect_absent": "inlined away",
+   "bug_text": "inlined away"
+  },
+  {
    "id": "lazy-reads-02",
    "program": "lazy-reads.py",
    "name": "an unreadable .hs file under TREE stopped the run with a traceback at exit 1, the status of findings, where 2 is promised for a run that did not happen",

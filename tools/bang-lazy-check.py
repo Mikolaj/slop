@@ -53,16 +53,18 @@ whole signature, not just the one argument's demand, so that a
 dictionary-argument miscount in the trailing-slot position mapping is
 visible to the reader. An UNVERIFIED verdict names its cause: local
 definitions never appear in dumps; a module with no dump file was built
-without the flags or came from the store; a dumped module lacking the
-name usually means INLINE dissolved the binding, so its strictness lives
-at the call sites. The unverified residue needs a reader or an extracted
-probe module. The reader's rules, each measured in the selftest: a
-literal or constructor pattern forces; a bang forces only the paths on
-which it is reached (earlier pattern failure in the same equation skips
-it); guards force their scrutinees on every guard path; a plain return of
-the argument forces it, a monadic `return arg` does not; a diverging body
-is a strict path; and strictness can arrive with no bang at all, via a
-strict callee or the recursive fixpoint.
+without the flags or came from the store; a binding its module does not
+export is missing from the dump, which lists exported bindings alone on
+GHC HEAD 10.1.20261019 and 9.12.4, so its Core is read instead; and an
+exported one missing usually means INLINE dissolved the binding, so its
+strictness lives at the call sites. The unverified residue needs a reader
+or an extracted probe module. The reader's rules, each measured in the
+selftest: a literal or constructor pattern forces; a bang forces only
+the paths on which it is reached (earlier pattern failure in the same
+equation skips it); guards force their scrutinees on every guard path; a
+plain return of the argument forces it, a monadic `return arg` does not;
+a diverging body is a strict path; and strictness can arrive with no bang
+at all, via a strict callee or the recursive fixpoint.
 
 Known limitations: equations whose argument list continues on the next
 source line are skipped (counted per file, and the count also includes
@@ -118,7 +120,7 @@ import tempfile
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hssource import blank_comments, hs_paths  # noqa: E402
+from hssource import blank_comments, exported, hs_paths  # noqa: E402
 
 KEYWORDS = {
     'let', 'in', 'where', 'do', 'case', 'of', 'if', 'then', 'else',
@@ -390,6 +392,18 @@ def verdict(cand, sigs, dumped_stems):
     quals = [q for q in entry if q.rsplit('.', 2)[-2:-1] == [stem]]
     if not quals:
         if stem in dumped_stems:
+            # The dump lists exported bindings alone: one the export list
+            # leaves out is missing even where the Core keeps it, which the
+            # verdict put down to INLINE (bang-lazy-check-08).
+            try:
+                with open(cand['file'], encoding='utf-8',
+                          errors='replace') as fh:
+                    names = exported(fh.read())
+            except OSError:
+                names = None
+            if names is not None and cand['name'] not in names:
+                return ('UNVERIFIED (not exported, and the demand dump lists'
+                        ' exported bindings alone -- read its Core)')
             return ('UNVERIFIED (module dumped but name absent -- inlined '
                     'away? check for an INLINE pragma, or read call sites)')
         return ('UNVERIFIED (no dump for this module -- built without the '
@@ -497,7 +511,7 @@ def run(roots, dump_pats, allow=None):
 SELFTEST_TOP = '''\
 {-# LANGUAGE BangPatterns #-}
 module SelfTest (loopW, loopW1, loopW2, loopT, loopE, loopG, cnt,
-                 benchGo, mret, gv) where
+                 benchGo, mret, gv, useHid) where
 
 -- Wildcard base case: lazy join; the bangs bind only their own equation.
 loopW :: Int -> Int -> Int
@@ -562,6 +576,16 @@ mret !k !acc = mret (k - 1) (acc + k)
 gv :: Int -> Int -> Int
 gv n acc | n == 0 = acc
 gv !n !acc = gv (n - 1) (acc + n)
+
+-- Not exported and NOINLINE, its Core kept: the dump, listing exported
+-- bindings alone, lacks it, and the verdict must say so, not blame INLINE.
+{-# NOINLINE hid #-}
+hid :: Int -> Int -> Int
+hid 0 _ = 0
+hid !k !acc = hid (k - 1) (acc + k)
+
+useHid :: Int -> Int
+useHid k = hid k 0
 '''
 
 # Scanner-shape control mirroring FastReshape.hs: let-bound equations, one
@@ -592,6 +616,7 @@ EXPECT_TOP = {
     ('mret', 2): ('STRONG', 'CONFIRMED'),
     ('gv', 1): ('WEAK', 'CLEARED'),
     ('gv', 2): ('WEAK', 'CLEARED'),
+    ('hid', 2): ('STRONG', 'UNVERIFIED'),
 }
 # loopE (bottom body), loopW1 (banged wildcard plus pure return), benchGo
 # (pure return), cnt and loopG must be absent.
@@ -644,6 +669,11 @@ def selftest():
             if gotm.get(key) != want:
                 bad.append('%s arg %d: expected markers [%s], got [%s]'
                            % (key + (want, gotm.get(key))))
+        hid = [verdict(c, sigs, stems) for c in cands
+               if (c['name'], c['arg']) == ('hid', 2)]
+        if hid and not hid[0].startswith('UNVERIFIED (not exported'):
+            bad.append('hid, which SelfTest does not export, not named'
+                       ' so: %s' % hid[0])
         lcands, _ = find_candidates(loc)
         lgot = {(c['name'], c['arg']) for c in lcands
                 if c['local'] and c['strength'] == 'STRONG'}
@@ -709,8 +739,8 @@ def selftest():
             print('FAIL: %s' % b)
         return 1
     print('ok:   all %d dump-checked verdicts, %d marker lines, %d local'
-          ' flags, the four --allow verdicts, the stops and the'
-          ' foreign-module verdict as expected'
+          ' flags, the four --allow verdicts, the stops, and the'
+          ' foreign-module and unexported verdicts as expected'
           % (len(EXPECT_TOP), len(EXPECT_MARKERS), len(EXPECT_LOCAL)))
     return 0
 

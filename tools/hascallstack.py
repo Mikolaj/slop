@@ -47,7 +47,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hssource import strip_comments  # noqa: E402
+from hssource import exported, strip_comments  # noqa: E402
 
 MODS = ['Internal', 'DynamicG', 'RankedG', 'ShapedG', 'Dynamic', 'DynamicS',
         'DynamicU', 'Ranked', 'RankedS', 'RankedU', 'Shaped', 'ShapedS',
@@ -267,17 +267,6 @@ def drop_hcs(sig):
     if new == ctx:
         new = re.sub(r',\s*HasCallStack', '', ctx, count=1)
     return head + new + rest
-
-
-def exported(s):
-    """The names a module's export list gives, or None where it exports
-    all of itself."""
-    m = re.search(r'^module\s+([\w.]+)\s*(\(.*?\))?\s*where',
-                  strip_comments(s), re.S | re.M)
-    if not m or m.group(2) is None or re.search(
-            r'\bmodule\s+%s\b' % re.escape(m.group(1)), m.group(2)):
-        return None
-    return set(re.findall(r"(?<![\w'.])([a-z_][\w']*)", m.group(2)))
 
 
 def stack_import(s):
