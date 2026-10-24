@@ -1215,11 +1215,20 @@ MUTANTS = [
      "            elif n is not None and n != k[1] and n != cfg.get(\n",
      "            elif False and n != cfg.get(\n", ST),
     ('hascallstack a call passing no name accepted', 'hascallstack.py',
-     "                    if not (passes(texts, g, lns) or any(\n",
+     "                    if not (passes(texts, g, lns, own) or any(\n",
      "                    if not (True or any(\n", ST),
     ("hascallstack a class's name not allowed", 'hascallstack.py',
      "                    'classes', {}).get(k[0]) and n not in {\n",
      "                    'classes', {}).get('') and n not in {\n", ST),
+    # hascallstack-04 and -05 (2026-10-24): a message wrapped below `error $`
+    # read, and a name the caller's own errors carry accepted; each watched
+    # failing its self-test before it was written down here.
+    ('hascallstack a wrapped message unread', 'hascallstack.py',
+     "                    errors.append((i,) + message(continued(lines, i)))\n",
+     "                    errors.append((i,) + message(lines[i]))\n", ST),
+    ("hascallstack the caller's own names refused", 'hascallstack.py',
+     "                    if not (passes(texts, g, lns, own) or any(\n",
+     "                    if not (passes(texts, g, lns) or any(\n", ST),
     # pragma-census (2026-10-10): each watched failing its self-test before
     # it was written down here.
     ('pragma-census HasCallStack taken for a class', 'pragma-census.py',

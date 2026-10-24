@@ -22,16 +22,17 @@ a name passed in and the call passes the caller's name as a literal. A contract
 check guards against a bug in orthotope and adds no stack, nor does an assert,
 and class methods take none, a stack on one binding every instance.
 
-An error's message is every string literal on its line from `error` on,
-and its name the word before the first literal's colon, or the name its
-message opens with where that is passed in. The rule reads the wording, so
-the wording is checked too: an error in Data.Array.Internal that does not say
-"violated contract", and one anywhere that says "impossible" or "shouldn't
-happen", are findings. So are an error naming neither its function nor
-a caller of it, an argument error naming its own function where its module
-does not export it, a call of a function whose errors open with a name passed
-in that passes neither the caller's name nor a name of the caller's own,
-and a stack-taking function that calls itself, each level of which would push
+An error's message is every string literal from `error` on, on its line and
+the lines below it indented deeper, which continue it, and its name the word
+before the first literal's colon, or the name its message opens with where
+that is passed in. The rule reads the wording, so the wording is checked
+too: an error in Data.Array.Internal that does not say "violated contract",
+and one anywhere that says "impossible" or "shouldn't happen", are findings.
+So are an error naming neither its function nor a caller of it, an argument
+error naming its own function where its module does not export it, a call of
+a function whose errors open with a name passed in that passes neither the
+caller's name nor a name of the caller's own, which its own errors carry, and
+a stack-taking function that calls itself, each level of which would push
 a frame of its own where a stack-free local worker pushes none.
 
 Reports each signature the rule would change and each module whose
@@ -130,7 +131,7 @@ def parse(cfg, texts):
                                        r"([a-z_][\w']*)(?![\w'])", l):
                     occ.setdefault((q, f), []).append(i)
                 if re.search(r'\berror\b', l):
-                    errors.append((i,) + message(lines[i]))
+                    errors.append((i,) + message(continued(lines, i)))
             funs[(m, name)] = dict(
                 sig=(k, sig_end), body=(sig_end, j),
                 hcs='HasCallStack' in ' '.join(lines[k:sig_end]),
@@ -160,6 +161,19 @@ def graph(funs, imports):
     return edges
 
 
+def continued(lines, i):
+    """Line i with the lines after it indented deeper, which continue its
+    expression, so that a message wrapped below `error $` is read
+    (hascallstack-04)."""
+    ind = len(lines[i]) - len(lines[i].lstrip())
+    out = [lines[i]]
+    for l in lines[i + 1:]:
+        if not l.strip() or len(l) - len(l.lstrip()) <= ind:
+            break
+        out.append(l.strip())
+    return ' '.join(out)
+
+
 def message(line):
     """(message, name) of the `error` call on the line."""
     tail = line[line.index('error') if 'error' in line else 0:]
@@ -173,10 +187,12 @@ def message(line):
     return ' '.join(lits), name
 
 
-def passes(texts, g, lns):
-    """Whether g's calls on lns pass g's own name as a literal."""
+def passes(texts, g, lns, names=()):
+    """Whether g's calls on lns pass as a literal g's own name or one of
+    names, those g's own errors carry (hascallstack-05)."""
     lines = texts[g[0]].split('\n')
-    return any('"%s"' % g[1] in lines[i] for i in lns)
+    return any('"%s"' % n in lines[i] for n in (g[1],) + tuple(names)
+               for i in lns)
 
 
 def argument_errors(d):
@@ -341,7 +357,9 @@ def check(cfg, texts):
                 out.append('error worded as neither: ' + at)
             if isinstance(n, tuple):
                 for g, lns in sorted(callers.items()):
-                    if not (passes(texts, g, lns) or any(
+                    own = tuple(m for _, _, m in funs[g]['errors']
+                                if isinstance(m, str))
+                    if not (passes(texts, g, lns, own) or any(
                             isinstance(m, tuple)
                             for _, _, m in funs[g]['errors'])):
                         out.append('a call passes no name of its caller: %s'
@@ -555,6 +573,24 @@ def self_test():
                 'error names elsewhere, neither its function nor a caller',
                 'error worded as neither', 'error worded as neither']:
         bad.append('after the rewrite: %s' % out)
+    # A contract's message wrapped below `error $` (hascallstack-04), and
+    # a helper passing on a name its own errors carry (hascallstack-05).
+    small = dict(own='T', mods=['A'], path={'A': 'A.hs'}, internal='A')
+    wrapped = {'A': 'module T.A where\nm :: [Int] -> Int\nm = e\n'
+                    'e :: [Int] -> Int\ne [] = error $\n'
+                    '    "e: violated contract: empty"\ne xs = maximum xs\n'}
+    if check(small, wrapped)[0]:
+        bad.append('wrapped message: %s' % check(small, wrapped)[0])
+    small['internal'] = 'X'
+    served = {'A': 'module T.A where\nop :: [Int] -> Int\nop = w id\n'
+                   'w :: (Int -> Int) -> [Int] -> Int\n'
+                   'w _ [] = error "op: empty"\nw f xs = h "op" (map f xs)\n'
+                   'h :: String -> [Int] -> Int\n'
+                   'h name [_] = error $ name ++ ": one element"\n'
+                   'h _ xs = sum xs\n'}
+    passed = [o for o in check(small, served)[0] if 'passes no name' in o]
+    if passed:
+        bad.append("a name of the caller's own: %s" % passed)
     clean = dict(FIXTURE)
     clean['A'] = re.sub(r'grow ::.*?\n\n', '', clean['A'], flags=re.S)
     clean['C'] = clean['C'][:clean['C'].index('bad ::')]
