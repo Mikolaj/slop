@@ -107,6 +107,13 @@ Not a check: the conditions every timing below assumes.
   does not move.
 - A time difference under about 10% decides nothing without instruction counts:
   an unchanged row's ratio ranged from 0.86 to 0.98 across pairs of builds.
+- In an instruction count a register-to-register `xchg` costs what a move does,
+  though it takes two micro-ops on this host's Zen 3, and a spill and its reload
+  cost two instructions, the round trip through memory nothing: where a change
+  trades one for another, `llvm-mca-18 -mcpu=znver3` estimates a block's latency
+  and throughput, and a timing settles it. On a GHC join fixup whose spills,
+  reloads and moves became nine `xchg`, it estimated one pass at 4 cycles
+  against 10, and repeated passes at 3.0 cycles each against 2.2.
 - An instruction count decides only at the cells it counts: count the large size
   and every view the change's code takes, a cost having twice gone unseen
   at the cells left out. Read gains and costs at one threshold, reporting
