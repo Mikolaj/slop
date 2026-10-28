@@ -1,0 +1,281 @@
+The layout's cold set built in GHC.CmmToAsm: an experiment, not adopted
+=======================================================================
+
+A patch to GHC's native code generator, on top of the linear-allocator series:
+the for-review branch of ~/slop/ghc at 4328c39640 ("Document behaviour
+of the NCG's CFG, layout and register allocators", on merged-mrs 12bd4c0c7a).
+Apply it from the root of a checkout of that commit:
+
+    git apply ghc-ncg-layout-cold-set.patch
+
+git apply skips this header.  The patch was checked with `git apply --check`
+against that tree, and the compiler built from it.
+
+What the series does
+--------------------
+
+The series treats the blocks that follow a failed heap or stack check as cold
+in two places after register allocation: the chain layout's back-edge rule
+(preferBackEdges in sequenceChain, GHC.CmmToAsm.BlockLayout) raises no back edge
+leaving one, and static prediction (loopHeads in staticBranchPrediction,
+GHC.CmmToAsm.CFG) counts no loop as headed by a block whose back edges all leave
+one.  Both find the set with coldBlocks, which infers it from the final CFG:
+checkFailures' blocks (those an edge tagged HeapStackCheck enters, and their
+successors) and the blocks the register allocator put after one of them,
+recognised by a single out-edge whose source is AsmCodeGen.
+
+Two shapes escape that inference, as the TODO at coldBlocks says:
+
+  - In a procedure needing more stack than maxSpillSlots, allocMoreStack splits
+    each entry block into a stack allocation jumping to a new block that holds
+    the old code.  Where the garbage collector returns to such a block, the new
+    block carries the back edge, and its out-edges are the old block's,
+    not the code generator's, so it is missed.
+
+  - A fixup block F that the allocator puts on a check's failure edge H -> G
+    takes that edge's HeapStackCheck tag on H -> F (addNodesBetween), so F
+    counts as the failure target and G as its successor, and the block
+    the garbage collector returns to, after G, is missed.
+
+What the patch does
+-------------------
+
+It builds the set in GHC.CmmToAsm, where the blocks inserted after allocation
+are known (layoutCold in cmmNativeGen): the allocator's set (checkFailures
+of the native CFG, before any block is inserted), the block allocMoreStack moves
+the code of a cold entry block into (stack_updt_blks), and the fixup blocks
+on an edge out of or into a cold block (cfgRegAllocUpdates).  It passes the set
+through optimizeCFG, staticPredCfg, mkGlobalWeights and staticBranchPrediction
+to loopHeads, and through sequenceTop and sequenceChain to preferBackEdges,
+in place of both calls of coldBlocks.  The graph allocator's call
+of mkGlobalWeights (slurpSpillCostInfo) keeps coldBlocks, its frequencies
+changing no code.
+
+What it measured
+----------------
+
+On x86-64, against the series' tip without it:
+
+  - nofib at -O2: the objects of real/fulsom, real/scs and spectral/hartel/ida
+    change, each in one procedure laid out anew; their instruction counts move
+    by +0.0000%, +0.0001% and +0.0008%;
+  - containers' benchmarks: no object changes;
+  - vector's benchmarks: none moves beyond its noise;
+  - the compiler's allocation: perf/compiler's T9961 at -O0 +0.034%, T12707
+    at -O0 +0.012%, T3294 at -O0 +0.005%, T9961 at -O +0.015%, the rest within
+    the runs' spread; compiling nofib -0.008%.
+
+The figures for nofib, containers and vector were taken on an earlier version
+of the patch, whose code differed only in SpillCost's frequency map, since made
+a where binding; the compiler's allocation, measured again with the patch
+as it stands, came out the same to the byte.
+
+Why it was not adopted
+----------------------
+
+It moved no figure measured, it costs compile allocation, and it threads a new
+argument through calls that the open !16687 (per-procedure CPU target
+attributes) also changes.  The TODO at coldBlocks records the experiment.
+
+It serves only the series' uses of coldBlocks.  The other TODOs about
+these blocks, at checkFailures and in the linear allocator (linearRA_SCCs'
+deferral, wideMoveDests' candidates, and regClobbers, whose TODO measured
+leaving them out), concern the set the allocator takes, before any block
+that the patch's set adds exists, so that there the two sets are equal; what
+they ask for is a better classification of that set (a continuation that a call
+also returns to, a failure target that another edge also enters) or block
+frequencies, as static prediction computed in a Cmm pass would give (Note
+[Static Branch Prediction]).
+
+diff -ru a/compiler/GHC/CmmToAsm/BlockLayout.hs b/compiler/GHC/CmmToAsm/BlockLayout.hs
+--- a/compiler/GHC/CmmToAsm/BlockLayout.hs	2026-10-29 05:28:54.913214200 +0100
++++ b/compiler/GHC/CmmToAsm/BlockLayout.hs	2026-10-29 05:28:54.914064008 +0100
+@@ -677,11 +677,12 @@
+ sequenceChain :: forall a i. Instruction i
+               => LabelMap a -- ^ Keys indicate an info table on the block.
+               -> CFG -- ^ Control flow graph and some meta data.
++              -> LabelSet -- ^ Blocks after a failed heap or stack check.
+               -> [GenBasicBlock i] -- ^ List of basic blocks to be placed.
+               -> [GenBasicBlock i] -- ^ Blocks placed in sequence.
+-sequenceChain _info _weights    [] = []
+-sequenceChain _info _weights    [x] = [x]
+-sequenceChain  info weights     blocks@((BasicBlock entry _):_) =
++sequenceChain _info _weights _ [] = []
++sequenceChain _info _weights _ [x] = [x]
++sequenceChain  info weights cold blocks@((BasicBlock entry _):_) =
+     let edges = infoEdgeList weights
+         directEdges :: [CfgEdge]
+         directEdges = sortBy (flip compare) $ preferBackEdges $ mapMaybe relevantWeight edges
+@@ -718,7 +719,6 @@
+               | mapNull backs = es
+               | otherwise     = map raise es
+               where
+-                cold = coldBlocks weights
+                 allBacks = findBackEdges entry weights
+                 -- each loop head, the entry block's one successor apart, to the
+                 -- blocks outside the cold set that its back edges leave
+@@ -863,11 +863,12 @@
+     :: Instruction instr
+     => NcgImpl statics instr jumpDest
+     -> Maybe CFG -- ^ CFG if we have one.
++    -> LabelSet -- ^ Blocks after a failed heap or stack check.
+     -> NatCmmDecl statics instr -- ^ Function to serialize
+     -> UniqDSM (NatCmmDecl statics instr)
+ 
+-sequenceTop _       _           top@(CmmData _ _) = pure top
+-sequenceTop ncgImpl edgeWeights (CmmProc info lbl live (ListGraph blocks)) = do
++sequenceTop _       _           _ top@(CmmData _ _) = pure top
++sequenceTop ncgImpl edgeWeights cold (CmmProc info lbl live (ListGraph blocks)) = do
+     let config     = ncgConfig ncgImpl
+         platform   = ncgPlatform config
+ 
+@@ -876,7 +877,7 @@
+                       | ncgCfgBlockLayout config
+                       , backendMaintainsCfg platform
+                       , Just cfg <- edgeWeights
+-                      -> {-# SCC layoutBlocks #-} sequenceChain info cfg blocks
++                      -> {-# SCC layoutBlocks #-} sequenceChain info cfg cold blocks
+ 
+                       -- Old algorithm without edge weights
+                       | ncgCfgWeightlessLayout config
+diff -ru a/compiler/GHC/CmmToAsm/CFG.hs b/compiler/GHC/CmmToAsm/CFG.hs
+--- a/compiler/GHC/CmmToAsm/CFG.hs	2026-10-29 05:28:54.917805087 +0100
++++ b/compiler/GHC/CmmToAsm/CFG.hs	2026-10-29 05:28:54.918655465 +0100
+@@ -765,10 +765,13 @@
+       | otherwise             = go s (succs s) ((n, ss) : stack)
+                                    (setInsert s seen) (setInsert s onStack) acc
+ 
+-optimizeCFG :: Bool -> Weights -> RawCmmDecl -> CFG -> CFG
+-optimizeCFG _ _ (CmmData {}) cfg = cfg
+-optimizeCFG doStaticPred weights proc@(CmmProc _info _lab _live graph) cfg =
+-  (if doStaticPred then staticPredCfg (g_entry graph) else id) $
++-- | The set given holds the blocks that follow a failed heap or stack check, as
++-- layoutCold in GHC.CmmToAsm builds them; static prediction takes it in place
++-- of 'coldBlocks'.
++optimizeCFG :: Bool -> Weights -> LabelSet -> RawCmmDecl -> CFG -> CFG
++optimizeCFG _ _ _ (CmmData {}) cfg = cfg
++optimizeCFG doStaticPred weights cold proc@(CmmProc _info _lab _live graph) cfg =
++  (if doStaticPred then staticPredCfg (g_entry graph) cold else id) $
+     optHsPatterns doStaticPred weights proc $ cfg
+ 
+ -- | Modify branch weights based on educated guess on
+@@ -860,11 +863,11 @@
+           | otherwise = False
+ 
+ -- | Convert block-local branch weights to global weights.
+-staticPredCfg :: BlockId -> CFG -> CFG
+-staticPredCfg entry cfg = cfg'
++staticPredCfg :: BlockId -> LabelSet -> CFG -> CFG
++staticPredCfg entry cold cfg = cfg'
+   where
+     (_, globalEdgeWeights) = {-# SCC mkGlobalWeights #-}
+-                             mkGlobalWeights entry cfg
++                             mkGlobalWeights entry cold cfg
+     cfg' = {-# SCC rewriteEdges #-}
+             mapFoldlWithKey
+                 (\cfg from m ->
+@@ -1043,8 +1046,8 @@
+ 
+ {-# NOINLINE mkGlobalWeights #-}
+ {-# SCC mkGlobalWeights #-}
+-mkGlobalWeights :: HasDebugCallStack => BlockId -> CFG -> (LabelMap Double, LabelMap (LabelMap Double))
+-mkGlobalWeights root localCfg
++mkGlobalWeights :: HasDebugCallStack => BlockId -> LabelSet -> CFG -> (LabelMap Double, LabelMap (LabelMap Double))
++mkGlobalWeights root cold localCfg
+   | null localCfg = panic "Error - Empty CFG"
+   | otherwise
+   = (blockFreqs', edgeFreqs')
+@@ -1066,7 +1069,7 @@
+     -- a proper subset of an enclosing one's
+     bodies' = map calcBody (sortOn (setSize . snd) bodies)
+ 
+-    estimatedCfg = staticBranchPrediction root loopResults localCfg
++    estimatedCfg = staticBranchPrediction root cold loopResults localCfg
+     -- Normalize the weights to probabilities and apply heuristics
+     nodeProbs = cfgEdgeProbabilities estimatedCfg toVertex
+ 
+@@ -1161,18 +1164,18 @@
+ -- See Note [Static Branch Prediction]
+ -- TODO: This should be combined with optimizeCFG
+ {-# SCC staticBranchPrediction #-}
+-staticBranchPrediction :: BlockId -> LoopInfo -> CFG -> CFG
+-staticBranchPrediction _root (LoopInfo l_backEdges _ l_loops) cfg =
++staticBranchPrediction :: BlockId -> LabelSet -> LoopInfo -> CFG -> CFG
++staticBranchPrediction _root cold (LoopInfo l_backEdges _ l_loops) cfg =
+     -- pprTrace "staticEstimatesOn" (ppr (cfg)) $
+     foldl' update cfg nodes
+   where
+     nodes = getCfgNodes cfg
+     backedges = S.fromList $ l_backEdges
+-    -- The heads of loops but those whose back edges all leave a block of
+-    -- 'coldBlocks': such a back edge closes the cycle a failed heap or stack
+-    -- check makes through the garbage collector, and lehPredicts says nothing
+-    -- about a branch into a loop head, so it would say nothing about the
+-    -- test that stays in a loop holding a check.  A back edge leaving a
++    -- The heads of loops but those whose back edges all leave a block of the
++    -- cold set given: such a back edge closes the cycle a failed heap or
++    -- stack check makes through the garbage collector, and lehPredicts says
++    -- nothing about a branch into a loop head, so it would say nothing about
++    -- the test that stays in a loop holding a check.  A back edge leaving a
+     -- continuation that a call returns to as well counts the same, so a loop
+     -- closed through such a call loses its head too; telling the two apart
+     -- moved no figure measured.  The check's own branch gets no heuristic
+@@ -1188,7 +1191,6 @@
+     -- each block to the number of those loops whose bodies hold it
+     loopLevels = mapFromListWith (+)
+       [ (b, 1 :: Int) | body <- M.elems headBodies, b <- setElems body ]
+-    cold = coldBlocks cfg
+ 
+     update :: CFG -> BlockId -> CFG
+     update cfg node
+diff -ru a/compiler/GHC/CmmToAsm/Reg/Graph/SpillCost.hs b/compiler/GHC/CmmToAsm/Reg/Graph/SpillCost.hs
+--- a/compiler/GHC/CmmToAsm/Reg/Graph/SpillCost.hs	2026-10-29 05:28:54.928512623 +0100
++++ b/compiler/GHC/CmmToAsm/Reg/Graph/SpillCost.hs	2026-10-29 05:28:54.929540874 +0100
+@@ -94,7 +94,8 @@
+                 -- the frequencies scale only the counts of uses and
+                 -- definitions, on which no spill choice depends: chooseSpill
+                 -- uses spillCost_length, a function of the lifetimes alone
+-                freqMap = (fst . mkGlobalWeights (head entries)) <$> cfg
++                freqMap = freqs <$> cfg
++                freqs c = fst (mkGlobalWeights (head entries) (coldBlocks c) c)
+ 
+         -- Lookup the regs that are live on entry to this block in
+         --      the info table from the CmmProc.
+diff -ru a/compiler/GHC/CmmToAsm.hs b/compiler/GHC/CmmToAsm.hs
+--- a/compiler/GHC/CmmToAsm.hs	2026-10-29 05:28:54.922455825 +0100
++++ b/compiler/GHC/CmmToAsm.hs	2026-10-29 05:28:54.923343254 +0100
+@@ -641,9 +641,24 @@
+                 {-# SCC "shortcutBranches" #-}
+                 shortcutBranches config ncgImpl tabled postRegCFG
+ 
++        -- The blocks that follow a failed heap or stack check, for static
++        -- prediction and the layout: the allocator's set, the block
++        -- allocMoreStack moves the code of one of them into, and the fixup
++        -- blocks on an edge out of or into one.  Built here, where the blocks
++        -- inserted after allocation are known, rather than from the final
++        -- CFG's edges, where a fixup block takes the tag of the edge it splits
++        -- and allocMoreStack's block the old block's out-edges (coldBlocks in
++        -- GHC.CmmToAsm.CFG).
++        let layoutCold =
++              let c1 = foldl' (\s (e, e') -> if e `setMember` allocCold
++                                                then setInsert e' s else s)
++                              allocCold stack_updt_blks
++              in foldl' (\s (f, b, t) -> if f `setMember` c1 || t `setMember` c1
++                                          then setInsert b s else s)
++                        c1 cfgRegAllocUpdates
+         let optimizedCFG :: Maybe CFG
+             optimizedCFG =
+-                optimizeCFG (ncgCmmStaticPred config) weights cmm <$!> postShortCFG
++                optimizeCFG (ncgCmmStaticPred config) weights layoutCold cmm <$!> postShortCFG
+ 
+         maybeDumpCfg logger optimizedCFG "CFG Weights - Final" proc_name
+ 
+@@ -664,7 +679,7 @@
+         let (sequenced, us_seq) =
+                         {-# SCC "sequenceBlocks" #-}
+                         runUniqueDSM usAlloc $ mapM (BlockLayout.sequenceTop
+-                                ncgImpl optimizedCFG)
++                                ncgImpl optimizedCFG layoutCold)
+                             shorted
+ 
+         massert (checkLayout shorted sequenced)
