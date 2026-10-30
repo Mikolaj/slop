@@ -77,11 +77,16 @@ that no relocation can have changed: no branch or call, no
 negative one. A stretch can run into an info table, whose relocated fields
 the search cannot see, so the places are found by a stretch's first 16
 bytes, and those printed match the most bytes, counted from each stretch's
-start to its first difference; copies of one stretch of code within a
-section can tie.
+start to its first difference. Copies of one stretch of code within
+a section tie there; an address an instruction from ADDR carries into its
+own section, which the object holds as a relocation against that section,
+tells them apart where there is one.
 
-The disassembly is objdump's linear sweep, restarted at every executed
-address a sweep did not decode as an instruction start: a sweep through one
+The disassembly is objdump's linear sweep, by objdump -D, which decodes
+the code under a symbol typed as an object in .text, every constructor's
+info table in GHC's code, where -d prints it as data (cg-read-05), and
+restarted at every executed address a sweep did not decode as an instruction
+start: a sweep through one
 of GHC's info tables, which sit in the code before continuations nm names
 no symbol for, falls out of step with the code after it, so a sweep from a
 symbol alone left executed instructions out and printed info-table bytes as
@@ -368,7 +373,9 @@ class Binary:
                 if a - stop > GAP:
                     break
                 stop = a
-            out = tool([OBJDUMP, '-d', '--no-show-raw-insn',
+            # -D, as -d prints the code under a symbol typed as an object
+            # in .text, a constructor's info table, as data (cg-read-05).
+            out = tool([OBJDUMP, '-D', '--no-show-raw-insn',
                         f'--start-address={start:#x}',
                         f'--stop-address={stop + 16:#x}', self.path])
             for line in out.splitlines():
@@ -481,7 +488,7 @@ def stretches(b, a, span=256, least=8):
     as it lies in b."""
     if not b.inside(a):
         raise Unreadable(f'{a:#x} is outside the text section of {b.path}')
-    out = tool([OBJDUMP, '-d', '--insn-width=16', f'--start-address={a:#x}',
+    out = tool([OBJDUMP, '-D', '--insn-width=16', f'--start-address={a:#x}',
                 f'--stop-address={a + span:#x}', b.path])
     runs, cur = [], None
     for line in out.splitlines():
@@ -532,6 +539,55 @@ def common(x, y):
     return n
 
 
+# Relocations that write an absolute address.
+ABS = ('R_X86_64_32S', 'R_X86_64_32', 'R_X86_64_64')
+
+
+@functools.lru_cache(maxsize=None)
+def relocations(obj):
+    """{section name: [(offset, type, symbol, addend)]} of an object
+    file's relocations; a section symbol's name is its section's."""
+    out, cur = collections.defaultdict(list), None
+    for line in tool([READELF, '-rW', obj]).splitlines():
+        m = re.match(r"Relocation section '\.rela?([^']+)'", line)
+        if m:
+            cur = m.group(1)
+            continue
+        f = line.split()
+        if (cur and len(f) >= 7 and f[2].startswith('R_')
+                and re.fullmatch(r'[0-9a-f]+', f[0])):
+            out[cur].append((int(f[0], 16), f[2], f[4],
+                             int(f[-1], 16) * (-1 if f[-2] == '-' else 1)))
+    return out
+
+
+def addressed(b, a, span=256):
+    """[(address, length, value)] of b's instructions within span bytes
+    from a that carry an absolute address as an immediate."""
+    out = tool([OBJDUMP, '-D', '--insn-width=16', f'--start-address={a:#x}',
+                f'--stop-address={a + span:#x}', b.path])
+    res = []
+    for line in out.splitlines():
+        m = RAW.match(line)
+        v = re.search(r'\$(0x(?!f{8})[0-9a-f]{5,})', m.group(3)) if m else None
+        if v:
+            res.append((int(m.group(1), 16), len(bytes.fromhex(m.group(2))),
+                        int(v.group(1), 16)))
+    return res
+
+
+def anchored(obj, sec, pos, a, addrs):
+    """How many of addrs, a's absolute addresses, the object's relocations
+    against sec give, sec's code placed so that a lies pos into it."""
+    base, hits = a - pos, 0
+    for at, n, v in addrs:
+        here = pos + (at - a)
+        hits += any(here <= off < here + n and typ in ABS and sym == sec
+                    and base + add == v
+                    for off, typ, sym, add in relocations(obj).get(sec, []))
+    return hits
+
+
 def owner_of(b, a, paths):
     """([(object, section, offset of a in it, symbol at or before it
     there)], bytes matched, bytes of a's stretches): of the places holding
@@ -574,6 +630,15 @@ def owner_of(b, a, paths):
         near = [x for x in syms.get(k, []) if x[0] <= pos]
         best.append((obj, name, pos, f'{near[-1][1]}+{pos - near[-1][0]:#x}'
                      if near else ''))
+    if len(best) > 1:
+        # Copies of the code within a section tie; an address into the
+        # section itself, which the object holds as a relocation against
+        # it, places the copy.
+        addrs = addressed(b, a)
+        score = [anchored(obj, sec, pos, a, addrs)
+                 for obj, sec, pos, _ in best]
+        if max(score) > 0:
+            best = [h for h, k in zip(best, score) if k == max(score)]
     return best, most, sum(len(c) for _, c in runs)
 
 
@@ -596,7 +661,7 @@ def region_seq(b, cnt, sym, n, least=0.25, raw=False):
 def sweep(b, lo, hi, cnt):
     """(sampled {address: count} in [lo, hi), those a linear objdump sweep
     from lo decodes as no instruction start)."""
-    out = tool([OBJDUMP, '-d', '--no-show-raw-insn',
+    out = tool([OBJDUMP, '-D', '--no-show-raw-insn',
                 f'--start-address={lo:#x}', f'--stop-address={hi:#x}', b.path])
     starts = {int(m.group(1), 16) for m in map(INSN.match, out.splitlines())
               if m}
@@ -866,6 +931,50 @@ pkgzm1zi0zminplace_ModA_loop_info:
         .org 0x150, 0x90
         mov %rbx, %rax
 '''
+# Code under a symbol typed as an object, as a constructor's info table in
+# GHC's code, which objdump -d prints as data (cg-read-05).
+CON_FIXTURE = r'''
+        .text
+        .globl _start
+_start:
+        ret
+        .org 0x100, 0x90
+        .globl pkgzm1zi0zminplace_ModA_Con_con_info
+        .type pkgzm1zi0zminplace_ModA_Con_con_info, @object
+pkgzm1zi0zminplace_ModA_Con_con_info:
+        inc %rbx
+        jmp *0x0(%rbp)
+        .org 0x110, 0x90
+        .globl pkgzm1zi0zminplace_ModA_f_info
+pkgzm1zi0zminplace_ModA_f_info:
+        ret
+'''
+# Two copies of one stretch of code in one section, as GHC can emit a loop
+# body twice, each storing the address of a label after both, which the
+# object holds as a relocation against the section; each ends in an
+# indirect jump, so that their bytes tie.
+TIE_FIXTURE = r'''
+        .text
+        .globl _start
+_start:
+        ret
+        .section .text..Lr9xy_info,"ax",@progbits
+        movq $3f, 0x8(%rbp)
+        mov 0x8(%rbp), %r14
+        add $-0x28, %rbp
+        mov 0x18(%rbp), %rdi
+        add $0x10, %r12
+        cmp %rcx, %rdi
+        jmp *%rax
+        movq $3f, 0x8(%rbp)
+        mov 0x8(%rbp), %r14
+        add $-0x28, %rbp
+        mov 0x18(%rbp), %rdi
+        add $0x10, %r12
+        cmp %rcx, %rdi
+        jmp *%rax
+3:      ret
+'''
 # A binding compiled into a section of its own whose label, .L, leaves no
 # symbol in the binary, so its code lies after ModA_a_info's; its first
 # instruction carries an address and a word after its code another, as an
@@ -1086,7 +1195,7 @@ def checks(bad, td):
     own = assemble(td, 'own', OWNER_FIXTURE)
     if own is None:
         return 2
-    lines = tool([OBJDUMP, '-d', '--no-show-raw-insn', own]).splitlines()
+    lines = tool([OBJDUMP, '-D', '--no-show-raw-insn', own]).splitlines()
     at = [int(m.group(1), 16) for m in map(INSN.match, lines)
           if m and 'movq' in m.group(2) and '0x8(%rbp)' in m.group(2)]
     ma = [int(m.group(1), 16) for m in map(INSN.match, lines)
@@ -1108,6 +1217,28 @@ def checks(bad, td):
     out, rc = run(['owner', own, f'{at[0]:#x}', obj])
     if rc != 1 or out[-1] != f'{at[0]:#x}: no object holds them':
         bad.append(f'owner where no object holds the code: {rc} {out}')
+    con = assemble(td, 'con', CON_FIXTURE)
+    if con is None:
+        return 2
+    cc = write_run(os.path.join(td, 'con.cg'), con, {0x100: 10, 0x103: 10})
+    out, rc = run(['seq', con, cc, 'Con_con_info', '10', '0', '100'])
+    if rc != 0 or out != [f'{BASE + 0x100:#x}    1.00 inc    %rbx',
+                          f'{BASE + 0x103:#x}    1.00 jmp    *0x0(%rbp)',
+                          'count 2']:
+        bad.append(f'code under a symbol typed as an object: {rc} {out}')
+    tie = assemble(td, 'tie', TIE_FIXTURE)
+    if tie is None:
+        return 2
+    cp = [int(m.group(1), 16) for m in map(INSN.match, tool(
+        [OBJDUMP, '-D', '--no-show-raw-insn', tie]).splitlines())
+          if m and m.group(2).startswith('movq')]
+    if len(cp) != 2:
+        bad.append(f'the tie fixture: {cp}')
+        return None
+    out, rc = run(['owner', tie, f'{cp[1]:#x}', tie + '.o'])
+    if rc != 0 or out[1:] != [f'{cp[1]:#x}: {tie}.o .text..Lr9xy_info'
+                              f'+{cp[1] - cp[0]:#x}']:
+        bad.append(f'owner of the second of two copies: {rc} {out}')
     # What the run did not happen for.
     head = 'events: Ir\nfn=f\n'
     cases = [(['bysym', fix, a, fix, bcg, '10'], 'compressed positions',

@@ -1816,6 +1816,33 @@ MUTANTS = [
      '                got += common(code, raw[o:min(o + len(code), off + size)])\n',
      '                got += len(code) if raw[o:o + len(code)] == code else 0\n',
      ST),
+    # cg-read owner's ties told apart by the relocations against the section
+    # (2026-10-30); each watched failing its self-test before it was
+    # written down here.
+    ('cg-read owner ties not told apart', 'cg-read.py',
+     '    if len(best) > 1:\n',
+     '    if False:\n', ST),
+    ("cg-read owner a relocation's address not checked", 'cg-read.py',
+     '                    and base + add == v\n',
+     '                    and True\n', ST),
+    # cg-read-05 (2026-10-30): objdump -d prints the code under a symbol
+    # typed as an object as data; watched failing its self-test before it
+    # was written down here.
+    ('cg-read code under an object symbol read as data', 'cg-read.py',
+     "            out = tool([OBJDUMP, '-D', '--no-show-raw-insn',\n",
+     "            out = tool([OBJDUMP, '-d', '--no-show-raw-insn',\n", ST),
+    # obj-diff (2026-10-30): the compiler's version and the unit ids' hashes
+    # masked, and a file one side lacks reported. Each watched failing its
+    # self-test before it was written down here.
+    ('obj-diff version not masked', 'obj-diff.py',
+     "MASK = re.compile(rb'(?<![0-9.])[0-9]+\\.[0-9]+\\.20[0-9]{6}(?![0-9])'\n",
+     "MASK = re.compile(rb'(?!x)x'\n", ST),
+    ('obj-diff hash not masked', 'obj-diff.py',
+     "                  rb'|[0-9a-f]{64}')\n",
+     "                  rb'|(?!x)x')\n", ST),
+    ('obj-diff a file one side lacks ignored', 'obj-diff.py',
+     '    return out, 1 if diff or oa or ob else 0\n',
+     '    return out, 1 if diff else 0\n', ST),
     # cachegrind-per-call-01 (2026-10-17): cg-percall.sh's shell division
     # truncated; the cells mode that replaces it, each watched failing its
     # self-test before it was written down here.

@@ -53,6 +53,7 @@ STEPS = [
     ('hpc-untaken self-test', ['python3', '{root}/hpc-untaken.py', '--self-test']),
     ('lazy-reads self-test', ['python3', '{root}/lazy-reads.py', '--self-test']),
     ('loop-reloads self-test', ['python3', '{root}/loop-reloads.py', '--self-test']),
+    ('obj-diff self-test', ['python3', '{root}/obj-diff.py', '--self-test']),
     ('one-shot self-test', ['python3', '{root}/one-shot.py', '--self-test']),
     ('perf-per-call self-test', ['python3', '{root}/perf-per-call.py', '--self-test']),
     ('pragma-calls self-test', ['python3', '{root}/pragma-calls.py', '--self-test']),

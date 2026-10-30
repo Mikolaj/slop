@@ -133,6 +133,11 @@ Not a check: the conditions every timing below assumes.
   a program linked without `-rtsopts`, stylish-haskell among them, exits 1
   under it. Profiles are the exception: under it a cost-centre profile recorded
   no ticks, and a `-hT` heap profile 3 samples where it took 12 without.
+  A change to what the clock decides is another exception: GHC
+  [#28060](https://gitlab.haskell.org/ghc/ghc/-/work_items/28060)'s fix runs
+  finalizers before the next context switch, which `-V0` already does,
+  so it moves nofib's gg at -O0 by +0.26% with the clock running and by nothing
+  under `-V0`.
 - Ask for every GHC option a benchmark or probe build adds beyond the cabal
   file's (`horde-ad/bench/CLAUDE.md`), but `-fspec-constr` where a recipe names
   or implies it. Never `-fno-full-laziness` with `-fno-cse`, which GHC
@@ -1096,6 +1101,14 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   as an instruction start in a linear sweep from the range's start; settle
   that before reading a hot loop off the samples and objdump at the hot
   addresses, and where it reports a miss, read the loop from `seq` instead.
+- `tools/obj-diff.py` compares the object and assembly files of two builds
+  by two compilers, file by file, with what the compiler's identity puts
+  into them masked: a development GHC's dated version, which it takes
+  from its commit's date and writes into every `.ident` and `.comment`,
+  and the cabal unit ids' hashes that cover it in the symbols. Without the masks
+  every file of two such builds differs; with them, the builds of GHC's master
+  and of the commit after it, which changed only the RTS, compared equal in all
+  431 of nofib's objects.
 - `tools/ticky-diff.py` diffs the per-closure allocation of two ticky-ticky runs
   of one benchmark, closure names normalised across builds. Build both
   with `--ghc-options=-ticky` and run the same `--iters` with `+RTS -rFILE`.

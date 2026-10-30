@@ -6352,6 +6352,36 @@
    "bug_text": "names no object that is"
   },
   {
+   "id": "cg-read-05",
+   "program": "cg-read.py",
+   "name": "the disassembly ran objdump -d, which prints the code under a symbol typed as an object in .text, every constructor's info table in GHC's code, as a data dump, so kinds, seq, region and owner read executed instructions as byte strings",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "executed code under a .text symbol typed @object, as a constructor's _con_info",
+   "ok": "objdump -D decodes it: seq prints inc %rbx and jmp *0x0(%rbp)",
+   "bug": "seq prints the data dump's characters, H...e..., or stops at an address objdump decoded nothing at",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Found 2026-10-30 by the orthotope session in an old-against-new trace: its binary has 738 such symbols, every constructor's info table, and kinds booked 378174 instructions a run to strings such as H...e.f..........; vector's Vector_con_info, under -D, is inc %rbx; jmp *0x0(%rbp). The same objdump call served decode, sweep, and owner's stretches and addresses.",
+   "plant_cmd": "cat > fix.s <<'EOF_FIX_S'\n        .text\n        .globl _start\n_start:\n        ret\n        .org 0x100, 0x90\n        .globl pkgzm1zi0zminplace_ModA_Con_con_info\n        .type pkgzm1zi0zminplace_ModA_Con_con_info, @object\npkgzm1zi0zminplace_ModA_Con_con_info:\n        inc %rbx\n        jmp *0x0(%rbp)\n        .org 0x110, 0x90\n        .globl pkgzm1zi0zminplace_ModA_f_info\npkgzm1zi0zminplace_ModA_f_info:\n        ret\nEOF_FIX_S\nas -o fix.o fix.s && ld -static -Ttext=0x401000 -e _start -o fix fix.o\ncat > a.cg <<'EOF_A_CG'\n# callgrind format\nversion: 1\ncreator: callgrind-3.22.0\ncmd: ./fix --iters 10\npart: 1\n\npositions: instr line\nevents: Ir\nsummary: 1\n\nob=(2) fix\nfl=???\nfn=foo\n0x401100 0 10\n0x401103 0 10\nEOF_A_CG\n",
+   "invoke": [
+    "seq",
+    "{tmp}/fix",
+    "{tmp}/a.cg",
+    "Con_con_info",
+    "10",
+    "0",
+    "100"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "inc    %rbx",
+    "jmp    *0x0(%rbp)"
+   ],
+   "bug_absent": "inc    %rbx"
+  },
+  {
    "id": "cachegrind-per-call-01",
    "program": "cachegrind-per-call.py",
    "name": "exact instructions a call by callgrind were divided in shell integers, truncating, and the large ravel cell was run at 20 calls, few enough for a collection to move its count",
