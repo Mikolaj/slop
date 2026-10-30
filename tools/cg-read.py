@@ -9,11 +9,15 @@ Usage: python3 tools/cg-read.py allocs [--min C] BIN RUN N
                                      BIN_B RUN_B_N RUN_B_2N N
        python3 tools/cg-read.py region [--min C] BIN_A RUN_A BIN_B RUN_B SYM N
        python3 tools/cg-read.py seq [--raw] BIN RUN SYM N LO HI
+       python3 tools/cg-read.py kinds [--top K] [--sym SYM]
+                                      BIN_A RUN_A BIN_B RUN_B N
+       python3 tools/cg-read.py owner BIN ADDR OBJ [OBJ ...]
        python3 tools/cg-read.py sweep BIN LO HI SAMPLES
        python3 tools/cg-read.py --self-test
 
 Each RUN is the output of `valgrind --tool=callgrind --dump-instr=yes
---compress-strings=no --compress-pos=no` over BIN, run with `--iters N` (or
+--compress-pos=no` over BIN, its names compressed or not (an object's number
+read from `ob=` and `cob=` lines alike, cg-read-04), run with `--iters N` (or
 2N for incr's second run of each binary), which gives every executed
 address its own count; the line after a `calls=` line, a call's inclusive
 cost, is not counted. Callgrind writes an address relative to the object
@@ -53,6 +57,28 @@ seq: one run's instructions of SYM's code run between LO and HI times a
 call, with their addresses; `--raw` keeps the instruction text as objdump
 prints it and names the symbol an immediate's address is, an info pointer
 most often.
+kinds: instructions a call by kind in two runs, over BIN's text or, with
+--sym, over SYM's code to the next symbol: the mnemonic, every conditional
+jump counted as `jcc`, and a jmp as `jmp` where direct and `jmp*` where
+indirect; the K largest differences (14 by default) and the whole run's.
+A change of block layout alone, which makes a block fall through where it
+jumped or jump where it fell through and can invert a conditional jump,
+moves `jmp` and leaves every other kind as it was.
+owner: which of the object files OBJ, or of the `.o` files under a
+directory OBJ, hold the code at ADDR, an instruction start of BIN, with its
+section, ADDR's offset there and the nearest symbol at or before it in that
+section. It names code nm gives no symbol for, which counts under whatever
+symbol precedes it in BIN: a module-internal procedure, and a library's
+binding compiled into a section of its own, as hadrian builds the boot
+libraries, which BIN's link can place after another module's symbol. It
+searches for the stretches of BIN's instructions within 256 bytes from ADDR
+that no relocation can have changed: no branch or call, no
+`%rip`-relative operand, no number of five hex digits or more but a small
+negative one. A stretch can run into an info table, whose relocated fields
+the search cannot see, so the places are found by a stretch's first 16
+bytes, and those printed match the most bytes, counted from each stretch's
+start to its first difference; copies of one stretch of code within a
+section can tie.
 
 The disassembly is objdump's linear sweep, restarted at every executed
 address a sweep did not decode as an instruction start: a sweep through one
@@ -71,12 +97,15 @@ read the loop from callgrind's `seq` instead.
 
 Exit 0 when the figures were printed (for sweep: every sampled address an
 instruction start), 1 when sweep found a sampled address the linear sweep
-missed, 2 when the run did not happen: a missing or unreadable input, a RUN
-written without `--dump-instr=yes` or with `--compress-pos=yes`, objdump or
-nm missing or failing, a binary without a `.text` section or text symbols,
-a RUN that names no object that is its binary or none of whose addresses
-lies in its text section, a SYM matching no symbol or several, or nothing
-executed often enough to read.
+missed or owner no object holding ADDR's code, 2 when the run did not
+happen: a missing or unreadable input, a RUN written without
+`--dump-instr=yes` or with `--compress-pos=yes`, objdump, nm or readelf
+missing or failing, a binary without a `.text` section or text symbols, a
+RUN that names no object that is its binary or none of whose addresses lies
+in its text section, a SYM matching no symbol or several, nothing executed
+often enough to read, an ADDR outside BIN's text section or with no eight
+bytes after it that no relocation can have changed, or no `.o` file among
+the OBJs.
 """
 
 import bisect
@@ -96,6 +125,7 @@ import tempfile
 # The self-test points these at what it needs.
 OBJDUMP = 'objdump'
 NM = 'nm'
+READELF = 'readelf'
 
 # A sweep stops where the next executed address is further on than this.
 GAP = 256
@@ -116,6 +146,16 @@ BUMP = re.compile(r'add\s+\$(-?0x[0-9a-f]+),%r12$')
 INFO = re.compile(r'movq\s+\$(0x[0-9a-f]+),(?:-?0x[0-9a-f]+)?\(%r12\)')
 IMM = re.compile(r'\$(0x[0-9a-f]+)')
 BIG = re.compile(r'0x[0-9a-f]{5,}|\b[0-9a-f]{6,}\b')
+# Prefixes objdump prints before a mnemonic.
+PREFIXES = {'bnd', 'notrack', 'lock', 'rep', 'repz', 'repe', 'repnz', 'repne',
+            'data16', 'addr32'}
+JCC = re.compile(r'j(?!mpq?$)[a-z]+$')
+# An instruction a relocation can have changed in an object file: a branch
+# or a call, an operand relative to %rip, or a number as long as an address,
+# not a small negative one, which objdump prints sign-extended to 64 bits.
+RELOC = re.compile(r'^(?:(?:bnd|notrack)\s+)?(?:j[a-z]*|call[a-z]*)\b|%rip'
+                   r'|0x(?!f{8})[0-9a-f]{5,}')
+RAW = re.compile(r'\s+([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*(.*)')
 
 
 class Unreadable(Exception):
@@ -179,6 +219,13 @@ def callgrind_counts(path, binary=None):
                 positions = line.split()[1:]
             elif line.startswith('events:'):
                 events = line.split()[1:]
+            elif line.startswith('cob='):
+                # a call's object; with compressed names, the first line
+                # naming an object can be this one, and callgrind numbers
+                # the names of cob= and ob= lines together (cg-read-04)
+                m = re.match(r'cob=\((\d+)\)\s+(.+)$', line.strip())
+                if m:
+                    names[m.group(1)] = m.group(2)
             elif line.startswith('ob='):
                 cur = line[3:].strip()
                 m = re.match(r'\((\d+)\)\s*(.*)$', cur)
@@ -384,6 +431,152 @@ def bysym(b, cnt):
     return by
 
 
+def kind(ins):
+    """An instruction's kind: its mnemonic, every conditional jump `jcc`, a
+    jmp `jmp` where direct and `jmp*` where indirect."""
+    f = ins.split()
+    while f and f[0] in PREFIXES:
+        f = f[1:]
+    if not f:
+        return '?'
+    if f[0] in ('jmp', 'jmpq'):
+        return 'jmp*' if len(f) > 1 and f[1].startswith('*') else 'jmp'
+    if JCC.match(f[0]):
+        return 'jcc'
+    return f[0]
+
+
+def kinds(b, cnt, lo=None, hi=None):
+    """Kind -> instructions, over b's text or [lo, hi)."""
+    addrs = [a for a in cnt if b.inside(a) and (lo is None or lo <= a < hi)]
+    text = b.decode(addrs)
+    by = collections.Counter()
+    for a in addrs:
+        by[kind(text[a]) if a in text else '?'] += cnt[a]
+    return by
+
+
+def objects(paths):
+    """The `.o` files among paths, a directory standing for those under it."""
+    found = []
+    for p in paths:
+        if os.path.isdir(p):
+            for d, _, fs in os.walk(p):
+                found += [os.path.join(d, f) for f in sorted(fs)
+                          if f.endswith('.o')]
+        elif os.path.isfile(p):
+            found.append(p)
+        else:
+            raise Unreadable(f'{p}: no such file or directory')
+    if not found:
+        raise Unreadable('no .o file among ' + ' '.join(paths))
+    return found
+
+
+def stretches(b, a, span=256, least=8):
+    """[(start, bytes)] of the runs of b's instructions from a, within span
+    bytes, at least least bytes long and none of whose instructions a
+    relocation can have changed (RELOC), in address order: a run far from a
+    can pass into a neighbour's code or an info table, which no object holds
+    as it lies in b."""
+    if not b.inside(a):
+        raise Unreadable(f'{a:#x} is outside the text section of {b.path}')
+    out = tool([OBJDUMP, '-d', '--insn-width=16', f'--start-address={a:#x}',
+                f'--stop-address={a + span:#x}', b.path])
+    runs, cur = [], None
+    for line in out.splitlines():
+        m = RAW.match(line)
+        if not m:
+            continue
+        at, code = int(m.group(1), 16), bytes.fromhex(m.group(2))
+        if RELOC.search(m.group(3)):
+            if cur and len(cur[1]) >= least:
+                runs.append(cur)
+            cur = None
+            continue
+        cur = (cur[0], cur[1] + code) if cur else (at, code)
+    if cur and len(cur[1]) >= least:
+        runs.append(cur)
+    if not runs:
+        raise Unreadable(f'{b.path}: no {least} bytes from {a:#x} that no'
+                         ' relocation can have changed')
+    return runs
+
+
+@functools.lru_cache(maxsize=None)
+def layout(obj):
+    """({section index: (name, file offset, size)}, {section index:
+    [(value, symbol)]}) of an object file, its section symbols left out."""
+    secs, syms = {}, collections.defaultdict(list)
+    for line in tool([READELF, '-SW', obj]).splitlines():
+        m = re.match(r'\s*\[\s*(\d+)\]\s+(\S+)\s+\S+\s+[0-9a-f]+\s+'
+                     r'([0-9a-f]+)\s+([0-9a-f]+)', line)
+        if m:
+            secs[m.group(1)] = (m.group(2), int(m.group(3), 16),
+                                int(m.group(4), 16))
+    for line in tool([READELF, '-sW', obj]).splitlines():
+        f = line.split()
+        if (len(f) >= 8 and f[0].endswith(':') and f[3] != 'SECTION'
+                and re.fullmatch(r'[0-9a-f]+', f[1])):
+            syms[f[6]].append((int(f[1], 16), f[7]))
+    return secs, {k: sorted(v) for k, v in syms.items()}
+
+
+def common(x, y):
+    """The length of the longest common prefix of x and y."""
+    n = 0
+    for p, q in zip(x, y):
+        if p != q:
+            break
+        n += 1
+    return n
+
+
+def owner_of(b, a, paths):
+    """([(object, section, offset of a in it, symbol at or before it
+    there)], bytes matched, bytes of a's stretches): of the places holding
+    the first 16 bytes of the first of a's stretches that some object holds,
+    those matching the most bytes, counted from the start of each stretch
+    lying in the place's section to its first difference."""
+    data = {}
+    for obj in objects(paths):
+        with open(obj, 'rb') as fh:
+            data[obj] = fh.read()
+    runs = stretches(b, a)
+    cands = []
+    for start, code in runs:
+        key = code[:16]
+        for obj, raw in data.items():
+            at = raw.find(key)
+            while at >= 0:
+                cands.append((obj, at, at - (start - a)))
+                at = raw.find(key, at + 1)
+        if cands:
+            break
+    best, most = [], 0
+    for obj, at, fa in cands:
+        secs, syms = layout(obj)
+        sec = [(k, n, o, z) for k, (n, o, z) in secs.items()
+               if o <= at < o + z]
+        if not sec:
+            continue
+        k, name, off, size = sec[0]
+        raw, got = data[obj], 0
+        for start, code in runs:
+            o = fa + (start - a)
+            if off <= o < off + size:
+                got += common(code, raw[o:min(o + len(code), off + size)])
+        if got < most:
+            continue
+        if got > most:
+            best, most = [], got
+        pos = fa - off
+        near = [x for x in syms.get(k, []) if x[0] <= pos]
+        best.append((obj, name, pos, f'{near[-1][1]}+{pos - near[-1][0]:#x}'
+                     if near else ''))
+    return best, most, sum(len(c) for _, c in runs)
+
+
 def region_seq(b, cnt, sym, n, least=0.25, raw=False):
     """[(instruction, count a call to two decimals, address)] of the code
     from sym to the next symbol executed at least least * n times."""
@@ -440,6 +633,15 @@ def option(argv, flag, kind, default):
         v = number(argv[i + 1], flag, kind)
         return v, argv[:i] + argv[i + 2:]
     return default, argv
+
+
+def text_option(argv, flag):
+    if flag in argv:
+        i = argv.index(flag)
+        if i + 1 >= len(argv):
+            raise Unreadable(f'{flag} needs a value')
+        return argv[i + 1], argv[:i] + argv[i + 2:]
+    return None, argv
 
 
 def run(argv, notes=None):
@@ -528,6 +730,32 @@ def run(argv, notes=None):
                 out.append(f'{a:#x} {c:7.2f} {ins}' + (f'  {name}' if name
                                                         else ''))
         out.append(f'count {k}')
+    elif cmd == 'kinds':
+        top, argv = option(argv, '--top', int, 14)
+        sym, argv = text_option(argv, '--sym')
+        need(argv, 5)
+        n = number(argv[4], 'N')
+        ba, bb = get(argv[0]), get(argv[2])
+        A = kinds(ba, counts_of(ba, argv[1]), *(ba.region(sym) if sym else ()))
+        B = kinds(bb, counts_of(bb, argv[3]), *(bb.region(sym) if sym else ()))
+        out.append(f'total {(sum(B.values()) - sum(A.values())) / n:.2f}')
+        for k in sorted(set(A) | set(B),
+                        key=lambda k: (-abs(B[k] - A[k]), k))[:top]:
+            out.append(f'{(B[k] - A[k]) / n:9.2f}  A {A[k] / n:9.2f}'
+                       f'  B {B[k] / n:9.2f}  {k}')
+    elif cmd == 'owner':
+        if len(argv) < 3:
+            need(argv, 3)
+        b = get(argv[0])
+        a = address(argv[1])
+        hits, got, total = owner_of(b, a, argv[2:])
+        out.append(f'{total} bytes from {a:#x} that no relocation can have'
+                   f' changed, {got} of them matched')
+        out += [f'{a:#x}: {obj} {sec}+{pos:#x}' + (f' {sym}' if sym else '')
+                for obj, sec, pos, sym in hits]
+        if not hits:
+            out.append(f'{a:#x}: no object holds them')
+            return out, 1
     elif cmd == 'sweep':
         need(argv, 4)
         b = get(argv[0])
@@ -615,6 +843,54 @@ _pkgzm1zi0zminplace_ModA_zdwh_UNIQUE_entry:
         add $0x10, %r12
         .org 0x190, 0x90
         ret
+'''
+# A loop's kinds of jump: a conditional one either way, a direct jmp that
+# one layout needs and the other does not, an indirect jmp.
+KINDS_FIXTURE = r'''
+        .text
+        .globl _start
+_start:
+        ret
+        .org 0x100, 0x90
+        .globl pkgzm1zi0zminplace_ModA_loop_info
+pkgzm1zi0zminplace_ModA_loop_info:
+        cmp %rax, %rbx
+        .org 0x110, 0x90
+        je 1f
+        .org 0x120, 0x90
+        jne 1f
+        .org 0x130, 0x90
+        jmp 1f
+        .org 0x140, 0x90
+1:      jmp *%rax
+        .org 0x150, 0x90
+        mov %rbx, %rax
+'''
+# A binding compiled into a section of its own whose label, .L, leaves no
+# symbol in the binary, so its code lies after ModA_a_info's; its first
+# instruction carries an address and a word after its code another, as an
+# info table's field does, which the object holds as relocations; objdump
+# prints the small negative number it adds to %rbp in 64 bits.
+OWNER_FIXTURE = r'''
+        .text
+        .globl _start
+_start:
+        ret
+        .section .text.ModA_a,"ax",@progbits
+        .globl pkgzm1zi0zminplace_ModA_a_info
+pkgzm1zi0zminplace_ModA_a_info:
+        mov %rbx, %rax
+        mov 0x10(%rbp), %rcx
+        ret
+        .section .text..Lr4ph_info,"ax",@progbits
+        movq $pkgzm1zi0zminplace_ModA_a_info, 0x8(%rbp)
+        mov 0x8(%rbp), %r14
+        add $-0x28, %rbp
+        mov 0x18(%rbp), %rdi
+        add $0x10, %r12
+        cmp %rcx, %rdi
+        ret
+        .quad pkgzm1zi0zminplace_ModA_a_info
 '''
 
 
@@ -775,6 +1051,63 @@ def checks(bad, td):
                                       ' addresses, 10 samples: 0x401140'):
         bad.append(f"sweep over callgrind samples, the library's left"
                    f' out: {rc} {out}')
+    # cg-read-04: with compressed names, the binary first named in a cob=
+    # line, as a call's object, and the ob= lines after it giving its number
+    # alone.
+    pc = os.path.join(td, 'cob.cg')
+    with open(pc, 'w') as fh:
+        fh.write('positions: instr line\nevents: Ir\nob=(1) /lib/libc.so.6\n'
+                 f'0x7f0000001000 0 7\ncob=(2) {fix}\n'
+                 f'calls=10 {BASE + 0x100:#x} 0\n0x7f0000001004 0 30\n'
+                 f'ob=(2)\n{BASE + 0x100:#x} 0 10\n{BASE + 0x110:#x} 0 10\n')
+    try:
+        got = callgrind_counts(pc, fix)
+        if got != {BASE + 0x100: 10, BASE + 0x110: 10}:
+            bad.append(f'a binary first named in a cob= line: {dict(got)}')
+    except Unreadable as e:
+        bad.append(f'a binary first named in a cob= line: {e}')
+    k = assemble(td, 'kinds', KINDS_FIXTURE)
+    if k is None:
+        return 2
+    ka = write_run(os.path.join(td, 'ka.cg'), k,
+                   {0x100: 10, 0x110: 10, 0x140: 10, 0x150: 10})
+    kb = write_run(os.path.join(td, 'kb.cg'), k,
+                   {0x100: 10, 0x120: 10, 0x130: 10, 0x140: 10, 0x150: 10})
+    for extra in ([], ['--sym', 'loop_info']):
+        out, rc = run(['kinds'] + extra + [k, ka, k, kb, '10'])
+        if rc != 0 or out != [
+                'total 1.00',
+                '     1.00  A      0.00  B      1.00  jmp',
+                '     0.00  A      1.00  B      1.00  cmp',
+                '     0.00  A      1.00  B      1.00  jcc',
+                '     0.00  A      1.00  B      1.00  jmp*',
+                '     0.00  A      1.00  B      1.00  mov']:
+            bad.append(f'kinds {extra}: {out}')
+    own = assemble(td, 'own', OWNER_FIXTURE)
+    if own is None:
+        return 2
+    lines = tool([OBJDUMP, '-d', '--no-show-raw-insn', own]).splitlines()
+    at = [int(m.group(1), 16) for m in map(INSN.match, lines)
+          if m and 'movq' in m.group(2) and '0x8(%rbp)' in m.group(2)]
+    ma = [int(m.group(1), 16) for m in map(INSN.match, lines)
+          if m and m.group(2).startswith('mov') and '%rbx,%rax' in m.group(2)]
+    if len(at) != 1 or len(ma) != 1:
+        bad.append(f'the owner fixture: {at} {ma}')
+        return None
+    # The stretch runs on into the relocated word, as the bytes objdump
+    # decodes from it allow; its 20 bytes of code match.
+    out, rc = run(['owner', own, f'{at[0]:#x}', td])
+    if rc != 0 or len(out) != 2 or not out[0].endswith(
+            ', 20 of them matched') \
+            or out[1] != f'{at[0]:#x}: {own}.o .text..Lr4ph_info+0x0':
+        bad.append(f'owner of a binding with no symbol: {rc} {out}')
+    out, rc = run(['owner', own, f'{ma[0]:#x}', own + '.o'])
+    if rc != 0 or out[1:] != [f'{ma[0]:#x}: {own}.o .text.ModA_a+0x0'
+                              ' pkgzm1zi0zminplace_ModA_a_info+0x0']:
+        bad.append(f'owner of a function with a symbol: {rc} {out}')
+    out, rc = run(['owner', own, f'{at[0]:#x}', obj])
+    if rc != 1 or out[-1] != f'{at[0]:#x}: no object holds them':
+        bad.append(f'owner where no object holds the code: {rc} {out}')
     # What the run did not happen for.
     head = 'events: Ir\nfn=f\n'
     cases = [(['bysym', fix, a, fix, bcg, '10'], 'compressed positions',

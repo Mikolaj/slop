@@ -6323,6 +6323,35 @@
    "bug_absent": "carries no symbol of a module-internal procedure"
   },
   {
+   "id": "cg-read-04",
+   "program": "cg-read.py",
+   "name": "a callgrind output written with compressed names, callgrind's default, can name its binary first in a `cob=` line, as the object a call goes to, the `ob=` lines after it giving the binary's number alone; the reader took names from `ob=` lines only, so it found no object that was the binary and refused the run, with a message naming no flag",
+   "family": "two-spellings",
+   "fix_rev": "self",
+   "trigger": "a callgrind output with compressed names whose binary is first named in a cob= line",
+   "ok": "the name read from the cob= line too, and the run's figures printed: foo's 2.00 a call",
+   "bug": "exit 2: names no object that is .../fix, only (2), /lib/libc.so.6",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Found 2026-10-30 on callgrind outputs of nofib's knights built by two compilers of GHC's NCG series, run without --compress-strings=no: callgrind numbers the names of ob= and cob= lines together, and knights' Main was first named as a call's target (cob=(8)); cg-read refused with 'names no object that is .../knights/Main, only (1), (2), (3)'. A refusal, no figure wrong; a session wrote its own reader meanwhile.",
+   "plant_cmd": "cat > fix.s <<'EOF_FIX_S'\n        .text\n        .globl _start\n_start:\n        nop\n        ret\n        .org 0x100, 0x90\n        .globl pkgzm1zi0zminplace_ModA_foo_info\npkgzm1zi0zminplace_ModA_foo_info:\n        add $0x10, %r12\n        .org 0x110, 0x90\n        ret\nEOF_FIX_S\nas -o fix.o fix.s && ld -static -Ttext=0x401000 -e _start -o fix fix.o\ncat > a.cg <<'EOF_A_CG'\n# callgrind format\nversion: 1\ncreator: callgrind-3.22.0\ncmd: ./fix --iters 10\npart: 1\n\npositions: instr line\nevents: Ir\nsummary: 1\n\nob=(1) /lib/libc.so.6\nfl=(1) ???\nfn=(1) memcpy\n0x7f0000001000 0 7\ncob=(2) fix\ncfi=(2) ???\ncfn=(2) foo\ncalls=10 0x401100 0\n0x7f0000001004 0 30\nob=(2)\nfl=(2)\nfn=(2)\n0x401100 0 10\n0x401110 0 10\nEOF_A_CG\n",
+   "invoke": [
+    "bysym",
+    "{tmp}/fix",
+    "{tmp}/a.cg",
+    "{tmp}/fix",
+    "{tmp}/a.cg",
+    "10"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "     0.00  A      2.00  B      2.00  ModA_foo_info"
+   ],
+   "bug_exit": 2,
+   "bug_text": "names no object that is"
+  },
+  {
    "id": "cachegrind-per-call-01",
    "program": "cachegrind-per-call.py",
    "name": "exact instructions a call by callgrind were divided in shell integers, truncating, and the large ravel cell was run at 20 calls, few enough for a collection to move its count",

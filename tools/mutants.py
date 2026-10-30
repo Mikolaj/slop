@@ -1788,6 +1788,34 @@ MUTANTS = [
     ("cg-read an internal procedure's unique kept", 'cg-read.py',
      "        return f'{m.group(1)}_{m.group(2)}'\n",
      "        return UNIT.sub('', name)\n", ST),
+    # cg-read-04 (2026-10-30): a binary first named in a cob= line; and the
+    # kinds and owner subcommands of that day. Each watched failing its
+    # self-test before it was written down here.
+    ('cg-read a cob= name not read', 'cg-read.py',
+     "            elif line.startswith('cob='):\n",
+     '            elif False:\n', ST),
+    ('cg-read kinds conditional jumps not merged', 'cg-read.py',
+     "        return 'jcc'\n",
+     '        return f[0]\n', ST),
+    ('cg-read kinds direct and indirect jmp merged', 'cg-read.py',
+     "        return 'jmp*' if len(f) > 1 and f[1].startswith('*') else 'jmp'\n",
+     "        return 'jmp'\n", ST),
+    ('cg-read owner bytes a relocation changes searched', 'cg-read.py',
+     '        if RELOC.search(m.group(3)):\n',
+     '        if False:\n', ST),
+    ('cg-read owner small negatives taken for addresses', 'cg-read.py',
+     "                   r'|0x(?!f{8})[0-9a-f]{5,}')\n",
+     "                   r'|0x[0-9a-f]{5,}')\n", ST),
+    ('cg-read owner offset not taken back to ADDR', 'cg-read.py',
+     '                cands.append((obj, at, at - (start - a)))\n',
+     '                cands.append((obj, at, at))\n', ST),
+    ('cg-read owner places found by whole stretches', 'cg-read.py',
+     '        key = code[:16]\n',
+     '        key = code\n', ST),
+    ('cg-read owner whole stretches scored', 'cg-read.py',
+     '                got += common(code, raw[o:min(o + len(code), off + size)])\n',
+     '                got += len(code) if raw[o:o + len(code)] == code else 0\n',
+     ST),
     # cachegrind-per-call-01 (2026-10-17): cg-percall.sh's shell division
     # truncated; the cells mode that replaces it, each watched failing its
     # self-test before it was written down here.
