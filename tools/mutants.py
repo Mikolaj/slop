@@ -497,24 +497,20 @@ MUTANTS = [
     ('perf-per-call spread of the differences unreported', 'perf-per-call.py',
      '        if hi - lo > SPAN * abs(mid):\n',
      '        if False:\n', ST),
-    # GHCRTS=-V0 on every measured run (2026-10-11), the caller's GHCRTS
-    # kept ahead of it. common.py is imported, so a mutant there changes
-    # its line's length: one of the same length went uncaught in one run,
-    # and in the next the copy was already red (2026-10-19).
-    ('perf-per-call run without GHCRTS=-V0', 'perf-per-call.py',
-     '                       text=True, env=measured_env())\n',
-     '                       text=True)\n', ST),
-    ('perf-per-call -V0 ahead of the caller\'s GHCRTS', 'common.py',
-     '                GHCRTS=(os.environ.get("GHCRTS", "") + " -V0").strip())\n',
-     '                GHCRTS=" ".join(["-V0", os.environ.get("GHCRTS", "")]).strip())\n',
-     'cd {dir} && python3 perf-per-call.py --self-test'),
-    ('ab-time run without GHCRTS=-V0', 'ab-time.py',
-     '                           env=measured_env())\n',
-     '                           )\n', ST),
-    ('ab-time -V0 ahead of the caller\'s GHCRTS', 'common.py',
-     '                GHCRTS=(os.environ.get("GHCRTS", "") + " -V0").strip())\n',
-     '                GHCRTS=" ".join(["-V0", os.environ.get("GHCRTS", "")]).strip())\n',
-     'cd {dir} && python3 ab-time.py --self-test'),
+    # GHCRTS=-V0 on every cachegrind run, the caller's GHCRTS kept ahead of
+    # it, and the RTS clock running on every native run, as in a user's:
+    # every measured run took -V0 from 2026-10-11 until GHC #28060's fix
+    # (2026-10-30). common.py is imported, so a mutant there changes its
+    # line's length: one of the same length went uncaught in one run, and
+    # in the next the copy was already red (2026-10-19).
+    ('perf-per-call run under GHCRTS=-V0', 'perf-per-call.py',
+     '                       text=True)\n',
+     "                       text=True, env=dict(os.environ, GHCRTS='-V0'))\n",
+     ST),
+    ('ab-time run under GHCRTS=-V0', 'ab-time.py',
+     '                           stderr=subprocess.PIPE, text=True)\n',
+     "                           stderr=subprocess.PIPE, text=True,"
+     " env=dict(os.environ, GHCRTS='-V0'))\n", ST),
     ('cachegrind-per-call run without GHCRTS=-V0', 'cachegrind-per-call.py',
      '                       text=True, env=measured_env())\n',
      '                       text=True)\n', ST),

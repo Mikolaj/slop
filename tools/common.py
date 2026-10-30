@@ -29,8 +29,8 @@ horde-ad's check-conv-bench-props.py keeps a copy of it, CI checking
 that repository out alone. A file that is not such a collection raises
 CriterionError, which each turns into its own exit 2, the run not having
 happened; so does an estimate that is not a finite number, criterion writing
-a NaN as null. measured_env is the environment of a measured run for
-ab-time.py, cachegrind-per-call.py and perf-per-call.py.
+a NaN as null. measured_env is the environment of a cachegrind-per-call.py
+run, the RTS clock stopped.
 
 GIT_LOCATION and git_env serve the git calls that must not run in a
 repository the caller set: check-doc-refs.py's, check-plan-citations.py's

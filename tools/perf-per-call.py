@@ -18,14 +18,15 @@ repetition to repetition; with `--cpu`, every run is pinned to CPU by
 the range of the repetitions' differences and, for each BIN after the
 first, its figures over A's.
 
-Every run is under GHCRTS=-V0, which stops the RTS clock
-(docs/perf-checklist.md, M): with the clock running, a fixed amount was
-added to some processes (56M on top of 39750M in five runs of fourteen of
-one benchmark built by GHC 10.1.20260918, and in none of eight under
--V0), lifting a repetition's difference by that amount over N. The
-instructions per call are the lowest 2N count less the lowest N count,
-over N, which an amount added to some but not all runs at each count
-does not lift, and they are what decides; where a build's differences
+Every run takes the caller's GHCRTS, the RTS clock running as in a user's
+runs (docs/perf-checklist.md, M); with the clock running, some processes
+of one benchmark built by GHC 10.1.20260918, which lacks GHC #28060's fix,
+carried a fixed amount more (56M on top of 39750M in five runs of fourteen,
+and in none of eight under -V0), lifting a repetition's difference by that
+amount over N. The instructions per call are the
+lowest 2N count less the lowest N count, over N, which an amount added to
+some but not all runs at each count does not lift, and they are what
+decides; where a build's differences
 spread over more than 1% of the figure, the tool says so. Cycles carry
 the machine's noise: their figure is the repetitions' median, the range showing the
 noise. This is the native counterpart of tools/cachegrind-per-call.py,
@@ -44,12 +45,6 @@ import statistics
 import subprocess
 import sys
 import tempfile
-from unittest import mock
-
-# Beside this file, which a path import (a defect case's unit) leaves off
-# sys.path.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import measured_env  # noqa: E402
 
 EVENTS = ('instructions', 'cycles')
 
@@ -112,7 +107,7 @@ def estimate(runs, n):
 def run(binary, name, iters, cpu, out):
     cmd = command(binary, name, iters, out, cpu)
     r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                       text=True, env=measured_env())
+                       text=True)
     if r.returncode != 0:
         raise ValueError(f'{" ".join(cmd)} exited {r.returncode}:\n'
                          + r.stderr[-2000:])
@@ -133,7 +128,7 @@ def measure(bins, name, n, reps, cpu, td):
 
 FAKE = '''#!/usr/bin/env python3
 import os, sys
-if os.environ.get('GHCRTS', '').split()[-1:] != ['-V0']:
+if '-V0' in os.environ.get('GHCRTS', '').split():
     sys.exit(3)
 a = sys.argv
 out, rest = a[a.index('-o') + 1], a[a.index('--') + 1:]
@@ -209,9 +204,6 @@ def self_test():
                     bad.append(f'{what} did not exit 2')
             if main(['g/x', '10']) != 2:
                 bad.append('no build did not exit 2')
-            with mock.patch.dict(os.environ, GHCRTS='-V1'):
-                if measured_env()['GHCRTS'] != '-V1 -V0':
-                    bad.append("-V0 not after the caller's GHCRTS")
         finally:
             PERF = saved
     for b in bad:

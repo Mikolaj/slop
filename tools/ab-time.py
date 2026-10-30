@@ -11,8 +11,9 @@ a round, ROUNDS rounds, the order rotated by one from round to round, so
 that each build goes first as often as the next where ROUNDS is a multiple
 of their number --- two builds alternate. One benchmark per process
 (`-m glob NAME`, criterion's default time limit, `--regress allocated:iters`,
-`--json` with `+RTS -T`), each under GHCRTS=-V0 (docs/perf-checklist.md, M)
-and pinned to CPU by `taskset -c` with `--cpu`.
+`--json` with `+RTS -T`), each under the caller's GHCRTS, the RTS clock
+running as in a user's runs (docs/perf-checklist.md, M), and pinned to CPU
+by `taskset -c` with `--cpu`.
 Reads criterion's OLS slopes of seconds and of bytes allocated per iteration
 from each run, and prints, for each BIN after the first, the median of its
 ROUNDS time ratios to A's, each ratio within one round, with their range,
@@ -49,13 +50,11 @@ import statistics
 import subprocess
 import sys
 import tempfile
-from unittest import mock
 
 # Beside this file, which a path import (a defect case's unit) leaves off
 # sys.path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
-from common import measured_env  # noqa: E402
 
 
 def command(binary, name, path, cpu, iters=None):
@@ -72,7 +71,7 @@ def counted(binary, name, cpu, iters):
     """Time and bytes allocated a call of one benchmark run iters times in a
     fresh process, from the line `NAME TIME BYTES` it prints last."""
     r = subprocess.run(command(binary, name, None, cpu, iters),
-                       capture_output=True, text=True, env=measured_env())
+                       capture_output=True, text=True)
     if r.returncode != 0:
         raise ValueError(f'{binary} on {name} exited {r.returncode}: '
                          + r.stderr[-500:])
@@ -95,8 +94,7 @@ def slopes(binary, name, cpu):
     try:
         r = subprocess.run(command(binary, name, path, cpu),
                            stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE, text=True,
-                           env=measured_env())
+                           stderr=subprocess.PIPE, text=True)
         if r.returncode != 0:
             raise ValueError(f'{binary} on {name} exited {r.returncode}: '
                              + r.stderr[-500:])
@@ -144,7 +142,7 @@ def rounds(bins, n, name, cpu, log, iters=None):
 
 FAKE = '''#!/usr/bin/env python3
 import json, os, sys
-if os.environ.get('GHCRTS', '').split()[-1:] != ['-V0']:
+if '-V0' in os.environ.get('GHCRTS', '').split():
     sys.exit(3)
 secs = {secs!r}
 a = sys.argv
@@ -168,7 +166,7 @@ json.dump(['criterion', '1.6', reps], open(out, 'w'))
 # a line of its own, then `NAME TIME BYTES`, under the name given or another.
 FAKE_COUNTED = '''#!/usr/bin/env python3
 import os, sys
-if os.environ.get('GHCRTS', '').split()[-1:] != ['-V0']:
+if '-V0' in os.environ.get('GHCRTS', '').split():
     sys.exit(3)
 a = sys.argv
 if a[1:2] != ['--iters'] or a[3:5] != ['-m', 'glob']:
@@ -224,9 +222,6 @@ def self_test():
         nul = fake('N', [None], 100.0)
         if main([bins[0], nul, '1', 'g/x']) != 2:
             bad.append('a null slope did not exit 2')
-        with mock.patch.dict(os.environ, GHCRTS='-V1'):
-            if measured_env()['GHCRTS'] != '-V1 -V0':
-                bad.append("-V0 not after the caller's GHCRTS")
         ccalls = os.path.join(td, 'ccalls')
 
         def fake_counted(tag, secs, alloc, shown=''):

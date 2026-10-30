@@ -122,22 +122,37 @@ Not a check: the conditions every timing below assumes.
 - A count differencing N and 2N calls spans few calls at a large size,
   and an old-generation collection falling between them in one build and
   not the other moved one cell by 6M instructions a call, at `-A4m`: recount
-  such a cell over ten times the calls before reading it.
+  such a cell over ten times the calls before reading it. Within one build, too,
+  the minor collections between N and 2N calls are no fixed share of the calls,
+  so a large cell's level moves with N: at `-A32m`, up to 12.6% at about 10
+  calls and 0.2 to 0.8% at 100 against 300, in orthotope's specialisation
+  benchmark on 2026-10-30, while two builds allocating alike differed
+  by the same to about 50 instructions a call. So read a difference between
+  builds rather than a level; a level, such as instructions an element, wants
+  calls enough that doubling them leaves it.
 - `-A32m`, and `-A4m` too where a library's users may run at the default area.
-- `GHCRTS=-V0`, which stops the RTS clock, on every timed or counted process
-  of horde-ad or orthotope; `ab-time.py`, `perf-per-call.py`,
-  `cachegrind-per-call.py` and the launching scripts at the top of orthotope's
-  `micro-regime3` set it themselves. With the clock running, some processes
-  of a HEAD-built `shortProdForCI` carried 56M instructions more than the rest.
-  Set it per command or in a measuring script, never session-wide, since
-  a program linked without `-rtsopts`, stylish-haskell among them, exits 1
-  under it. Profiles are the exception: under it a cost-centre profile recorded
-  no ticks, and a `-hT` heap profile 3 samples where it took 12 without.
-  A change to what the clock decides is another exception: GHC
-  [#28060](https://gitlab.haskell.org/ghc/ghc/-/work_items/28060)'s fix runs
-  finalizers before the next context switch, which `-V0` already does,
-  so it moves nofib's gg at -O0 by +0.26% with the clock running and by nothing
-  under `-V0`.
+- The RTS clock running, as in a user's runs, on every native timed or counted
+  process of horde-ad or orthotope. GHC
+  [#28060](https://gitlab.haskell.org/ghc/ghc/-/work_items/28060)'s fix,
+  in `~/slop/ghc` since 10.1.20261030, runs a collection's finalizers at once,
+  where with the clock running they had waited for the next context switch;
+  on 2026-10-30 four cells of orthotope's specialisation benchmark, small
+  and large, counted the same per call with the clock running
+  as under `GHCRTS=-V0`, to within their runs' spread, built by 10.1.20261019
+  and by 10.1.20261030 alike. A change to what the clock decides shows only
+  with it running: the fix moves nofib's gg at -O0 by +0.26% with the clock
+  running and by nothing under `-V0`. Callgrind and cachegrind runs stop
+  the clock with `-V0`, which `cachegrind-per-call.py` sets: under them a call
+  takes many times its native wall time, and the clock's work grows with it.
+  A build by a GHC without the fix may still need `-V0`: with the clock running,
+  some processes of a `shortProdForCI` built by 10.1.20260918 carried 56M
+  instructions more than the rest, presumed the finalizers' wait
+  and not measured again. Set `-V0` per command or in a measuring script, never
+  session-wide, since a program linked without `-rtsopts`, stylish-haskell among
+  them, exits 1 under it; profiles never take it: under it a cost-centre profile
+  recorded no ticks, and a `-hT` heap profile 3 samples where it took 12
+  without. The launching scripts at the top of orthotope's `micro-regime3` set
+  it on native runs.
 - Ask for every GHC option a benchmark or probe build adds beyond the cabal
   file's (`horde-ad/bench/CLAUDE.md`), but `-fspec-constr` where a recipe names
   or implies it. Never `-fno-full-laziness` with `-fno-cse`, which GHC
@@ -1067,9 +1082,9 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   counts equal to 0.003%. With `--cells FILE` it counts every cell of a file
   of `MODE NAME N` lines in each of several builds, a `summed` cell run
   with `--summed` as orthotope's specialisation benchmark takes it, each figure
-  exact to two decimals; give a cell of large arrays 100 calls or more, which
-  keeps a collection from moving its count. `--cpu` pins the runs to one CPU,
-  and `--arg` passes the benchmark an argument.
+  exact to two decimals; give a cell of large arrays 100 calls or more,
+  a collection still moving its level by up to 0.8% at 100 (M). `--cpu` pins
+  the runs to one CPU, and `--arg` passes the benchmark an argument.
 - `tools/cg-read.py` reads a benchmark binary's callgrind runs, made
   with `valgrind --tool=callgrind --dump-instr=yes --compress-pos=no`, names
   compressed or not, against the binary's symbols and disassembly, each symbol's
