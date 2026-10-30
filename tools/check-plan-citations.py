@@ -36,7 +36,8 @@ exists: a commit above it slides it onto other text while it still resolves,
 and nothing then says so. Cite a text anchor instead, or, where the sentence
 describes a past tree, a permalink pinned to it. Line numbers are refused
 since 2026-10-21, by when citations had slid in both repositories that used
-them with every pass green.
+them with every pass green. In fenced code a file and line is text the
+document quotes, a compiler's diagnostic most often, and passes.
 
 A `/.../` component in a cited path is treated as a wildcard (the document
 uses it to abbreviate long paths).
@@ -79,7 +80,8 @@ A document's links are checked for their own claims too. A `[text][label]`
 with no definition renders as plain text and fails, but for two bracketed
 numbers in a document defining no numeric label, which are sources cited
 footnote-style against a numbered list. A permalink's link text
-shaped like a path must be the end of its URL, and a `#L` one must continue
+shaped like a path must be the end of its URL, one that is a module's name,
+`GHC.Core.Utils`, must name the cited file, and a `#L` one must continue
 the file the paragraph's last path-shaped one named. And of the names written
 beside a permalink in its clause --- backticked code, a `Note [...]`, a
 quotation of twelve characters or more, the link text included --- the
@@ -213,6 +215,8 @@ CODE_RE = re.compile(r"(`+)(.+?)\1", re.S)
 # Link text that names a file and line rather than saying something:
 # `compiler/GHC/X.hs#L12`, `X.hs`, `#L40`.
 PATHISH_RE = re.compile(r"[A-Za-z0-9_./+-]*(?:#L\d+(?:-L?\d+)?)?")
+# Link text that is a Haskell module's name, `GHC.Core.Utils`.
+MODULE_RE = re.compile(r"[A-Z][A-Za-z0-9_']*(?:\.[A-Z][A-Za-z0-9_']*)+")
 # The names beside a link that say what its line holds: code, a Note, or a
 # quotation of the source.
 NAME_RE = re.compile(r"`([^`\n]+)`|Note \[([^\]\n]+)\]|\"([^\"\n]{12,})\"")
@@ -487,8 +491,18 @@ def check_links(text, own, foreign):
             if t is None:
                 continue
             clone, sha, path, lo, hi = t
-            if PATHISH_RE.fullmatch(shown) and ("#" in shown or "/" in shown
-                                                or "." in shown):
+            if MODULE_RE.fullmatch(shown):
+                # A module's name, which its dots do not make a path: it
+                # names the cited file (check-plan-citations-24).
+                stem = "/" + shown.replace(".", "/")
+                if not any(("/" + path).endswith(stem + ext)
+                           for ext in (".hs", ".lhs", ".hs-boot")):
+                    print(f"FAIL [{shown}] --- the link text names module"
+                          f" {shown}, not the cited {path}")
+                    failures += 1
+                last = path
+            elif PATHISH_RE.fullmatch(shown) and ("#" in shown or "/" in shown
+                                                  or "." in shown):
                 cut = len(url) - len(shown)
                 if not url.endswith(shown) or not (
                         shown.startswith("#") or url[cut - 1] == "/"):
@@ -836,6 +850,41 @@ def self_test():
             expect("a commit on origin/HEAD is published", p.returncode, 0)
             contains("a commit on origin/HEAD is published", p.stdout,
                      "ok   src/N.hs#L1 @")
+            # A module's name as a link text names the cited file, its dots
+            # no path (check-plan-citations-24); a file and line in fenced
+            # code is quoted text, beside one in prose, which is refused
+            # (check-plan-citations-23).
+            os.makedirs("mods/M")
+            common.scratch_repo("mods")
+            mgit = functools.partial(git, "-C", "mods")
+            mgit("remote", "add", "origin", "https://github.com/x/y.git")
+            open("mods/M/N.hs", "w").write("module M.N where\n")
+            open("mods/M/K.hs", "w").write("module M.K where\n")
+            mgit("add", "M")
+            mgit("commit", "-qm", "m")
+            ma = head("-C", "mods")
+            mgit("update-ref", "refs/remotes/origin/master", ma)
+            murl = f"https://github.com/x/y/blob/{ma}/M/"
+            open("mods/mod.md", "w").write(
+                "Right, [M.N][a]; wrong, [M.N][b].\n\n"
+                f"[a]: {murl}N.hs#L1\n[b]: {murl}K.hs#L1\n")
+            p = run("mod.md", cwd="mods")
+            expect("a module's name as a link text", p.returncode, 1)
+            contains("a module's name as a link text", p.stdout,
+                     "ok   M/N.hs#L1 @",
+                     "[M.N] --- the link text names module M.N, not the"
+                     " cited M/K.hs", "1 failed")
+            if "not the end of its URL" in p.stdout:
+                bad.append("a module's name as a link text: taken for a"
+                           " path")
+            open("mods/fence.md", "w").write(
+                "See `M/N.hs:1`.\n\n```\nM/K.hs:1:8: warning\n```\n")
+            p = run("fence.md", cwd="mods")
+            expect("a line number in fenced code", p.returncode, 1)
+            contains("a line number in fenced code", p.stdout,
+                     "M/N.hs:1 --- LINE-NUMBER")
+            if "M/K.hs:1" in p.stdout:
+                bad.append("a line number in fenced code: refused")
         finally:
             os.chdir(prev)
     for b in bad:
@@ -900,8 +949,12 @@ def check(doc):
     # A line number is refused wherever it points, resolving or not: a
     # commit above the line slides it onto other text while it still
     # resolves, and into a document the formatter moves it at every reflow.
+    # In fenced code it is text the document quotes, such as a compiler's
+    # diagnostic, not a citation (check-plan-citations-23).
+    prose = "\n".join(line if kind is None else "" for line, kind, _info
+                      in common.fence_scan(flat.split("\n")))
     numbers = sorted({m.group(1) + ":" + m.group(2)
-                      for m in CITE_RE.finditer(flat)})
+                      for m in CITE_RE.finditer(prose)})
     failures = 0
     blocked = False
     for cite in numbers:

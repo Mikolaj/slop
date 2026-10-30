@@ -7833,6 +7833,50 @@
    "bug_text": "0 citations checked"
   },
   {
+   "id": "check-plan-citations-23",
+   "program": "check-plan-citations.py",
+   "name": "a file and line inside fenced code, such as a compiler's diagnostic quoted as output, was refused as a citation by line number: that scan read the whole text, where the link checks skip fenced code",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "a fenced block quoting `R.hs:12:11: warning`, beside a citation `R.hs:5` in prose",
+   "ok": "FAIL R.hs:5 --- LINE-NUMBER alone, exit 1",
+   "bug": "FAIL R.hs:12 --- LINE-NUMBER as well, exit 1",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired 2026-10-30 in check-all over ~/slop/tools on docs/ghc-issue-redundant-bang-pattern-synonym.md, a filed issue body kept as filed, which quotes GHC's -Wredundant-bang-patterns warning at Repro.hs:12:11.",
+   "plant_cmd": "git init -q . && printf 'x = 1\\n' > R.hs && printf 'See `R.hs:5`.\\n\\n```\\nR.hs:12:11: warning: [GHC-38520]\\n```\\n' > d.md",
+   "invoke": [
+    "d.md"
+   ],
+   "expect_exit": 1,
+   "expect_text": "R.hs:5 --- LINE-NUMBER",
+   "expect_absent": "R.hs:12",
+   "bug_exit": 1,
+   "bug_text": "R.hs:12 --- LINE-NUMBER"
+  },
+  {
+   "id": "check-plan-citations-24",
+   "program": "check-plan-citations.py",
+   "name": "a link text that is a Haskell module's name, as GHC.Core.Utils for a permalink into compiler/GHC/Core/Utils.hs, was taken for a path, the dots passing the path-like test, and failed as not the end of its URL",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "[M.N][a], [a] a permalink to M/N.hs#L1",
+   "ok": "the link passes, exit 0",
+   "bug": "FAIL [M.N] --- the link text is not the end of its URL, exit 1",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired 2026-10-30 in check-all over ~/slop/tools on four links of two filed issue bodies kept as filed, docs/ghc-issue-late-float-out.md ([GHC.CoreToStg.Prep], [GHC.Core.Opt.Simplify.Utils]) and docs/ghc-issue-specialised-worker-cbv.md ([GHC.Core.Utils], [GHC.Core.Opt.Specialise]). A module name is now checked to name the cited file: its components, slashed, and .hs or .lhs end the cited path.",
+   "plant_cmd": "git init -q . && git remote add origin https://github.com/x/y.git && mkdir M && printf 'x = 1\\n' > M/N.hs && git add M/N.hs && git -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm base && git update-ref refs/remotes/origin/master HEAD && printf 'See [M.N][a].\\n\\n[a]: https://github.com/x/y/blob/%s/M/N.hs#L1\\n' \"$(git rev-parse HEAD)\" > d.md",
+   "invoke": [
+    "d.md"
+   ],
+   "expect_exit": 0,
+   "bug_exit": 1,
+   "bug_text": "the link text is not the end of its URL"
+  },
+  {
    "id": "check-doc-examples-10",
    "program": "check-doc-examples.py",
    "name": "the pattern for a data declaration's constructors ran its lazy `.*?=` past a declaration with no `=`, a GADT's, to the next `=` anywhere, so capitalised names in a later definition were taken for the document's own and never checked",

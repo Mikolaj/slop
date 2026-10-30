@@ -1954,6 +1954,19 @@ MUTANTS = [
     ('check-plan-citations footnote pair exempt beside a numeric label', 'check-plan-citations.py',
      '                        and not any(k.isdigit() for k in defs):\n',
      '                        and True:\n', ST),
+    # check-plan-citations-23 and -24 (2026-10-30): a file and line in
+    # fenced code refused as a citation; a module's name as a link text
+    # taken for a path. Each watched failing its self-test before it was
+    # written down here.
+    ('check-plan-citations fenced code read for line numbers', 'check-plan-citations.py',
+     '                      for m in CITE_RE.finditer(prose)})\n',
+     '                      for m in CITE_RE.finditer(flat)})\n', ST),
+    ('check-plan-citations a module name taken for a path', 'check-plan-citations.py',
+     '            if MODULE_RE.fullmatch(shown):\n',
+     '            if False:\n', ST),
+    ('check-plan-citations a module name not slashed', 'check-plan-citations.py',
+     '                stem = "/" + shown.replace(".", "/")\n',
+     '                stem = "/" + shown\n', ST),
     # common: the root taken from the cwd again and never from the documents,
     # which from ~/slop is ~/slop for every repository's document
     ('common chdir_root ignores the documents\' repository', 'common.py',
