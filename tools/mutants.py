@@ -2009,4 +2009,15 @@ MUTANTS = [
     ('check-doc-refs searches no FLAG_ROOTS', 'check-doc-refs.py',
      '    for r in FLAG_ROOTS:\n', '    for r in []:\n',
      IN_HORDE % 'check-doc-refs.py'),
+    # NCG-scale: the flag rule's two halves, a probe's growing item and a source
+    # kept byte for byte, each broken
+    ('NCG-scale report flags no rise under 9x', 'NCG-scale/report.py',
+     'r[-1] >= r[0] * 1.02', 'r[-1] >= r[0] * 9', ST),
+    ('NCG-scale report flags a rise not at every doubling', 'NCG-scale/report.py',
+     'flag = all(y > x for x, y in zip(r, r[1:])) and ', 'flag = ', ST),
+    ('NCG-scale gen nest one loop short', 'NCG-scale/gen.py',
+     "    body = '    s = 0;\\n    i1 = 0;\\n    goto l1;\\n'\n    for k in range(1, n + 1):\n",
+     "    body = '    s = 0;\\n    i1 = 0;\\n    goto l1;\\n'\n    for k in range(1, n):\n", ST),
+    ('NCG-scale gen ccalls source changed', 'NCG-scale/gen.py',
+     '+## 1.0##', '+## 2.0##', ST),
 ]

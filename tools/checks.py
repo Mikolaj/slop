@@ -53,6 +53,8 @@ STEPS = [
     ('hpc-untaken self-test', ['python3', '{root}/hpc-untaken.py', '--self-test']),
     ('lazy-reads self-test', ['python3', '{root}/lazy-reads.py', '--self-test']),
     ('loop-reloads self-test', ['python3', '{root}/loop-reloads.py', '--self-test']),
+    ('NCG-scale gen self-test', ['python3', '{root}/NCG-scale/gen.py', '--self-test']),
+    ('NCG-scale report self-test', ['python3', '{root}/NCG-scale/report.py', '--self-test']),
     ('obj-diff self-test', ['python3', '{root}/obj-diff.py', '--self-test']),
     ('one-shot self-test', ['python3', '{root}/one-shot.py', '--self-test']),
     ('perf-per-call self-test', ['python3', '{root}/perf-per-call.py', '--self-test']),
@@ -68,7 +70,7 @@ STEPS = [
     ('ticky-diff self-test', ['python3', '{root}/ticky-diff.py', '--self-test']),
     ('workaround-cites self-test', ['python3', '{root}/workaround-cites.py', '--self-test']),
     ('pyflakes', ['bash', '-c',
-                  'cd "{root}" && { python3 -m pyflakes --version >/dev/null 2>&1 || { echo "python3 -m pyflakes --version failed, so tools/*.py went unlinted"; exit 1; }; } && python3 -m pyflakes *.py']),
+                  'cd "{root}" && { python3 -m pyflakes --version >/dev/null 2>&1 || { echo "python3 -m pyflakes --version failed, so tools/*.py and tools/NCG-scale/*.py went unlinted"; exit 1; }; } && python3 -m pyflakes *.py NCG-scale/*.py']),
     ('shellcheck', ['bash', '-c',
                     'cd "{root}/.." && { command -v shellcheck >/dev/null || { echo "shellcheck is not on PATH (command -v shellcheck finds nothing), so the shell scripts went unlinted"; exit 1; }; } && files=$(git ls-files "*.sh") && if [ -z "$files" ]; then echo "no tracked shell script; nothing linted"; else shellcheck -S warning -f gcc $files; fi']),
     ('doc citations',          ['bash', '-c', DOCS % 'check-plan-citations.py']),
@@ -83,6 +85,9 @@ STEPS = [
 ]
 
 UNCOVERED = {
+    'NCG-scale/run.sh': 'compiles the scaling probes with built GHCs, '
+                        'minutes a pair of compilers; its two parts, '
+                        'gen.py and report.py, have self-tests',
     'machine-busy.sh': 'the busy reading of orthotope micro-regime3\'s '
                        'drivers, run-evening.sh\'s alarm among them, two '
                        'reads of /proc/stat; no case of its own yet',
