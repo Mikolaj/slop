@@ -25,7 +25,8 @@ check-doc-refs-14, check-doc-wrap-11).
 
 bucket sorts a profile's functions into the collector's, the RTS's with
 libc's, and the program's own, and zdecode and demangle make a GHC symbol
-readable, all three from Simon Jakobi's cgwork.py, for compile-cost.py.
+readable, all three from Simon Jakobi's cgwork.py, for compile-cost.py and
+cg-read.py.
 
 The criterion reader serves ab-time.py and bench-baseline.py, which each
 read a `--json` collection's regressions against the iteration count;
@@ -402,7 +403,7 @@ def measured_env():
                 GHCRTS=(os.environ.get("GHCRTS", "") + " -V0").strip())
 
 # --- GHC symbols in profiles: the buckets and the z-decoding of Simon
-# Jakobi's cgwork.py, for compile-cost.py:
+# Jakobi's cgwork.py, for compile-cost.py and cg-read.py:
 # https://gist.github.com/sjakobi/eed39b23f41b06fc41337d137067bd8b
 
 # The collector, the storage manager and the bookkeeping coupled to them.

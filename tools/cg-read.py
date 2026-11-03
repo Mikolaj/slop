@@ -4,8 +4,9 @@ the instructions callgrind saw it execute, read against the binary's
 symbols and disassembly.
 
 Usage: python3 tools/cg-read.py allocs [--min C] BIN RUN N
-       python3 tools/cg-read.py bysym [--top K] BIN_A RUN_A BIN_B RUN_B N
-       python3 tools/cg-read.py incr [--top K] BIN_A RUN_A_N RUN_A_2N
+       python3 tools/cg-read.py bysym [--top K] [--decode]
+                                      BIN_A RUN_A BIN_B RUN_B N
+       python3 tools/cg-read.py incr [--top K] [--decode] BIN_A RUN_A_N RUN_A_2N
                                      BIN_B RUN_B_N RUN_B_2N N
        python3 tools/cg-read.py region [--min C] BIN_A RUN_A BIN_B RUN_B SYM N
        python3 tools/cg-read.py seq [--raw] BIN RUN SYM N LO HI
@@ -45,7 +46,12 @@ executed at least C times a call (0.5 by default), each with its count a
 call and its place, their bytes a call summed, and the info pointers stored
 relative to `%r12`, `movq $INFO,D(%r12)`, by the symbol they name.
 bysym: instructions a call by symbol in two runs, the K largest
-differences (14 by default) and the whole run's.
+differences (14 by default) and the whole run's, and last their sums
+by bucket: the collector's, the RTS's with libc's and the dynamic linker's
+(`other`), and the program's own, sorted by common.bucket, from Simon
+Jakobi's cgwork.py; the RTS's code is part of what generated code costs,
+so the buckets attribute and drop nothing. --decode prints the names
+z-decoded.
 incr: the same between N and 2N calls, (I(2N) - I(N))/N for each binary,
 which cancels the process's setup; the K largest differences (10).
 region: the instructions of the code from symbol SYM to the next symbol
@@ -125,6 +131,9 @@ import re
 import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from common import bucket, zdecode  # noqa: E402
 import tempfile
 
 # The self-test points these at what it needs.
@@ -700,6 +709,33 @@ def option(argv, flag, kind, default):
     return default, argv
 
 
+def flag_option(argv, flag):
+    return flag in argv, [a for a in argv if a != flag]
+
+
+def shown(name, decode):
+    """A symbol's stable name as printed: z-decoded with --decode."""
+    return zdecode(name) if decode and name != 'other' else name
+
+
+BUCKETS = (('collector', 'gc'), ('rts and libc', 'rts'), ('program', 'comp'))
+
+
+def by_bucket(a, b):
+    """The line summing two runs' figures by symbol into the collector's,
+    the RTS's with libc's and the dynamic linker's ('other', outside BIN's
+    text), and the program's own, B's minus A's beside each."""
+    def sums(d):
+        t = collections.Counter()
+        for k, v in d.items():
+            t['rts' if k == 'other' else bucket(k)] += v
+        return t
+    sa, sb = sums(a), sums(b)
+    return 'by bucket: ' + ',  '.join(
+        f'{what} {sb[k] - sa[k]:.2f} (A {sa[k]:.2f} B {sb[k]:.2f})'
+        for what, k in BUCKETS)
+
+
 def text_option(argv, flag):
     if flag in argv:
         i = argv.index(flag)
@@ -733,6 +769,7 @@ def run(argv, notes=None):
         out += [f'  obj {k:6.2f}  {s}' for s, k in objs]
     elif cmd == 'bysym':
         top, argv = option(argv, '--top', int, 14)
+        dec, argv = flag_option(argv, '--decode')
         need(argv, 5)
         n = number(argv[4], 'N')
         ba, bb = get(argv[0]), get(argv[2])
@@ -743,9 +780,12 @@ def run(argv, notes=None):
         for k, v in sorted(d.items(),
                            key=lambda kv: (-abs(kv[1]), kv[0]))[:top]:
             out.append(f'{v:9.2f}  A {A[k] / n:9.2f}  B {B[k] / n:9.2f}'
-                       f'  {k[:100]}')
+                       f'  {shown(k, dec)[:100]}')
+        out.append(by_bucket({k: v / n for k, v in A.items()},
+                             {k: v / n for k, v in B.items()}))
     elif cmd == 'incr':
         top, argv = option(argv, '--top', int, 10)
+        dec, argv = flag_option(argv, '--decode')
         need(argv, 7)
         n = number(argv[6], 'N')
         ba, bb = get(argv[0]), get(argv[3])
@@ -758,7 +798,8 @@ def run(argv, notes=None):
         out.append(f'total A {sa:.2f} B {sb:.2f} B-A {sb - sa:.2f}')
         for k in sorted(keys, key=lambda k: (-abs(ib[k] - ia[k]), k))[:top]:
             out.append(f'{ib[k] - ia[k]:11.2f}  A {ia[k]:12.2f}'
-                       f'  B {ib[k]:12.2f}  {k[:90]}')
+                       f'  B {ib[k]:12.2f}  {shown(k, dec)[:90]}')
+        out.append(by_bucket(ia, ib))
     elif cmd == 'region':
         least, argv = option(argv, '--min', float, 0.25)
         need(argv, 6)
@@ -1090,6 +1131,10 @@ def checks(bad, td):
             '     4.00  A      2.00  B      6.00  ModA_bar_info',
             '     1.00  A      6.50  B      7.50  ModA_foo_info']:
         bad.append(f'bysym output: {out[:3]}')
+    # stg_gc_noregs, the RTS's, and "other", libc's, in one bucket
+    if out[-1:] != ['by bucket: collector 0.00 (A 0.00 B 0.00),  rts and libc'
+                    ' 0.00 (A 5.30 B 5.30),  program 5.00 (A 8.70 B 13.70)']:
+        bad.append(f'bysym\'s buckets: {out[-1:]}')
     if notes != [NOTE.format(fix)]:
         bad.append(f'the note on a binary without internal symbols: {notes}')
     i1, i2 = (assemble(td, f'int{k}', INTERNAL_FIXTURE.replace('UNIQUE', u))
@@ -1107,6 +1152,10 @@ def checks(bad, td):
             '     2.00  A      2.00  B      4.00  ModA_zdwh_entry',
             '     0.00  A      1.00  B      1.00  ModA_foo_info']:
         bad.append(f'an internal procedure of two builds: {out[:3]} {notes}')
+    out, rc = run(['bysym', '--decode', i1, c1, i2, c2, '10'])
+    if rc != 0 or out[1:2] != [
+            '     2.00  A      2.00  B      4.00  ModA_$wh_entry']:
+        bad.append(f'--decode: {out[1:2]}')
     a2 = write_run(os.path.join(td, 'a2.cg'), fix, RUN_A, scale=2)
     b2 = write_run(os.path.join(td, 'b2.cg'), fix, rb, scale=2)
     out, rc = run(['incr', fix, a, a2, fix, bcg, b2, '10'])

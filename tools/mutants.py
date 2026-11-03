@@ -2025,6 +2025,13 @@ MUTANTS = [
     ('NCG-scale collections unmarked', 'NCG-scale/report.py',
      "                coll = name == 'instr' and any(\n",
      '                coll = False and any(\n', ST),
+    # cg-read.py (2026-11-03): bysym's and incr's buckets and --decode.
+    ('cg-read other taken as the program', 'cg-read.py',
+     "            t['rts' if k == 'other' else bucket(k)] += v\n",
+     '            t[bucket(k)] += v\n', ST),
+    ('cg-read --decode ignored', 'cg-read.py',
+     "    return zdecode(name) if decode and name != 'other' else name\n",
+     '    return name\n', ST),
     # compile-cost.py (2026-11-03): each figure, warning and exit of the
     # self-test's, and the buckets and z-decoding from cgwork.py.
     ('compile-cost compare drops the assembly hashes', 'compile-cost.py',
