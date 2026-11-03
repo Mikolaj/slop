@@ -23,7 +23,8 @@ it, every file it generates written out in it, and runs nothing. Run it
 unsandboxed. It exits 0 when every part ran and 2 when it stopped over the
 label's results or a part failed: a compiler missing, or a build, nofib-run,
 a benchmark run or compile-cost.py failing, the part's log saying which;
-compile-cost.py's warnings fail nothing.
+compile-cost.py's warnings fail nothing, nor does nofib-run's exit 1 over
+real/eff alone, some of whose programs GHC rejects.
 
 The work directory (--work, dist-ghcho by default) holds the trees, nofib-r
 (the nofib checkout and its built nofib-run), vpapi (the packages' sources
@@ -90,7 +91,6 @@ NOFIB_J, CABAL_J = 3, 2  # 6
 # Under the work directory.
 NOFIB_RUN = ('nofib-r/nofib/dist-newstyle/build/x86_64-linux/ghc-9.12.4/'
              'nofib-0.1.0.0/x/nofib-run/build/nofib-run/nofib-run')
-HSC2HS = 'nofib-r/c/f/_build/stage0/bin/hsc2hs'
 PAPIPKG = 'vpapi/tasty-papi-settle2'
 PERF_TESTS = 'ghc-g/testsuite/tests/perf/compiler'
 MBB = 'tmp-save-2026-10-30/m9/gen/ManyBasicBlocks.cmm'
@@ -226,7 +226,6 @@ def nofib_part(work, tree, label, level):
         heredoc(f'{w}/ghc', wrapper(tree, label, ghc)),
         f'chmod +x {q(w + "/ghc")}',
         f'ln -s {q(f + "/ghc-pkg")} {q(w + "/ghc-pkg")}',
-        f'ln -s {q(work + "/" + HSC2HS)} {q(w + "/hsc2hs")}',
         f'cd {q(n + "/nofib")} || exit 2',
         f'rm -rf {q("_make/" + res)} {q(stats)}; mkdir -p {q(stats)}',
         f'echo "{tag} start $(date +%T)" >> {q(lines)}',
@@ -237,7 +236,11 @@ def nofib_part(work, tree, label, level):
         '# the shootout inputs and outputs a run generates, 1.1 GB, which'
         ' nothing reads after it',
         f'rm -f {shootout}',
-        '[ $e = 0 ] || exit 2'])
+        '# 1 with every failed target under real/eff is no failure: GHC rejects'
+        ' some of its programs',
+        f'd=$(grep -a "^\\* Depends on: " {q(log)})',
+        '[ $e = 0 ] || { [ $e = 1 ] &&'
+        ' ! printf \'%s\\n\' "$d" | grep -qv /real/eff/; } || exit 2'])
 
 
 def project(work, tree, label, pkg, level):
@@ -438,7 +441,9 @@ def main(argv):
 FAKE = r'''#!/bin/bash
 me=$(basename "$0")
 case $me in
-  nofib-run) echo "nofib-run|$PWD|$NB_STATS|$*" >> "$FAKELOG";;
+  nofib-run) echo "nofib-run|$PWD|$NB_STATS|$*" >> "$FAKELOG"
+             for d in ${FAKEDEPENDS:-}; do echo "* Depends on: _make/x/$d"; done
+             exit "${FAKENOFIB:-0}";;
   cabal) echo "cabal|$PWD|$*" >> "$FAKELOG"
          case " $* " in *" list-bin "*) echo "$FAKEBIN/bench";; esac;;
   setarch) echo "setarch|$*" >> "$FAKELOG"; shift; exec "$@";;
@@ -595,6 +600,18 @@ def self_test():
         if (p.returncode != 2 or 'algorithms-papi run 5 exit 3'
                 not in open(f'{w}/vpapi/vb-ct-x.log').read()):
             bad.append(f'failing benchmark runs exited {p.returncode}, not 2')
+        # nofib-run's exit 1 over real/eff alone is no failure, and any other is.
+        for code, deps, want in (('1', 'real/eff/FS/EffBench.o', 0),
+                                 ('1', 'real/eff/FS/Main spectral/simple/Main', 2),
+                                 ('1', 'spectral/simple/Main', 2),
+                                 ('1', '', 2),
+                                 ('3', 'real/eff/FS/Main', 2)):
+            p = subprocess.run(['bash', '-c', script(w, 't', 'x', '4-6', o, ('nofib-O1',)),
+                                'test'], env=dict(env, FAKENOFIB=code, FAKEDEPENDS=deps),
+                               capture_output=True, text=True)
+            if p.returncode != want:
+                bad.append(f'nofib-run exit {code} over {deps!r}: exited'
+                           f' {p.returncode}, not {want}')
         open(log, 'w').close()
         p = subprocess.run([sys.executable, os.path.abspath(__file__), '--dry',
                             '--work', w, '--out', o, 't', 'x', '4-6',
