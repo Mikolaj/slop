@@ -46,3 +46,9 @@ Lib.hs
 # and ~/slop has no cabal file to resolve a target against.
 cabal CAFlessTest
 cabal convVjpBench
+# Files of nofib's own tree, which docs/nofib-issue-31-make-comment.md, a
+# comment for nofib's tracker, names relative to nofib's root and to its
+# real/ben-raytrace program; nofib is not checked out in ~/slop.
+nofib-common/NofibUtils.hs
+Random/*.hs
+SamplerMonad/*.hs
