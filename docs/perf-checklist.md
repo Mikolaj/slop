@@ -1215,13 +1215,15 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
 - `tools/NCG-battery/battery.py` runs the NCG series' measurement battery
   for one GHC tree under one label, or any of its parts alone: nofib at -O2, -O1
   and -O0, the tasty-papi benchmarks of containers, vector and megaparsec at -O2
-  and -O1, and the fifteen compilations by the tree's stage-1 and stage-2
-  compilers through `compile-cost.py`. Its docstring states each setting once
-  with its reason, nofib's compiler under `+RTS -A3G -V0` and the benchmarks
-  with the RTS clock running among them, and `--dry` prints the script it would
-  run. `nbcmp.py` compares two labels' nofib runs, the collections and copied
-  bytes beside the instructions, `pkgcmp.py` their package benchmarks,
-  and `alone.py` reruns one containers benchmark alone.
+  and -O1, the fifteen compilations by the tree's stage-1 and stage-2 compilers
+  through `compile-cost.py`, GHC's perf tests and the scaling probes.
+  Its docstring states each setting once with its reason, nofib's compiler
+  under `+RTS -A3G -V0` and the benchmarks with the RTS clock running among
+  them, and `--dry` prints the script it would run. `nbcmp.py` compares two
+  labels' nofib runs, the collections and copied bytes beside the instructions,
+  `pkgcmp.py` their package benchmarks, `perfcmp.py` their perf tests and which
+  leave the window GHC's CI holds them to, and `alone.py` reruns one containers
+  benchmark alone.
 - `tools/one-shot.py` recompiles one module of a finished build alone, flags
   added, from the arguments a `cabal build -v2` log records, reading the build's
   interfaces and writing none of its files: a module's Core under a flag,

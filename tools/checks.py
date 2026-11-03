@@ -57,6 +57,7 @@ STEPS = [
     ('NCG-battery battery self-test', ['python3', '{root}/NCG-battery/battery.py', '--self-test']),
     ('NCG-battery nbcmp self-test', ['python3', '{root}/NCG-battery/nbcmp.py', '--self-test']),
     ('NCG-battery pkgcmp self-test', ['python3', '{root}/NCG-battery/pkgcmp.py', '--self-test']),
+    ('NCG-battery perfcmp self-test', ['python3', '{root}/NCG-battery/perfcmp.py', '--self-test']),
     ('NCG-battery alone self-test', ['python3', '{root}/NCG-battery/alone.py', '--self-test']),
     ('NCG-scale gen self-test', ['python3', '{root}/NCG-scale/gen.py', '--self-test']),
     ('NCG-scale report self-test', ['python3', '{root}/NCG-scale/report.py', '--self-test']),

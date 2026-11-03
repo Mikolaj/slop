@@ -3,7 +3,7 @@
 and measure (bytes allocated, the compiler's instructions, assembly lines), N
 ascending.
 
-Usage: python3 tools/NCG-scale/report.py OUT
+Usage: python3 tools/NCG-scale/report.py OUT...
        python3 tools/NCG-scale/report.py --self-test
 
 A row is flagged where the ratio rises at every doubling of N and by 2% or more
@@ -18,7 +18,9 @@ the first scaling run's figures, in which mw's code on chain grew faster than
 the base's (1.34 to 3.00) and lf8's compile cost on loops did (1.012 to 1.183),
 while lf8's on chain did not (1.021 to 1.007)."""
 import math
+import subprocess
 import sys
+import tempfile
 
 
 def report(lines):
@@ -134,6 +136,18 @@ def self_test():
               for x in out if x.endswith('(collections)')]
     if marked != [['x3', 'loops', 'O1']]:
         bad.append(f'collections marked on {marked}, not x3 loops instr')
+    # Several files read as one: battery.py writes a file per compiler.
+    other = ['x3' + x[2:] for x in same]
+    with tempfile.TemporaryDirectory(prefix='ncg-report-') as d:
+        for name, part in (('a', same), ('b', other)):
+            with open(f'{d}/{name}', 'w') as fh:
+                fh.write('\n'.join(part) + '\nscale DONE 12:00:00\n')
+        p = subprocess.run([sys.executable, __file__, f'{d}/a', f'{d}/b'],
+                           capture_output=True, text=True)
+        with open(f'{d}/a') as a, open(f'{d}/b') as b:
+            whole = '\n'.join(report(list(a) + list(b))[0]) + '\n'
+    if p.returncode or p.stdout != whole or 'x3' not in p.stdout:
+        bad.append(f'two files, exit {p.returncode}: {p.stdout[:200]!r}')
     for x in bad:
         print('FAIL', x)
     print('ok   report.py self-test' if not bad else f'{len(bad)} failed')
@@ -143,7 +157,10 @@ def self_test():
 if __name__ == '__main__':
     if sys.argv[1:] == ['--self-test']:
         sys.exit(self_test())
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         sys.exit(__doc__)
-    with open(sys.argv[1]) as f:
-        print('\n'.join(report(f)[0]))
+    lines = []
+    for path in sys.argv[1:]:
+        with open(path) as f:
+            lines += f
+    print('\n'.join(report(lines)[0]))
