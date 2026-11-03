@@ -1224,6 +1224,10 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   `pkgcmp.py` their package benchmarks, `perfcmp.py` their perf tests and which
   leave the window GHC's CI holds them to, and `alone.py` reruns one containers
   benchmark alone.
+- `tools/NCG-fuzz/run.py` compiles and runs `gen.py`'s random programs
+  under many flag sets, by a GHC tree's stage-2 compiler and a base tree's,
+  and reports each disagreement, panic and crash: a test of the NCG's
+  correctness, which measures nothing. `--report` counts its result files.
 - `tools/one-shot.py` recompiles one module of a finished build alone, flags
   added, from the arguments a `cabal build -v2` log records, reading the build's
   interfaces and writing none of its files: a module's Core under a flag,
