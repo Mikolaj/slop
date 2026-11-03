@@ -3,7 +3,8 @@
 (the tables hadrian's test --summary-metrics writes): per metric the tests in
 both, the geometric mean of B/A and the largest moves either way. A metric is
 what GHC's testsuite reads off the compile or the run, such as
-compile_time/bytes allocated, the bytes the compiler allocates on the heap.
+compile_time/bytes allocated, the bytes the compiler allocates on the heap,
+or size, bytes on disk.
 
 Usage: python3 tools/NCG-battery/perfcmp.py [--work DIR] [--out DIR]
            A B [TREE [RANGE]]
@@ -29,6 +30,8 @@ import tempfile
 
 WORK = '/home/mikolaj/slop/dist-ghcho'
 RESIDENCY = ('max_bytes_used', 'peak_megabytes_allocated')  # the driver's
+SIZE_FUNS = ('collect_size', 'collect_size_dir', 'collect_size_ghc_pkg',
+             'collect_object_size')  # the driver's
 MOVES = 6
 
 
@@ -43,10 +46,12 @@ def table(path):
     return out
 
 
-def metrics_of(block):
-    """(metric, tolerance) of the statistics one test of an all.T collects."""
+def metrics_of(block, variables):
+    """(metric, tolerance) of the statistics one test of an all.T collects;
+    variables are the numbers that all.T assigns to names."""
     names = r"(\[[^\]]*\]|'[^']*')"
-    tol = r'([0-9.]+)'
+    tol_re = r'[0-9.]+'
+    tol = f'({tol_re})'
     out = []
     for fun, tag in (('collect_compiler_stats', 'compile_time'),
                      ('collect_stats', 'runtime')):
@@ -59,6 +64,11 @@ def metrics_of(block):
                      ('collect_runtime_residency', 'runtime')):
         for m in re.finditer(rf'\b{fun}\(\s*{tol}\s*\)', block):
             out += [(f'{tag}/{r}', float(m.group(1))) for r in RESIDENCY]
+    for fun in SIZE_FUNS:
+        for m in re.finditer(rf'\b{fun}\(\s*(\w[\w.]*)\s*,', block):
+            tol = variables.get(m.group(1), m.group(1))
+            if re.fullmatch(tol_re, tol):
+                out.append(('size', float(tol)))
     return out
 
 
@@ -72,9 +82,10 @@ def tolerances(tree):
             with open(os.path.join(dp, 'all.T'), errors='replace') as fh:
                 s = fh.read()
             marks = list(re.finditer(r'''^\s*test\s*\(\s*['"]([^'"]+)['"]''', s, re.M))
+            variables = dict(re.findall(r'^(\w+)\s*=\s*([0-9.]+)\s*$', s, re.M))
             for i, m in enumerate(marks):
                 end = marks[i + 1].start() if i + 1 < len(marks) else len(s)
-                for metric, tol in metrics_of(s[m.end():end]):
+                for metric, tol in metrics_of(s[m.end():end], variables):
                     out[(m.group(1), metric)] = tol
     return out
 
@@ -200,6 +211,11 @@ test ('Down',
 test('Run', [ collect_stats(['bytes allocated', 'max_bytes_used'], 5) ],
      compile_and_run, [''])
 test('Within', [ collect_stats('bytes allocated', 5, 'f.stats') ], x, [''])
+thr = 100
+test('Hello', [ collect_size(5, 'hello.o') ], compile, [''])
+test('Dir', [ collect_size_ghc_pkg(thr, 'base') ], static_stats, [])
+test('So', [ req_dynamic_ghc, collect_object_size(thr, "base") ], static_stats, [])
+test('Lib', [ collect_size_dir(10, config.libdir) ], static_stats, [])
 test('Named', [ collect_compiler_stats('bytes allocated', 2) ], compile, [''])
 for t in names:
     test(t, [ collect_compiler_stats('bytes allocated', 2) ], compile, [''])
@@ -213,7 +229,7 @@ MESSAGE = ('Subject\n\nMetric Increase:\n    Named\n    Another\n\n'
            'Not a metric line: Up\n\nMetric Decrease:\n    Run\n')
 
 
-def plant_table(path, values, residency):
+def plant_table(path, values, residency, size):
     with open(path, 'w') as fh:
         fh.write('\n')
         for t, v in values.items():
@@ -221,6 +237,7 @@ def plant_table(path, values, residency):
             fh.write(f'local\t{t}\tnormal\t{tag}/bytes allocated\t{v}\n')
         fh.write(f'local\tDown\tnormal\tcompile_time/max_bytes_used\t{residency}\n')
         fh.write('local\tRun\tnormal\truntime/max_bytes_used\t500\n')
+        fh.write(f'local\tHello\tnormal\tsize\t{size}\n')
         fh.write('other\tRun\tnormal\truntime/max_bytes_used\t999\n')
 
 
@@ -242,8 +259,8 @@ def self_test():
         os.makedirs(f'{tree}/testsuite/tests/perf')
         with open(f'{tree}/testsuite/tests/perf/all.T', 'w') as fh:
             fh.write(ALL_T)
-        plant_table(f'{out}/perf-a.tsv', TSV_A, 1000)
-        plant_table(f'{out}/perf-b.tsv', TSV_B, 1100)
+        plant_table(f'{out}/perf-a.tsv', TSV_A, 1000, 1000)
+        plant_table(f'{out}/perf-b.tsv', TSV_B, 1100, 1070)
         tols = tolerances(tree)
         check('tolerances', tols, {
             ('Up', 'compile_time/bytes allocated'): 2.0,
@@ -253,11 +270,16 @@ def self_test():
             ('Run', 'runtime/bytes allocated'): 5.0,
             ('Run', 'runtime/max_bytes_used'): 5.0,
             ('Within', 'runtime/bytes allocated'): 5.0,
-            ('Named', 'compile_time/bytes allocated'): 2.0})
+            ('Named', 'compile_time/bytes allocated'): 2.0,
+            ('Hello', 'size'): 5.0,
+            ('Dir', 'size'): 100.0,
+            ('So', 'size'): 100.0,
+            ('Lib', 'size'): 10.0})
         a, b = table(f'{out}/perf-a.tsv'), table(f'{out}/perf-b.tsv')
         check('other rows', a[('Run', 'normal', 'runtime/max_bytes_used')], 500.0)
         lines = compare(a, b)
-        check('rows', lines[0], '8 and 8 rows, 8 in both; only in A: []; only in B: []')
+        check('rows', lines[0], '9 and 9 rows, 9 in both; only in A: []; only in B: []')
+        check('size', lines[-3], 'size: 1 tests, geomean +7.000%')
         g = math.exp(sum(math.log(b[k] / a[k]) for k in a
                          if k[2] == 'compile_time/bytes allocated') / 4)
         check('geomean', lines[1], 'compile_time/bytes allocated: 4 tests, geomean '
@@ -266,10 +288,11 @@ def self_test():
         check('rises', lines[3].split(', ')[0], '  rises: Free(normal) +100.000%')
         lines = outside(a, b, tols, n)
         check('windows', lines, [
-            'windows: 7 of 8 rows have a tolerance',
-            'Metric Increase, outside the window: 3',
+            'windows: 8 of 9 rows have a tolerance',
+            'Metric Increase, outside the window: 4',
             '  Named(normal) compile_time/bytes allocated tol 2%: 1000 -> 1100'
             ' +10.00%  named',
+            '  Hello(normal) size tol 5%: 1000 -> 1070 +7.00%  NOT named',
             '  Run(normal) runtime/bytes allocated tol 5%: 1000 -> 1060 +6.00%'
             '  NOT named',
             '  Up(normal) compile_time/bytes allocated tol 2%: 100000 -> 102001'

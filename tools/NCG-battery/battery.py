@@ -2,8 +2,8 @@
 """The measurement battery of the NCG series, for one compiler tree under one
 label: nofib at -O2, -O1 and -O0, the tasty-papi benchmarks of containers,
 vector and megaparsec at -O2 and -O1, the fifteen compilations by the tree's
-stage-1 and stage-2 compilers, GHC's perf tests and the scaling probes; or some
-of these parts alone.
+stage-1 and stage-2 compilers, GHC's perf and size tests and the scaling probes;
+or some of these parts alone.
 
 Usage: python3 tools/NCG-battery/battery.py [--dry] [--work DIR] [--out DIR]
            TREE LABEL CPUS [PART...]
@@ -11,22 +11,23 @@ Usage: python3 tools/NCG-battery/battery.py [--dry] [--work DIR] [--out DIR]
 
 TREE names the work directory's ghc-TREE, whose _build/stage0/bin/ghc is the
 stage-1 compiler and _build/stage1/bin/ghc the stage-2 one. CPUS is a taskset
-list of three CPUs or more. With no PART, the whole battery: it stops if any
-of the label's results exist, copies both compilers to ghc-LABEL beside
-themselves, and runs three lanes on CPUS: nofib; the packages at -O2, then
-at -O1, then the compilations, the stage-1 compiler's on CPUS' second CPU beside
-the stage-2 compiler's on its third; and the perf tests, then the probes, on its
-first CPU. Its lines go to OUT/meas-LABEL.log. A PART -- nofib-O2, nofib-O1,
-nofib-O0, containers-O2, containers-O1, vector-O2, vector-O1, megaparsec-O2,
-megaparsec-O1, comp1, comp2, perf or scale -- runs alone, in the order given,
-on CPUS, with ghc-LABEL already in place. The battery is a bash script; --dry
-prints it, every file it generates written out in it, and runs nothing. Run it
-unsandboxed. It exits 0 when every part ran and 2 when it stopped over the
-label's results or a part failed: a compiler missing, or a build, nofib-run,
-a benchmark run, compile-cost.py, a perf test or a probe failing, the part's log
-saying which, or hadrian rebuilding the compiler the perf tests were to run;
-compile-cost.py's warnings fail nothing, nor does nofib-run's exit 1 over
-real/eff alone, some of whose programs GHC rejects.
+list of three CPUs or more. With no PART, the whole battery: it stops if any of
+the label's results exist, copies both compilers to ghc-LABEL beside themselves,
+and runs three lanes on CPUS: nofib; the packages at -O2, then at -O1, then the
+compilations, the stage-1 compiler's on CPUS' second CPU beside the stage-2
+compiler's on its third; and the probes, on its first CPU; and, those ended, the
+perf and size tests. Its lines go to OUT/meas-LABEL.log. A PART -- nofib-O2,
+nofib-O1, nofib-O0, containers-O2, containers-O1, vector-O2, vector-O1,
+megaparsec-O2, megaparsec-O1, comp1, comp2, perf or scale -- runs alone, in the
+order given, on CPUS, with ghc-LABEL already in place. The battery is a bash
+script; --dry prints it, every file it generates written out in it, and runs
+nothing. Run it unsandboxed. It exits 0 when every part ran and 2 when it
+stopped over the tree's flavour or the label's results or a part failed: a
+compiler missing, or a build, nofib-run, a benchmark run, compile-cost.py, a
+perf or size test or a probe failing, the part's log saying which, or hadrian
+rebuilding the compiler the perf tests were to run; compile-cost.py's warnings
+fail nothing, nor does nofib-run's exit 1 over real/eff alone, some of whose
+programs GHC rejects.
 
 The work directory (--work, dist-ghcho by default) holds the trees, nofib-r
 (the nofib checkout and its built nofib-run), vpapi (the packages' sources
@@ -45,8 +46,10 @@ and pkgcmp.py:
   comp        OUT/compN-LABEL.txt, compile-cost.py's table, OUT/compN-LABEL.runs,
               its --out file, and its first round's assembly in OUT/pLABEL
               (stage 1) and OUT/pLABEL-2 (stage 2)
-  perf        OUT/perf-LABEL.tsv, hadrian's --summary-metrics table, for
-              perfcmp.py; OUT/perf-LABEL-summary.txt and OUT/perf-LABEL.log
+  perf        OUT/perf-LABEL.tsv, hadrian's --summary-metrics table of both
+              runs, for perfcmp.py; OUT/perf-LABEL-summary.txt and
+              OUT/perf-LABEL.log and, of the size tests,
+              OUT/perf-LABEL-size-summary.txt and OUT/perf-LABEL-size.log
   scale       OUT/scale-LABEL.txt, tools/NCG-scale/run.sh's lines, for
               tools/NCG-scale/report.py with the base's file first
 
@@ -79,13 +82,23 @@ The settings, each stated here and nowhere else:
    2026-11-03), so that the compiler's figures beside the programs' are those
    of a GHC the series compiled; earlier labels' are the stage-1 compiler's.
    comp1 alone runs the stage-1 compiler, which GHC 9.12.4 compiled.
-8. The perf tests run by hadrian/build -j1 --freeze1 test --only-perf, in the
-   flavour _build/flavour names, one round: the figures GHC's CI judges, under
+8. The perf tests run by hadrian/build -jN --freeze1 test --only-perf, N being
+   how many CPUS are given, one round: the figures GHC's CI judges, under
    the RTS options the testsuite driver gives, counting allocation and residency
-   and no instructions. Hadrian tests the stage-2 compiler and rebuilds it
-   where the tree's sources changed, so the part fails unless the compiler is
-   still the copy ghc-LABEL.
+   and no instructions. A table at -j10 under load differed from one at -j1
+   by no more than a second -j1 run did. They run after the lanes, so that they
+   do not contend with the programs the lanes count.
+   --only-perf leaves out the size tests of testsuite/tests/perf/size, which
+   count bytes on disk, so a second such run names that directory and adds its
+   rows to the same table; those needing a dynamically linked compiler are
+   skipped under the flavour of setting 10. Hadrian tests the stage-2 compiler
+   and rebuilds it where the tree's sources changed, so the part fails unless
+   the compiler is still the copy ghc-LABEL.
 9. The probes run under tools/NCG-scale/run.sh's own settings.
+10. A tree is measured only in hadrian's flavour
+    perf+no_profiled_libs+no_dynamic_libs, that of the trees the battery's
+    results compare across, so nothing runs if its _build/flavour names another
+    or none.
 """
 
 import contextlib
@@ -107,12 +120,14 @@ SCALE_RUN = os.path.join(os.path.dirname(HERE), 'NCG-scale', 'run.sh')
 ROUNDS = {'containers': 5, 'vector': 5, 'megaparsec': 10}  # 3
 NOFIB_RTS = '+RTS -A3G -V0 -RTS'  # 5
 NOFIB_J, CABAL_J = 3, 2  # 6
+FLAVOUR = 'perf+no_profiled_libs+no_dynamic_libs'  # 10
 
 # Under the work directory.
 NOFIB_RUN = ('nofib-r/nofib/dist-newstyle/build/x86_64-linux/ghc-9.12.4/'
              'nofib-0.1.0.0/x/nofib-run/build/nofib-run/nofib-run')
 PAPIPKG = 'vpapi/tasty-papi-settle2'
 PERF_TESTS = 'ghc-g/testsuite/tests/perf/compiler'
+SIZE_TESTS = 'testsuite/tests/perf/size'
 MBB = 'tmp-save-2026-10-30/m9/gen/ManyBasicBlocks.cmm'
 CONTAINERS_CABAL = 'vpapi/ctr/containers/containers-tests/containers-tests.cabal'
 SPECTRAL_MAKEFILE = 'nofib-r/nofib/spectral/Makefile'
@@ -342,26 +357,35 @@ def comp_part(work, tree, label, stage, cpu, outdir, cc=COMPILE_COST):
         '[ $e != 2 ] || exit 2'])
 
 
-def perf_part(work, tree, label, cpu, outdir):
+def perf_part(work, tree, label, jobs, outdir):
     t = f'{work}/ghc-{tree}'
     ghc = '_build/stage1/bin/ghc'
     base = f'{outdir}/perf-{label}'
+    tsv = q(base + '.tsv')
+    hadrian = (f'timeout 14400 hadrian/build -j{jobs} --flavour={FLAVOUR}'
+               ' --docs=none --freeze1 test')
     return '\n'.join([
-        "# GHC's perf tests by the stage-2 compiler, one test at a time",
+        "# GHC's perf tests by the stage-2 compiler",
         f'cd {q(t)} || exit 2',
         f'[ -x {q(f"{ghc}-{label}")} ] || {{ echo "perf {label}: no {t}/{ghc}-{label}"; exit 2; }}',
         f'[ -e {q(base + ".tsv")} ] && {{ echo "perf {label}: {base}.tsv exists"; exit 2; }}',
         f'mkdir -p {q(outdir)}',
-        f'timeout 14400 taskset -c {cpu} hadrian/build -j1'
-        ' --flavour="$(cat _build/flavour)" --docs=none --freeze1 test --only-perf'
-        f' --summary={q(base + "-summary.txt")} --summary-metrics={q(base + ".tsv")}'
+        f'{hadrian} --only-perf'
+        f' --summary={q(base + "-summary.txt")} --summary-metrics={tsv}'
         f' > {q(base + ".log")} 2>&1; e=$?',
         f'echo "perf {label} exit $e $(date +%T):'
         f' $(grep -E \'unexpected failures|expected passes\' {q(base + "-summary.txt")}'
         ' | tr -s \' \' | tr \'\\n\' \';\')"',
+        '# the size tests, which --only-perf leaves out; the driver appends to the table',
+        f'{hadrian} --test-root-dirs={SIZE_TESTS}'
+        f' --summary={q(base + "-size-summary.txt")} --summary-metrics={tsv}'
+        f' > {q(base + "-size.log")} 2>&1; e2=$?',
+        f'echo "perf {label} size exit $e2 $(date +%T):'
+        f' $(grep -E \'unexpected failures|expected passes\' {q(base + "-size-summary.txt")}'
+        ' | tr -s \' \' | tr \'\\n\' \';\')"',
         f'cmp -s {ghc} {q(f"{ghc}-{label}")}'
         f' || {{ echo "perf {label}: hadrian rebuilt {ghc}"; exit 2; }}',
-        '[ $e = 0 ] || exit 2'])
+        '[ $e = 0 ] && [ $e2 = 0 ] || exit 2'])
 
 
 def scale_part(work, tree, label, cpu, outdir, sc=SCALE_RUN):
@@ -397,7 +421,7 @@ def part(name, work, tree, label, cpus, outdir, cc, sc):
     elif fam in PKGS:
         body = pkg_part(work, tree, label, fam, int(lev))
     elif name == 'perf':
-        body = perf_part(work, tree, label, cpus[0], outdir)
+        body = perf_part(work, tree, label, len(cpus), outdir)
     elif name == 'scale':
         body = scale_part(work, tree, label, cpus[0], outdir, sc)
     else:
@@ -418,6 +442,9 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
                          f' {" ".join(PARTS)}')
     cpus = cpu_list(cpus_spec)
     pin = f'taskset -cp {q(cpus_spec)} $BASHPID > /dev/null || exit 2'
+    flavour = f'{work}/ghc-{tree}/_build/flavour'
+    flavour_ok = (f'[ "$(cat {q(flavour)} 2>/dev/null)" = {q(FLAVOUR)} ]'
+                  f' || {{ echo "battery STOP, {flavour} does not name {FLAVOUR}"; exit 2; }}')
 
     def p(name):
         return part(name, work, tree, label, cpus, outdir, cc, sc)
@@ -425,7 +452,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
             f'# NCG-battery: tree {tree}, label {label}, CPUs {cpus_spec},'
             f' work {work}, out {outdir}', 'set -u']
     if parts:
-        return '\n'.join(head + ['(', pin, 'f=0'] + [p(x) for x in parts]
+        return '\n'.join(head + [flavour_ok, '(', pin, 'f=0'] + [p(x) for x in parts]
                          + ['exit $f', ')']) + '\n'
     n, v, g = f'{work}/nofib-r', f'{work}/vpapi', f'{work}/ghc-{tree}/_build'
     stop = [f'{n}/nofib/_make/c{tree}-{label}', f'{n}/nofib/_make/o1-{label}',
@@ -440,6 +467,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
         f'mkdir -p {q(outdir)} || exit 2',
         f'exec >> {q(f"{outdir}/meas-{label}.log")} 2>&1',
         f'echo "== measure {label} (tree {tree}) $(date +%T)"',
+        flavour_ok,
         f'for p in {" ".join(q(x) for x in stop)}; do',
         '  [ -e "$p" ] && { echo "meas STOP, $p exists"; exit 2; }',
         'done',
@@ -456,14 +484,16 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
         '(', p('comp2'), 'exit $f', ') & q2=$!',
         'wait $q1 || f=2; wait $q2 || f=2',
         f'echo "comp DONE {label} $(date +%T)"', 'exit $f', ') & p2=$!',
-        '(', pin, 'f=0', p('perf'), p('scale'),
-        f'echo "perf and scale DONE {label} $(date +%T)"', 'exit $f', ') & p3=$!',
+        '(', pin, 'f=0', p('scale'),
+        f'echo "scale DONE {label} $(date +%T)"', 'exit $f', ') & p3=$!',
         'wait $p1; s1=$?; wait $p2; s2=$?; wait $p3; s3=$?',
+        '(', pin, 'f=0', p('perf'),
+        f'echo "perf DONE {label} $(date +%T)"', 'exit $f', ')', 's4=$?',
         f'grep -h "^nbf {label} exit" {q(n + "/nbf.log")} | tail -1',
         f'grep -h -E "^nbo [01] {label} exit" {q(n + "/nbo.log")} | tail -2',
         f'for f in {logs}; do tail -1 "$f"; done',
         f'echo "measured {label} $(date +%T)"',
-        '[ $s1 = 0 ] && [ $s2 = 0 ] && [ $s3 = 0 ]'
+        '[ $s1 = 0 ] && [ $s2 = 0 ] && [ $s3 = 0 ] && [ $s4 = 0 ]'
         ' || { echo "a part failed"; exit 2; }']
     return '\n'.join(head + body) + '\n'
 
@@ -515,9 +545,10 @@ case $me in
   build) echo "build|$PWD|$*" >> "$FAKELOG"
          for a in "$@"; do case $a in
            --summary=*) echo "  1 expected passes" > "${a#*=}";;
-           --summary-metrics=*) : > "${a#*=}";;
+           --summary-metrics=*) : >> "${a#*=}";;
          esac; done
          [ -z "${FAKEREBUILD:-}" ] || echo rebuilt >> _build/stage1/bin/ghc
+         case " $* " in *" --test-root-dirs="*) exit "${FAKESIZE:-0}";; esac
          exit "${FAKEPERF:-0}";;
   taskset) echo "taskset|$1 $2" >> "$FAKELOG"; [ "$1" = -cp ] && exit 0
            shift 2; exec "$@";;
@@ -559,7 +590,7 @@ def plant(d):
     with open(f'{d}/scale.sh', 'w') as fh:
         fh.write(FAKE_SCALE)
     with open(f'{w}/ghc-t/_build/flavour', 'w') as fh:
-        fh.write('fl+av\n')
+        fh.write(FLAVOUR + '\n')
     return w, fb
 
 
@@ -637,10 +668,14 @@ def self_test():
                 for s, c, k in ((1, 5, ''), (2, 6, '-2'))]
         if sorted(of('compile-cost')) != want:
             bad.append(f'compile-cost ran {of("compile-cost")}')
-        if sorted(of('taskset')) != ['-c 4'] + ['-cp 4-6'] * 3:
+        if of('taskset') != ['-cp 4-6'] * 4:
             bad.append(f'taskset ran {of("taskset")}')
-        want = [f'{w}/ghc-t|-j1 --flavour=fl+av --docs=none --freeze1 test --only-perf'
-                f' --summary={o}/perf-x-summary.txt --summary-metrics={o}/perf-x.tsv']
+        hadrian = f'{w}/ghc-t|-j3 --flavour={FLAVOUR} --docs=none --freeze1 test'
+        want = [f'{hadrian} --only-perf --summary={o}/perf-x-summary.txt'
+                f' --summary-metrics={o}/perf-x.tsv',
+                f'{hadrian} --test-root-dirs={SIZE_TESTS}'
+                f' --summary={o}/perf-x-size-summary.txt'
+                f' --summary-metrics={o}/perf-x.tsv']
         if of('build') != want:
             bad.append(f'hadrian ran {of("build")}')
         want = [f'4|{o}/scale-x.txt x={w}/ghc-t/_build/stage1/bin/ghc-x']
@@ -677,6 +712,8 @@ def self_test():
         for s in ('stage0', 'stage1'):
             if not os.path.isfile(f'{w}/ghc-t/_build/{s}/bin/ghc-x'):
                 bad.append(f'no copy of the {s} compiler')
+        log0 = f'{d}/fake-first.log'
+        shutil.copy(log, log0)
         open(log, 'w').close()
         p = run()
         meas = open(f'{o}/meas-x.log').read()
@@ -689,9 +726,10 @@ def self_test():
         if (p.returncode != 2 or 'algorithms-papi run 5 exit 3'
                 not in open(f'{w}/vpapi/vb-ct-x.log').read()):
             bad.append(f'failing benchmark runs exited {p.returncode}, not 2')
-        # A perf test failing, a compiler rebuilt, a probe failing and earlier
-        # results each fail their part.
+        # A perf test failing, a size test failing, a compiler rebuilt, a probe
+        # failing and earlier results each fail their part.
         for name, extra, word in (('perf', {'FAKEPERF': '1'}, 'perf x exit 1'),
+                                  ('perf', {'FAKESIZE': '1'}, 'perf x size exit 1'),
                                   ('perf', {'FAKEREBUILD': '1'}, 'hadrian rebuilt'),
                                   ('perf', {}, 'perf-x.tsv exists'),
                                   ('scale', {'FAKESCALE': '1'}, 'scale x'),
@@ -709,13 +747,45 @@ def self_test():
                            f' {p.stdout[-200:]}')
             shutil.copy(f'{w}/ghc-t/_build/stage1/bin/ghc-x',
                         f'{w}/ghc-t/_build/stage1/bin/ghc')
-        # A failure in the third lane fails the whole battery.
-        o3 = f'{d}/out-whole'
-        p = subprocess.run(['bash', '-c', script(w, 't', 'y', '4-6', o3, cc=f'{d}/cc.py',
-                                                 sc=f'{d}/scale.sh'), 'test'],
-                           env=dict(env, FAKEPERF='1'), capture_output=True, text=True)
-        if p.returncode != 2 or 'a part failed' not in open(f'{o3}/meas-y.log').read():
-            bad.append(f'a failing perf test in the whole battery: {p.returncode}')
+        # A tree in another flavour, or naming none, measures nothing, whether
+        # by the whole battery or by a part.
+        flav = f'{w}/ghc-t/_build/flavour'
+        for content in ('perf\n', FLAVOUR + '+x\n', None):
+            if content is None:
+                os.unlink(flav)
+            else:
+                with open(flav, 'w') as fh:
+                    fh.write(content)
+            for parts in ((), ('nofib-O2',), ('perf',), ('scale',)):
+                o4 = f'{d}/out-flavour'
+                shutil.rmtree(o4, ignore_errors=True)
+                open(log, 'w').close()
+                p = subprocess.run(['bash', '-c', script(w, 't', 'z', '4-6', o4, parts,
+                                                         cc=f'{d}/cc.py', sc=f'{d}/scale.sh'),
+                                    'test'], env=env, capture_output=True, text=True)
+                meas = f'{o4}/meas-z.log'
+                said = p.stdout + (open(meas).read() if os.path.isfile(meas) else '')
+                if (p.returncode != 2 or open(log).read() or 'battery STOP' not in said
+                        or os.path.exists(f'{w}/ghc-t/_build/stage1/bin/ghc-z')):
+                    bad.append(f'flavour {content!r}, parts {parts}: exited'
+                               f' {p.returncode}, ran {open(log).read()[:80]!r}')
+        with open(flav, 'w') as fh:
+            fh.write(FLAVOUR + '\n')
+        # The perf tests start when the lanes have ended.
+        lines = open(log0).read().split('\n')
+        last = max(i for i, x in enumerate(lines)
+                   if x and not x.startswith(('build|', 'taskset|')))
+        if not any(x.startswith('build|') for x in lines[last:]) or any(
+                x.startswith('build|') for x in lines[:last]):
+            bad.append('the perf tests overlap the lanes')
+        # A failure in the probes' lane or the perf tests fails the whole battery.
+        for lab, what in (('y', 'FAKEPERF'), ('z', 'FAKESCALE')):
+            o3 = f'{d}/out-whole-{lab}'
+            p = subprocess.run(['bash', '-c', script(w, 't', lab, '4-6', o3, cc=f'{d}/cc.py',
+                                                     sc=f'{d}/scale.sh'), 'test'],
+                               env=dict(env, **{what: '1'}), capture_output=True, text=True)
+            if p.returncode != 2 or 'a part failed' not in open(f'{o3}/meas-{lab}.log').read():
+                bad.append(f'{what} in the whole battery: {p.returncode}')
         # nofib-run's exit 1 over real/eff alone is no failure, and any other is.
         for code, deps, want in (('1', 'real/eff/FS/EffBench.o', 0),
                                  ('1', 'real/eff/FS/Main spectral/simple/Main', 2),

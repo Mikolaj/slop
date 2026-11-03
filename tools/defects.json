@@ -8534,6 +8534,36 @@
    "discovery": "review",
    "notes": "Mikolaj asked on 2026-11-03 for a confirmation that everything measured ran bootstrapped; reading each driver found this. On the scaling probes the stages' assembly was the same and their compile instructions were not. The program figures of earlier labels rest on the two stages generating the same code.",
    "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
+  },
+  {
+   "id": "NCG-battery-03",
+   "program": "NCG-battery/battery.py",
+   "name": "a tree of any flavour was measured in silence, so figures of differently built compilers could be set side by side",
+   "family": "quiet-failure",
+   "fix_rev": "self",
+   "trigger": "battery.py, whole or any part, on a tree whose _build/flavour is not perf+no_profiled_libs+no_dynamic_libs, or which has none",
+   "ok": "the script says battery STOP and exits 2 before anything runs or is copied",
+   "bug": "the parts ran, and the perf part read its flavour off the same file",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "Mikolaj asked on 2026-11-03 what flavour a rebuild was and whether the script prescribes it; it prescribed none. No measured tree on record was of another flavour.",
+   "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
+  },
+  {
+   "id": "NCG-battery-04",
+   "program": "NCG-battery/battery.py",
+   "name": "the perf part ran none of the tests of testsuite/tests/perf/size, so GHC's own measures of code size stayed out of the battery",
+   "family": "other:measured-less-than-it-said",
+   "fix_rev": "self",
+   "trigger": "any perf part: --only-perf keeps the tests _collect_stats marks, and the size tests go through collect_generic_stat",
+   "ok": "a second hadrian run names that directory and adds its rows to the same table, and perfcmp.py reads their tolerances",
+   "bug": "the table had no row of metric size, and nothing said so",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "review",
+   "notes": "Found on 2026-11-03 reading the flavour's effect on the tests: 0 of perf/size's tests in perf-lj.tsv. The tests that need a dynamically linked compiler stay skipped under the flavour NCG-battery-03 requires.",
+   "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
   }
  ]
 }
