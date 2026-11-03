@@ -13,8 +13,8 @@ Usage: python3 tools/compile-cost.py [--cpu CPU] [--rounds R] [--rts OPTS]
        python3 tools/compile-cost.py cg-diff CG_A CG_B
        python3 tools/compile-cost.py --self-test
 
-Each LABEL=GHC is a compiler, a stage-1 one such as a hadrian tree's
-_build/stage0/bin/ghc or a copy of it, with `-B LIBDIR` passed where
+Each LABEL=GHC is a compiler, such as a hadrian tree's bootstrapped
+_build/stage1/bin/ghc or a copy of it, with `-B LIBDIR` passed where
 @LIBDIR is given (a copied binary does not find its tree's libdir). Each
 cell of CELLS, a comma-separated list of NAME:LEVEL, compiles NAME.hs of
 --tests DIR (a GHC checkout's testsuite/tests/perf/compiler) or, for the

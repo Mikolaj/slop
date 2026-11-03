@@ -2,7 +2,8 @@
 # run.sh OUT BASE LABEL...: the scaling probes, gen.py's shapes at N =
 # $SCALEN (default 50 100 200 400), compiled to assembly at -O1 and -O2
 # by each compiler, BASE first; a compiler is LABEL=PATH, or LABEL for
-# ghc-LABEL/_build/stage0/bin/ghc under the working directory. Appends to OUT
+# ghc-LABEL/_build/stage1/bin/ghc under the working directory, the bootstrapped
+# stage-2 compiler, whose cost the stage-1 one misstates. Appends to OUT
 # one line per compile, "label shape level N bytes instructions asm-lines
 # collections", for report.py; every compile under +RTS -A3G -V0 beside GHC's
 # own RTS options, as tools/compile-cost.py runs it: a compile allocating less
@@ -19,7 +20,7 @@ ulimit -v 8000000
 mkdir -p "$W" && (cd "$W" && python3 "$H/gen.py" $NS) || exit 1
 for spec in "$@"; do
   l=${spec%%=*}; g=${spec#*=}
-  [ "$g" = "$spec" ] && g=$PWD/ghc-$l/_build/stage0/bin/ghc
+  [ "$g" = "$spec" ] && g=$PWD/ghc-$l/_build/stage1/bin/ghc
   for O in 1 2; do for p in $(python3 "$H/gen.py" --shapes); do for n in $NS; do
     src=$W/$p$n.hs; ext=-XBangPatterns
     [ -f "$src" ] || { src=$W/$p$n.cmm; ext=; }

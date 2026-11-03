@@ -67,6 +67,11 @@ The settings, each stated here and nowhere else:
    which nbcmp.py's compiler collections show.
 6. nofib-run at -j3 and cabal at -j2, the two lanes sharing CPUS, as the
    scripts replaced ran them.
+7. nofib and the packages are built by the stage-2 compiler with the
+   libraries the stage-1 compiler built, the bootstrapped GHC (Mikolaj,
+   2026-11-03), so that the compiler's figures beside the programs' are those
+   of a GHC the series compiled; earlier labels' are the stage-1 compiler's.
+   comp1 alone runs the stage-1 compiler, which GHC 9.12.4 compiled.
 """
 
 import contextlib
@@ -199,7 +204,7 @@ def wrapper(tree, label, ghc):
 
 def nofib_part(work, tree, label, level):
     n = f'{work}/nofib-r'
-    f = f'{work}/ghc-{tree}/_build/stage0/bin'
+    f = f'{work}/ghc-{tree}/_build/stage1/bin'
     ghc = f'{f}/ghc-{label}'
     if level == 2:
         tag, wdir, res = f'nbf {label}', f'{n}/c{tree}/{label}', f'c{tree}-{label}'
@@ -245,7 +250,7 @@ def nofib_part(work, tree, label, level):
 
 def project(work, tree, label, pkg, level):
     p = PKGS[pkg]
-    g = f'{work}/ghc-{tree}/_build/stage0/bin'
+    g = f'{work}/ghc-{tree}/_build/stage1/bin'
     ci = '' if tree == 'f' else p.get('unless_f', '')
     head = [f'packages: {p["packages"]}{ci} {work}/{PAPIPKG}',
             f'with-compiler: {g}/ghc-{label}',
@@ -269,7 +274,7 @@ def project(work, tree, label, pkg, level):
 def pkg_part(work, tree, label, pkg, level):
     p = PKGS[pkg]
     v = f'{work}/vpapi'
-    ghc = f'{work}/ghc-{tree}/_build/stage0/bin/ghc-{label}'
+    ghc = f'{work}/ghc-{tree}/_build/stage1/bin/ghc-{label}'
     lab = f'c{tree}-{label}' if level == 2 else f'c{tree}-o{level}-{label}'
     # the -O1 builds share the -O2 store: the dependencies are built as there
     cabal = 'cabal --store-dir=' + q(f'{v}/store-c{tree}-{label}')
@@ -516,7 +521,7 @@ def self_test():
                 != 3:
             bad.append('nofib-run not under setarch -R')
         line = (f'exec perf stat -x, -e instructions:u -o "$NB_STATS/$id.csv"'
-                f' -- {w}/ghc-t/_build/stage0/bin/ghc-x +RTS -A3G -V0 -RTS "$@"')
+                f' -- {w}/ghc-t/_build/stage1/bin/ghc-x +RTS -A3G -V0 -RTS "$@"')
         for wr in (f'{nb}/ct/x/w/ghc', f'{nb}/co/x/w/ghc'):
             if not os.path.isfile(wr) or line not in open(wr).read().split('\n'):
                 bad.append(f'{wr} lacks the line {line!r}')
@@ -558,7 +563,7 @@ def self_test():
         if of('taskset') != ['-cp 4-6'] * 2:
             bad.append(f'taskset ran {of("taskset")}')
         # A whole file, an -O1 file's stanzas and megaparsec's packages.
-        g = f'{w}/ghc-t/_build/stage0/bin'
+        g = f'{w}/ghc-t/_build/stage1/bin'
         want = [('ctr/cabal.project.ct-x', str.__eq__,
                  'packages: containers/containers-tests tasty-bench-papi'
                  f' {w}/vpapi/tasty-papi-settle2\nwith-compiler: {g}/ghc-x\n'
