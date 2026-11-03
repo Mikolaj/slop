@@ -8504,6 +8504,21 @@
    "discovery": "review",
    "notes": "Found on 2026-11-03 when an NCG series probe's ManyBasicBlocks rows, counted by a script of the same shape outside this tree, moved up to 2% between runs of one compiler; run.sh had the same RTS options. Under -A3G a compile allocating less than the area collects once and repeats within 0.003%; the probes' largest shapes allocate more, so report.py marks those rows rather than the options settling them.",
    "no_audit": "other:needs-built-ghc-compilers"
+  },
+  {
+   "id": "NCG-battery-01",
+   "program": "NCG-battery/battery.py",
+   "name": "a nofib part failed on any exit but 0, and nofib-run exits 1 on every run over the real/eff programs GHC rejects, so a whole battery could only end in exit 2 and a program failing elsewhere read the same",
+   "family": "other:always-failing-guard",
+   "fix_rev": "2c755ad38b8a",
+   "trigger": "a nofib part over a nofib checkout some of whose real/eff programs GHC rejects",
+   "ok": "the part passes where every failed target Shake names is under real/eff, and fails on any other target or any exit but 0 and 1",
+   "bug": "exit 2 from every whole battery, whatever had failed",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "Found on 2026-11-03 before the tool's first real run, by reading the exits of the scripts it replaced, which ignored theirs. The self-test's fake nofib-run always exited 0, so it could not show this; it now plays each exit, and the mutants prove those cases bite.",
+   "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
   }
  ]
 }
