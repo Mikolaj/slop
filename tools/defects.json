@@ -8489,6 +8489,21 @@
     "branch": "post-inlining-catalogue",
     "path": "tools/probe-entries-sweep.py"
    }
+  },
+  {
+   "id": "NCG-scale-01",
+   "program": "NCG-scale/run.sh",
+   "name": "the compiler's instruction counts carried the collector's work, whose collections fall elsewhere from one run to the next at byte-equal allocation under GHC's own RTS options",
+   "family": "environment-decides",
+   "fix_rev": "aa52a8ba8164",
+   "trigger": "a compile run as GHC's own -with-rtsopts leave it, -H sizing the heap after each major collection",
+   "ok": "every compile under +RTS -A3G -V0, its collections recorded, report.py marking an instr row whose compiles collected more than once",
+   "bug": "a compile under GHC's own options alone: ManyBasicBlocks at -O1, a compile of one size as the probes', spread 0.3% in instructions over three runs of one compiler at byte-equal allocation, its collections numbering 232 to 235",
+   "proved": "ran",
+   "harm": "unknown",
+   "discovery": "review",
+   "notes": "Found on 2026-11-03 when an NCG series probe's ManyBasicBlocks rows, counted by a script of the same shape outside this tree, moved up to 2% between runs of one compiler; run.sh had the same RTS options. Under -A3G a compile allocating less than the area collects once and repeats within 0.003%; the probes' largest shapes allocate more, so report.py marks those rows rather than the options settling them.",
+   "no_audit": "other:needs-built-ghc-compilers"
   }
  ]
 }
