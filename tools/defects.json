@@ -8519,6 +8519,21 @@
    "discovery": "review",
    "notes": "Found on 2026-11-03 before the tool's first real run, by reading the exits of the scripts it replaced, which ignored theirs. The self-test's fake nofib-run always exited 0, so it could not show this; it now plays each exit, and the mutants prove those cases bite.",
    "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
+  },
+  {
+   "id": "NCG-battery-02",
+   "program": "NCG-battery/battery.py",
+   "name": "nofib and the packages were built by the stage-1 compiler, which GHC 9.12.4 compiled, so the compile figures beside the programs described no compiler the series had compiled",
+   "family": "other:measured-the-wrong-compiler",
+   "fix_rev": "dceb19bdb4e9",
+   "trigger": "any nofib or package part of the battery, and NCG-scale/run.sh given a bare label",
+   "ok": "the parts' wrappers and project files name _build/stage1/bin, the stage-2 compiler; comp1 alone names stage 0, as a control",
+   "bug": "with-compiler and the nofib wrapper named _build/stage0/bin",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "review",
+   "notes": "Mikolaj asked on 2026-11-03 for a confirmation that everything measured ran bootstrapped; reading each driver found this. On the scaling probes the stages' assembly was the same and their compile instructions were not. The program figures of earlier labels rest on the two stages generating the same code.",
+   "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
   }
  ]
 }
