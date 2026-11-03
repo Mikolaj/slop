@@ -8564,6 +8564,21 @@
    "discovery": "review",
    "notes": "Found on 2026-11-03 reading the flavour's effect on the tests: 0 of perf/size's tests in perf-lj.tsv. The tests that need a dynamically linked compiler stay skipped under the flavour NCG-battery-03 requires.",
    "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
+  },
+  {
+   "id": "NCG-battery-05",
+   "program": "NCG-battery/pkgcmp.py",
+   "name": "containers' and megaparsec's comparison read no allocation, though their tables carry it, so real allocation rises stayed out of a list of regressions",
+   "family": "other:measured-less-than-it-said",
+   "fix_rev": "self",
+   "trigger": "any pkgcmp.py containers or megaparsec run where a benchmark's ALLOC differs",
+   "ok": "it prints a line of how many differ and each, rises then falls",
+   "bug": "it printed instructions alone, and a list drawn from it said nothing of them",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "review",
+   "notes": "2026-11-04: while filling the MR description's allocation sentence, containers' graph dfs.star,n=1000000 was found +11.39%, exact at every run, after a regression list of the same session had said nothing of it.",
+   "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
   }
  ]
 }

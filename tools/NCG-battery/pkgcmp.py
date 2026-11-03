@@ -10,15 +10,16 @@ Usage: python3 tools/NCG-battery/pkgcmp.py [--work DIR] containers A B [N]
        python3 tools/NCG-battery/pkgcmp.py --self-test
 
 containers and megaparsec mind the runs' spread: a benchmark whose runs agree
-within 0.05% in both labels is compared by its minimum, moving if by more
-than 0.05%; any other moves only where the two labels' ranges do not
-overlap. Prints how many rise and fall, the geometric mean of the minima's
-ratios over the stable ones, and the N (20 by default) largest rises and
-falls. vector prints, per benchmark, ALLOC's change and the minimum TOT_INS
-over each label's runs, with the geometric mean of the TOT_INS ratios.
-tasty-papi's CSVs carry ALLOC beside the counters and no collections or
-copied bytes, so a rise here cannot be told mutator from collector. The work
-directory is battery.py's, dist-ghcho by default."""
+within 0.05% in both labels is compared by its minimum, moving if by more than
+0.05%; any other moves only where the two labels' ranges do not overlap. Prints
+how many rise and fall, the geometric mean of the minima's ratios over the
+stable ones, and the N (20 by default) largest rises and falls, then every
+benchmark whose lowest ALLOC differs, up to N each way. vector prints, per
+benchmark, ALLOC's change and the minimum TOT_INS over each label's runs, with
+the geometric mean of the TOT_INS ratios. tasty-papi's CSVs carry ALLOC beside
+the counters and no collections or copied bytes, so a rise here cannot be told
+mutator from collector. The work directory is battery.py's, dist-ghcho by
+default."""
 import csv
 import glob
 import math
@@ -40,14 +41,14 @@ def rows(path):
         return {r['benchmark']: r for r in csv.DictReader(fh)}
 
 
-def load_spread(v, d, label):
+def load_spread(v, d, label, column='TOT_INS'):
     runs = defaultdict(list)
     for p in glob.glob(os.path.join(v, d, label, '*.csv')):
         prog = re.match(r'(.*)-\d+\.csv$', os.path.basename(p)).group(1)
         runs[prog].append(rows(p))
     if not runs:
         raise ValueError(f'no runs in {os.path.join(v, d, label)}')
-    return {f'{prog}/{b}': [int(r[b]['TOT_INS']) for r in rs if b in r]
+    return {f'{prog}/{b}': [int(r[b][column]) for r in rs if b in r]
             for prog, rs in runs.items() for b in rs[0]}
 
 
@@ -79,7 +80,22 @@ def spread(v, d, a, b, n=20):
         out.append(title)
         for dd, k, x, y, how in sel:
             out.append(f'  {k[:80]:80} {x!s:>22} {y!s:>22} {dd * 100:+.3f}% {how}')
-    return out
+    return out + allocation(load_spread(v, d, a, 'ALLOC'),
+                            load_spread(v, d, b, 'ALLOC'), n)
+
+
+def allocation(A, B, n):
+    """The lines of the benchmarks whose lowest ALLOC differs, rises then falls,
+    a base of 0 counting as 1."""
+    moved = sorted(((min(B[k]) / max(min(va), 1) - 1, k, min(va), min(B[k]))
+                    for k, va in A.items() if B.get(k) and min(B[k]) != min(va)),
+                   reverse=True)
+    rises = [m for m in moved if m[0] > 0]
+    falls = [m for m in moved if m[0] < 0]
+    return ([f'allocation: {len(moved)} benchmarks differ in their lowest ALLOC,'
+             f' {len(rises)} rise, {len(falls)} fall']
+            + [f'  {k[:80]:80} {x!s:>22} {y!s:>22} {dd * 100:+.3f}%'
+               for dd, k, x, y in rises[:n] + falls[-n:]])
 
 
 def load_vector(v, label):
@@ -114,6 +130,10 @@ def vector(v, a, b):
     return out
 
 
+ALLOCS = {('B', 'All.s'): 110, ('B', 'All.u'): 50, ('A', 'All.d'): 0,
+          ('B', 'All.d'): 32768}
+
+
 def write_csv(path, recs):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as fh:
@@ -137,13 +157,17 @@ def self_test():
         for lab, bs in ins.items():
             for i in (0, 1):
                 write_csv(f'{v}/cres/{lab}/p-{i + 1}.csv',
-                          [(k, 0, x[i]) for k, x in bs.items()])
+                          [(k, ALLOCS.get((lab, k), 100), x[i]) for k, x in bs.items()])
         got = spread(v, 'cres', 'A', 'B')
         want = ['B against A: 6 benchmarks, 2 stable in both; 2 rise, 1 fall;'
                 ' geometric mean over the stable +0.499%', 'rises',
                 ('p/All.d', '1000..1010', '1100..1105', '+8.911%', 'disjoint'),
                 ('p/All.s', '1000', '1010', '+1.000%', 'stable'), 'falls',
-                ('p/All.f', '1000..1010', '900..950', '-5.000%', 'disjoint')]
+                ('p/All.f', '1000..1010', '900..950', '-5.000%', 'disjoint'),
+                'allocation: 3 benchmarks differ in their lowest ALLOC, 2 rise, 1 fall',
+                ('p/All.d', '0', '32768', '+3276700.000%'),
+                ('p/All.s', '100', '110', '+10.000%'),
+                ('p/All.u', '100', '50', '-50.000%')]
         got = [x if not x.startswith('  ') else tuple(x.split()) for x in got]
         if got != want:
             bad.append(f'containers: {got}')

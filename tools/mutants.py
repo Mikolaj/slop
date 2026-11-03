@@ -2191,6 +2191,13 @@ MUTANTS = [
     ('NCG-battery third lane not waited for', 'NCG-battery/battery.py',
      "        '[ $s1 = 0 ] && [ $s2 = 0 ] && [ $s3 = 0 ] && [ $s4 = 0 ]'\n",
      "        '[ $s1 = 0 ] && [ $s2 = 0 ] && [ $s4 = 0 ]'\n", ST),
+    # Allocation left out of the comparison (NCG-battery-05).
+    ('NCG-battery pkgcmp allocation left out', 'NCG-battery/pkgcmp.py',
+     "    return out + allocation(load_spread(v, d, a, 'ALLOC'),\n"
+     "                            load_spread(v, d, b, 'ALLOC'), n)\n",
+     "    return out\n", ST),
+    ('NCG-battery pkgcmp instructions read as allocation', 'NCG-battery/pkgcmp.py',
+     "[int(r[b][column]) for r in rs if b in r]", "[int(r[b]['TOT_INS']) for r in rs if b in r]", ST),
     ('NCG-battery perfcmp window on B', 'NCG-battery/perfcmp.py',
      '        lo, hi = bounds(a[k], tol)\n', '        lo, hi = bounds(b[k], tol)\n', ST),
     ('NCG-battery perfcmp directions swapped', 'NCG-battery/perfcmp.py',
