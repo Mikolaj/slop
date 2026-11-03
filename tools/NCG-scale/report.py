@@ -8,7 +8,10 @@ Usage: python3 tools/NCG-scale/report.py OUT
 
 A row is flagged where the ratio rises at every doubling of N and by 2% or more
 from the smallest N to the largest: the label's excess over the base then grows
-faster than the base. "base^" is the base's own growth exponent over the last
+faster than the base. An instr row is marked "(collections)" where a line of
+its label or the base's, the eighth field being the compile's collections,
+collected more than once: its instructions then include the collector's work.
+"base^" is the base's own growth exponent over the last
 doubling, so that the base's own super-linear shapes are told apart: on chain,
 assembly grows about as N^1.9 and allocation as N^2.4. The self-test replays
 the first scaling run's figures, in which mw's code on chain grew faster than
@@ -21,7 +24,7 @@ import sys
 def report(lines):
     """The report's lines, and the set of flagged (label, shape, level,
     measure)."""
-    rows, labels, fails = {}, [], []
+    rows, labels, fails, gcs = {}, [], [], {}
     for line in lines:
         f = line.split()
         if not f or f[0] == 'scale':
@@ -33,6 +36,8 @@ def report(lines):
         if lab not in labels:
             labels.append(lab)
         rows[(lab, shape, lev, n)] = [int(x) for x in f[4:7]]
+        if len(f) > 7 and f[7].isdigit():
+            gcs[(lab, shape, lev, n)] = int(f[7])
     out, flagged = [], set()
     if not labels:
         return ['no rows'] + fails, flagged
@@ -55,8 +60,12 @@ def report(lines):
                 flag = all(y > x for x, y in zip(r, r[1:])) and r[-1] >= r[0] * 1.02
                 if flag:
                     flagged.add((lab, shape, lev, name))
+                coll = name == 'instr' and any(
+                    gcs.get((x, shape, lev, n), 0) > 1
+                    for x in (lab, base) for n in ns)
                 out.append(f"{'FLAG' if flag else '    '} {lab:6} {shape:9} {lev} {name:5} "
-                           + ' '.join(f'{x:.3f}' for x in r) + f'  base^{exp:.2f}')
+                           + ' '.join(f'{x:.3f}' for x in r) + f'  base^{exp:.2f}'
+                           + ('  (collections)' if coll else ''))
     out += fails
     out.append(f'{len(flagged)} flagged; N = {" ".join(map(str, allns))}; base {base}')
     return out, flagged
@@ -118,6 +127,13 @@ def self_test():
     _, flagged = report(same + noisy)
     if flagged:
         bad.append(f'a ratio not rising at every doubling flagged {sorted(flagged)}')
+    # The eighth field: one collection everywhere but x2 loops at N = 400.
+    gl = [x + (' 3' if x.startswith('x2 loops O1 400') else ' 1') for x in same]
+    out, _ = report(gl + ['x3' + x[2:] for x in gl])
+    marked = [[t for t in x.split() if t != 'FLAG'][:3]
+              for x in out if x.endswith('(collections)')]
+    if marked != [['x3', 'loops', 'O1']]:
+        bad.append(f'collections marked on {marked}, not x3 loops instr')
     for x in bad:
         print('FAIL', x)
     print('ok   report.py self-test' if not bad else f'{len(bad)} failed')

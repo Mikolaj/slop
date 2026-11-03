@@ -23,6 +23,10 @@ item, for check-doc-refs.py and check-doc-wrap.py: each had a reader of
 its own, and each lacked a case another had (heading-outline-07,
 check-doc-refs-14, check-doc-wrap-11).
 
+bucket sorts a profile's functions into the collector's, the RTS's with
+libc's, and the program's own, and zdecode and demangle make a GHC symbol
+readable, all three from Simon Jakobi's cgwork.py, for compile-cost.py.
+
 The criterion reader serves ab-time.py and bench-baseline.py, which each
 read a `--json` collection's regressions against the iteration count;
 horde-ad's check-conv-bench-props.py keeps a copy of it, CI checking
@@ -396,3 +400,85 @@ def measured_env():
     GHCRTS."""
     return dict(os.environ,
                 GHCRTS=(os.environ.get("GHCRTS", "") + " -V0").strip())
+
+# --- GHC symbols in profiles: the buckets and the z-decoding of Simon
+# Jakobi's cgwork.py, for compile-cost.py:
+# https://gist.github.com/sjakobi/eed39b23f41b06fc41337d137067bd8b
+
+# The collector, the storage manager and the bookkeeping coupled to them.
+GC = re.compile(
+    r'evacuate|scavenge|GarbageCollect|todo_block|mark_root|markCAFs|markSRT'
+    r'|push_scanned|popWSDeque|pushWSDeque|stealWSDeque|gcWorkerThread'
+    r'|freeGroup|freeChain|allocGroup|allocBlock|allocNursery|allocLargeChunk'
+    r'|alloc_mega_group|alloc_todo|resizeNurser|clearNursery|prepare_collected'
+    r'|StablePtrTable|StableNameTable|rememberOldStable|gcStableName'
+    r'|thunk_selector|threadPaused|nonmoving|update_remembered'
+    r'|scheduleFinalizers|stat_end|getNumberOfProcessors'
+    r'|notifyTodoBlock|scheduleDoGC|^schedule$|updateThunk|traverseWeakPtr'
+    r'|calcNeeded|updateAdjacentFrames|gcThread|waitForGcThreads'
+    r'|pruneSparkQueue|markCapability|tidyWeakList|getCurrentThreadCPUTime')
+# The RTS's hand-written code, libc and the dynamic linker; unsymbolised code.
+RTS_CODE = re.compile(
+    r'^stg_|^__stg_|^\?\?\?$|^rts_|^dirty_|^newCAF|^pthread_'
+    r'|^__memcpy|^__memset|^__memcmp|^_dl_|^_int_|^_dl'
+    r'|do_lookup_x|check_match|dl_lookup|dl_relocate|dl_name_match'
+    r'|^strcmp|^strlen|^strncmp|^memcmp|^malloc$|^free$|^calloc$|^realloc$'
+    r'|clock_gettime|getMonotonicNSec')
+
+
+def bucket(fn):
+    return 'gc' if GC.search(fn) else 'rts' if RTS_CODE.search(fn) else 'comp'
+
+
+_ZL = {'z': 'z', 'a': '&', 'b': '|', 'c': '^', 'd': '$', 'e': '=', 'g': '>',
+       'h': '#', 'i': '.', 'l': '<', 'm': '-', 'n': '!', 'p': '+', 'q': "'",
+       'r': '\\', 's': '/', 't': '*', 'u': '_', 'v': '%'}
+_ZU = {'Z': 'Z', 'L': '(', 'R': ')', 'M': '[', 'N': ']', 'C': ':'}
+
+
+def zdecode(s):
+    """GHC's z-encoding undone (GHC.Utils.Encoding.zEncodeString)."""
+    out, i, n = [], 0, len(s)
+    while i < n:
+        c = s[i]
+        d = s[i + 1] if i + 1 < n else ''
+        if c in 'zZ' and d.isdigit():
+            j = i + 1
+            while j < n and s[j] in '0123456789abcdefABCDEF':
+                j += 1
+            if c == 'z' and j < n and s[j] == 'U':
+                out.append(chr(int(s[i + 1:j], 16)))
+                i = j + 1
+                continue
+            j = i + 1
+            while j < n and s[j].isdigit():
+                j += 1
+            if c == 'Z' and j < n and s[j] in 'TH':
+                a = int(s[i + 1:j])
+                sep = ',' * (a - 1) if a else ''
+                out.append(f'(#{sep}#)' if s[j] == 'H' else f'({sep})')
+                i = j + 1
+                continue
+            out.append(c)
+            i += 1
+        elif c == 'z' and d in _ZL:
+            out.append(_ZL[d])
+            i += 2
+        elif c == 'Z' and d in _ZU:
+            out.append(_ZU[d])
+            i += 2
+        else:
+            out.append(c)
+            i += 1
+    return ''.join(out)
+
+
+def demangle(s):
+    """A GHC symbol as Module.name, its unit dropped; another symbol, one
+    without an encoded `.`, as it is."""
+    if 'zi' not in s:
+        return s
+    parts = s.split('_')
+    if len(parts) < 3:
+        return zdecode(s)
+    return f'{zdecode(parts[1])}.{zdecode("_".join(parts[2:]))}'

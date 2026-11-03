@@ -46,6 +46,7 @@ STEPS = [
     ('check-doc-refs self-test', ['python3', '{root}/check-doc-refs.py', '--self-test'], '{root}/../horde-ad'),
     ('check-doc-wrap self-test', ['python3', '{root}/check-doc-wrap.py', '--self-test']),
     ('check-plan-citations self-test', ['python3', '{root}/check-plan-citations.py', '--self-test'], '{root}/..'),
+    ('compile-cost self-test', ['python3', '{root}/compile-cost.py', '--self-test']),
     ('core-diff self-test', ['python3', '{root}/core-diff.py', '--self-test']),
     ('ctime-diff self-test', ['python3', '{root}/ctime-diff.py', '--self-test']),
     ('hascallstack self-test', ['python3', '{root}/hascallstack.py', '--self-test']),

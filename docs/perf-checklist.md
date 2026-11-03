@@ -131,6 +131,16 @@ Not a check: the conditions every timing below assumes.
   builds rather than a level; a level, such as instructions an element, wants
   calls enough that doubling them leaves it.
 - `-A32m`, and `-A4m` too where a library's users may run at the default area.
+- **A GHC's own compile cost** --- compilers from two trees, compared on what
+  compiling some modules costs them --- is counted
+  by `python3 $T/compile-cost.py`, natively under `+RTS -A3G -V0`: under GHC's
+  own RTS options the collections move from run to run at byte-equal allocation,
+  and the instructions of compiling ManyBasicBlocks at -O1, 42% of them
+  the collector's, spread 0.3% over three runs of one compiler, where
+  under `-A3G` they repeat within 0.003% (2026-11-03). The instructions
+  are then the mutator's; collection shows in the allocation, collections
+  and copied bytes printed beside them. Extend the tool rather than compose
+  a probe by hand.
 - The RTS clock running, as in a user's runs, on every native timed or counted
   process of horde-ad or orthotope. GHC
   [#28060](https://gitlab.haskell.org/ghc/ghc/-/work_items/28060)'s fix,
@@ -1189,6 +1199,19 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   of the run. On one pair of orthotope builds whose Core shrank by 2.3%,
   the time ratio was 1.005, inside the controls' 1.004 to 1.114,
   and the allocation ratio 0.978, the steadier measure.
+- `tools/compile-cost.py` counts what compiling each of a set of modules costs
+  several GHCs --- instructions natively under `+RTS -A3G -V0`, allocation
+  and collections --- and whether their assembly differs, by default
+  over the fifteen compilations of the NCG series' measurements, and says where
+  a compile collected more than once, a figure moved between rounds or a compile
+  failed. Its `cg` mode runs one compile under cachegrind and splits
+  its instructions into the collector's, the RTS's with libc's,
+  and the compiler's own, and `cg-diff` gives the last's difference by function,
+  z-decoded: the split and the decoding are Simon Jakobi's
+  [cgwork.py](https://gist.github.com/sjakobi/eed39b23f41b06fc41337d137067bd8b).
+  `tools/NCG-scale/run.sh` compiles its scaling probes under the same options
+  and records each compile's collections, which `report.py` marks where they
+  exceed one.
 - `tools/one-shot.py` recompiles one module of a finished build alone, flags
   added, from the arguments a `cabal build -v2` log records, reading the build's
   interfaces and writing none of its files: a module's Core under a flag,
