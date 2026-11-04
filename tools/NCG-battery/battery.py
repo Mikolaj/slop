@@ -13,10 +13,12 @@ TREE names the work directory's ghc-TREE, whose _build/stage0/bin/ghc is the
 stage-1 compiler and _build/stage1/bin/ghc the stage-2 one. CPUS is a taskset
 list of three CPUs or more. With no PART, the whole battery: it stops if any of
 the label's results exist, copies both compilers to ghc-LABEL beside themselves,
-and runs three lanes on CPUS: nofib; the packages at -O2, then at -O1, then the
-compilations, the stage-1 compiler's on CPUS' second CPU beside the stage-2
-compiler's on its third; and the probes, on its first CPU; and, those ended, the
-perf and size tests. Its lines go to OUT/meas-LABEL.log. A PART -- nofib-O2,
+and on CPUS builds the packages, one after another, with only the probes beside
+them, on its first CPU; then runs five lanes at once: containers' rounds at -O2;
+containers' at -O1; vector's at -O2, then at -O1; megaparsec's at -O2, then
+at -O1; and nofib; those ended, the compilations, the stage-1 compiler's on CPUS'
+second CPU beside the stage-2 compiler's on its third; and then the perf and size
+tests. Its lines go to OUT/meas-LABEL.log. A PART -- nofib-O2,
 nofib-O1, nofib-O0, containers-O2, containers-O1, vector-O2, vector-O1,
 megaparsec-O2, megaparsec-O1, comp1, comp2, perf or scale -- runs alone, in the
 order given, on CPUS, with ghc-LABEL already in place. The battery is a bash
@@ -75,8 +77,12 @@ The settings, each stated here and nowhere else:
    at byte-equal allocation, and the compiler's instructions spread by 0.3%
    to 0.65%. A module whose compile allocates more than 3 GB collects again,
    which nbcmp.py's compiler collections show.
-6. nofib-run at -j3 and cabal at -j2, their lanes sharing CPUS, as the
-   scripts replaced ran them.
+6. nofib-run at -j5 and cabal at -j8, the lanes sharing CPUS, as Mikolaj ruled
+   on 2026-11-03 for the series' full rebuild: "run containers, vector and
+   megaparsec each on its own lane in parallel and at the same time run nofib
+   at -j5"; "give -O2 and -O1 of containers their own lanes"; "if you build
+   packages when nothing runs except probes, then do `cabal -j8`". Labels before
+   then ran nofib-run at -j3 and cabal at -j2, the packages in one lane.
 7. nofib and the packages are built by the stage-2 compiler with the
    libraries the stage-1 compiler built, the bootstrapped GHC (Mikolaj,
    2026-11-03), so that the compiler's figures beside the programs' are those
@@ -119,7 +125,7 @@ SCALE_RUN = os.path.join(os.path.dirname(HERE), 'NCG-scale', 'run.sh')
 # The settings of the docstring, by number.
 ROUNDS = {'containers': 5, 'vector': 5, 'megaparsec': 10}  # 3
 NOFIB_RTS = '+RTS -A3G -V0 -RTS'  # 5
-NOFIB_J, CABAL_J = 3, 2  # 6
+NOFIB_J, CABAL_J = 5, 8  # 6
 FLAVOUR = 'perf+no_profiled_libs+no_dynamic_libs'  # 10
 
 # Under the work directory.
@@ -173,6 +179,7 @@ PKGS = {
 PARTS = ('nofib-O2', 'nofib-O1', 'nofib-O0', 'containers-O2', 'vector-O2',
          'megaparsec-O2', 'containers-O1', 'vector-O1', 'megaparsec-O1',
          'comp1', 'comp2', 'perf', 'scale')
+PKG_PARTS = PARTS[3:9]
 EOF = 'NCG_EOF'
 
 
@@ -301,7 +308,7 @@ def project(work, tree, label, pkg, level):
     return '\n'.join(head) + '\n' + ''.join('\n' + s for s in stanzas)
 
 
-def pkg_part(work, tree, label, pkg, level):
+def pkg_part(work, tree, label, pkg, level, steps=('build', 'run')):
     p = PKGS[pkg]
     v = f'{work}/vpapi'
     ghc = f'{work}/ghc-{tree}/_build/stage1/bin/ghc-{label}'
@@ -312,14 +319,19 @@ def pkg_part(work, tree, label, pkg, level):
             + q(f'{v}/{p["builddir"]}-{lab}'))
     progs = p.get('progs') or containers_progs(work)
     out = [f'# {pkg} at -O{level}, label {lab}',
-           'exec > ' + q(f'{v}/{p["log"]}-{lab}.log') + ' 2>&1',
+           ('exec > ' if 'build' in steps else 'exec >> ')
+           + q(f'{v}/{p["log"]}-{lab}.log') + ' 2>&1',
            'echo "start $(date +%T)"',
            f'[ -x {q(ghc)} ] || {{ echo "no compiler {ghc}"; exit 2; }}',
-           'cd ' + q(f'{v}/{p["src"]}') + ' || exit 2',
-           heredoc(f'cabal.project.{lab}', project(work, tree, label, pkg, level)),
-           f'{cabal} build -j{CABAL_J} {p["build"]} {opts}'
-           f' || {{ echo "{p["log"]} {lab} build failed"; exit 2; }}',
-           'echo "built $(date +%T)"', 'f=0']
+           'cd ' + q(f'{v}/{p["src"]}') + ' || exit 2']
+    if 'build' in steps:
+        out += [heredoc(f'cabal.project.{lab}', project(work, tree, label, pkg, level)),
+                f'{cabal} build -j{CABAL_J} {p["build"]} {opts}'
+                f' || {{ echo "{p["log"]} {lab} build failed"; exit 2; }}',
+                'echo "built $(date +%T)"']
+    if 'run' not in steps:
+        return '\n'.join(out)
+    out.append('f=0')
     if p['resdir']:
         r = q(f'{v}/' + p['resdir'].format(lab=lab))
         out.append(f'rm -rf {r}; mkdir -p {r}')
@@ -414,12 +426,12 @@ def cpu_list(spec):
     return out
 
 
-def part(name, work, tree, label, cpus, outdir, cc, sc):
+def part(name, work, tree, label, cpus, outdir, cc, sc, steps=('build', 'run')):
     fam, _, lev = name.partition('-O')
     if fam == 'nofib':
         body = nofib_part(work, tree, label, int(lev))
     elif fam in PKGS:
-        body = pkg_part(work, tree, label, fam, int(lev))
+        body = pkg_part(work, tree, label, fam, int(lev), steps)
     elif name == 'perf':
         body = perf_part(work, tree, label, len(cpus), outdir)
     elif name == 'scale':
@@ -446,8 +458,12 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
     flavour_ok = (f'[ "$(cat {q(flavour)} 2>/dev/null)" = {q(FLAVOUR)} ]'
                   f' || {{ echo "battery STOP, {flavour} does not name {FLAVOUR}"; exit 2; }}')
 
-    def p(name):
-        return part(name, work, tree, label, cpus, outdir, cc, sc)
+    def p(name, steps=('build', 'run')):
+        return part(name, work, tree, label, cpus, outdir, cc, sc, steps)
+
+    def lane(pid, done, *ps):
+        return ['(', pin, 'f=0', *ps, f'echo "{done} DONE {label} $(date +%T)"',
+                'exit $f', f') & {pid}=$!']
     head = ['#!/bin/bash',
             f'# NCG-battery: tree {tree}, label {label}, CPUs {cpus_spec},'
             f' work {work}, out {outdir}', 'set -u']
@@ -463,6 +479,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
             f'{outdir}/scale-{label}.txt']
     logs = ' '.join(q(f'{v}/{PKGS[k]["log"]}-c{tree}{o}-{label}.log')
                     for k in PKGS for o in ('', '-o1'))
+    build, run = ('build',), ('run',)
     body = [
         f'mkdir -p {q(outdir)} || exit 2',
         f'exec >> {q(f"{outdir}/meas-{label}.log")} 2>&1',
@@ -474,27 +491,28 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
         f'cp {q(g + "/stage0/bin/ghc")} {q(f"{g}/stage0/bin/ghc-{label}")}'
         f' && cp {q(g + "/stage1/bin/ghc")} {q(f"{g}/stage1/bin/ghc-{label}")}'
         ' || { echo "meas STOP, copies failed"; exit 2; }',
-        '(', pin, 'f=0', p('nofib-O2'), p('nofib-O1'), p('nofib-O0'),
-        f'echo "nofib DONE {label} $(date +%T)"', 'exit $f', ') & p1=$!',
-        '(', pin, 'f=0', p('containers-O2'), p('vector-O2'), p('megaparsec-O2'),
-        f'echo "packages -O2 DONE {label} $(date +%T)"',
-        p('containers-O1'), p('vector-O1'), p('megaparsec-O1'),
-        f'echo "packages -O1 DONE {label} $(date +%T)"',
+        's=0',
+        *lane('probes', 'scale', p('scale')),
+        *lane('built', 'packages built', *[p(x, build) for x in PKG_PARTS]),
+        'wait $probes || s=2; wait $built || s=2',
+        *lane('c2', 'containers -O2', p('containers-O2', run)),
+        *lane('c1', 'containers -O1', p('containers-O1', run)),
+        *lane('vec', 'vector', p('vector-O2', run), p('vector-O1', run)),
+        *lane('mega', 'megaparsec', p('megaparsec-O2', run), p('megaparsec-O1', run)),
+        *lane('nb', 'nofib', p('nofib-O2'), p('nofib-O1'), p('nofib-O0')),
+        'wait $c2 || s=2; wait $c1 || s=2; wait $vec || s=2; wait $mega || s=2; wait $nb || s=2',
+        '(', pin, 'f=0',
         '(', p('comp1'), 'exit $f', ') & q1=$!',
         '(', p('comp2'), 'exit $f', ') & q2=$!',
         'wait $q1 || f=2; wait $q2 || f=2',
-        f'echo "comp DONE {label} $(date +%T)"', 'exit $f', ') & p2=$!',
-        '(', pin, 'f=0', p('scale'),
-        f'echo "scale DONE {label} $(date +%T)"', 'exit $f', ') & p3=$!',
-        'wait $p1; s1=$?; wait $p2; s2=$?; wait $p3; s3=$?',
+        f'echo "comp DONE {label} $(date +%T)"', 'exit $f', ') || s=2',
         '(', pin, 'f=0', p('perf'),
-        f'echo "perf DONE {label} $(date +%T)"', 'exit $f', ')', 's4=$?',
+        f'echo "perf DONE {label} $(date +%T)"', 'exit $f', ') || s=2',
         f'grep -h "^nbf {label} exit" {q(n + "/nbf.log")} | tail -1',
         f'grep -h -E "^nbo [01] {label} exit" {q(n + "/nbo.log")} | tail -2',
         f'for f in {logs}; do tail -1 "$f"; done',
         f'echo "measured {label} $(date +%T)"',
-        '[ $s1 = 0 ] && [ $s2 = 0 ] && [ $s3 = 0 ] && [ $s4 = 0 ]'
-        ' || { echo "a part failed"; exit 2; }']
+        '[ $s = 0 ] || { echo "a part failed"; exit 2; }']
     return '\n'.join(head + body) + '\n'
 
 
@@ -540,7 +558,13 @@ case $me in
              for d in ${FAKEDEPENDS:-}; do echo "* Depends on: _make/x/$d"; done
              exit "${FAKENOFIB:-0}";;
   cabal) echo "cabal|$PWD|$*" >> "$FAKELOG"
-         case " $* " in *" list-bin "*) echo "$FAKEBIN/bench";; esac;;
+         case " $* " in
+           *" list-bin "*) echo "$FAKEBIN/bench";;
+           *" build "*) sleep "${FAKESLEEP:-0}"; exit "${FAKECABAL:-0}";;
+         esac;;
+  bench) echo "bench|$*" >> "$FAKELOG"; sleep "${FAKESLEEP:-0}"
+         case "$*" in *"${FAKEBENCH:-no such benchmark}"*) exit 3;; esac
+         exit "${FAKEFAIL:-0}";;
   setarch) echo "setarch|$*" >> "$FAKELOG"; shift; exec "$@";;
   build) echo "build|$PWD|$*" >> "$FAKELOG"
          for a in "$@"; do case $a in
@@ -605,7 +629,8 @@ def self_test():
         open(log, 'w').close()
 
         def run():
-            return subprocess.run(['bash', '-c', text, 'test'], env=env,
+            return subprocess.run(['bash', '-c', text, 'test'],
+                                  env=dict(env, FAKESLEEP='0.05'),
                                   capture_output=True, text=True)
         p = run()
         with open(log) as fh:
@@ -617,11 +642,11 @@ def self_test():
             return [x.split('|', 1)[1] for x in got if x.startswith(prog + '|')]
         perf = '--speed=Norm --perf --perf-arg=-e --perf-arg=instructions:u'
         nb = f'{w}/nofib-r'
-        want = [f'{nb}/nofib|{nb}/stats/ct-x|-j3 -w {nb}/ct/x/w/ghc -o ct-x {perf}',
-                f'{nb}/nofib|{nb}/stats/o1-x|-j3 -w {nb}/co/x/w/ghc -o o1-x'
+        want = [f'{nb}/nofib|{nb}/stats/ct-x|-j5 -w {nb}/ct/x/w/ghc -o ct-x {perf}',
+                f'{nb}/nofib|{nb}/stats/o1-x|-j5 -w {nb}/co/x/w/ghc -o o1-x'
                 f' --compiler-arg -O1 {perf}',
                 f'{nb}/nofib|{nb}/stats/o0-x|imaginary real shootout'
-                f' spectral/ansi spectral/fish -j3 -w {nb}/co/x/w/ghc -o o0-x'
+                f' spectral/ansi spectral/fish -j5 -w {nb}/co/x/w/ghc -o o0-x'
                 f' --compiler-arg -O0 {perf}']
         if of('nofib-run') != want:
             bad.append(f'nofib-run ran {of("nofib-run")}')
@@ -635,7 +660,7 @@ def self_test():
                 bad.append(f'{wr} lacks the line {line!r}')
         builds = [x for x in of('cabal') if ' build ' in x]
         s = f'--store-dir={w}/vpapi/store-ct-x'
-        want = [f'{w}/vpapi/{src}|{s} build -j2 {t} --project-file=cabal.project.{lab}'
+        want = [f'{w}/vpapi/{src}|{s} build -j8 {t} --project-file=cabal.project.{lab}'
                 f' --builddir={w}/vpapi/{bd}-{lab}'
                 for o1 in ('', 'o1-')
                 for src, t, bd in (('ctr', 'containers-tests:benchmarks', 'cdist'),
@@ -658,7 +683,7 @@ def self_test():
             for i in range(1, 11):
                 c = f'-j1 --csv {w}/vpapi/mres/ct-{o1}x/bench-speed-{i}.csv'
                 want += [f'setarch|-R {fb}/bench {c}', f'bench|{c}']
-        if runs != want:
+        if sorted(runs) != sorted(want):
             extra = [x for x in runs if x not in want][:2]
             bad.append(f'benchmark runs: {len(runs)}, not {len(want)}; first'
                        f' unexpected {extra}')
@@ -668,8 +693,13 @@ def self_test():
                 for s, c, k in ((1, 5, ''), (2, 6, '-2'))]
         if sorted(of('compile-cost')) != want:
             bad.append(f'compile-cost ran {of("compile-cost")}')
-        if of('taskset') != ['-cp 4-6'] * 4:
+        if of('taskset') != ['-cp 4-6'] * 9:
             bad.append(f'taskset ran {of("taskset")}')
+        for k, lv in (('vb', ''), ('vb', 'o1-'), ('mb', ''), ('mb', 'o1-'),
+                      ('cb', ''), ('cb', 'o1-')):
+            t = open(f'{w}/vpapi/{k}-ct-{lv}x.log').read()
+            if 'built' not in t or 'DONE' not in t:
+                bad.append(f'the log {k}-ct-{lv}x.log is {t!r}')
         hadrian = f'{w}/ghc-t|-j3 --flavour={FLAVOUR} --docs=none --freeze1 test'
         want = [f'{hadrian} --only-perf --summary={o}/perf-x-summary.txt'
                 f' --summary-metrics={o}/perf-x.tsv',
@@ -778,14 +808,43 @@ def self_test():
         if not any(x.startswith('build|') for x in lines[last:]) or any(
                 x.startswith('build|') for x in lines[:last]):
             bad.append('the perf tests overlap the lanes')
-        # A failure in the probes' lane or the perf tests fails the whole battery.
-        for lab, what in (('y', 'FAKEPERF'), ('z', 'FAKESCALE')):
+
+        # The packages are built beside the probes alone, the five lanes overlap,
+        # a lane's levels go in order, and the compilations follow the lanes.
+        def at(*pieces):
+            return [i for i, x in enumerate(lines)
+                    if all(piece in x for piece in pieces)]
+        built, rounds = at('cabal|', ' build '), at('bench|')
+        nofib, comp, scale = at('nofib-run|'), at('compile-cost|'), at('scale|')
+        c2, c1 = at('bench|', 'cres/ct-x/'), at('bench|', 'cres/ct-o1-x/')
+        v2, v1 = at('bench|', 'res-ct-x-'), at('bench|', 'res-ct-o1-x-')
+        m2, m1 = at('bench|', 'mres/ct-x/'), at('bench|', 'mres/ct-o1-x/')
+        if not max(built) < min(rounds + nofib):
+            bad.append('a lane started before the packages were built')
+        if not max(scale) < max(built):
+            bad.append('the probes did not run beside the builds')
+        for name, begin, end in (('containers -O1', c1, c2), ('containers -O2', c2, c1),
+                                 ('vector', v2, c2), ('megaparsec', m2, c2),
+                                 ('nofib', nofib, c2)):
+            if not min(begin) < max(end):
+                bad.append(f'{name} does not overlap the containers lane beside it')
+        if not (max(v2) < min(v1) and max(m2) < min(m1)):
+            bad.append("vector's or megaparsec's levels out of order")
+        if not max(rounds + nofib) < min(comp):
+            bad.append('the compilations overlap the lanes')
+        # A failure in any lane or the perf tests fails the whole battery.
+        for lab, what, value in (('y', 'FAKEPERF', '1'), ('z', 'FAKESCALE', '1'),
+                                 ('u', 'FAKECABAL', '1'), ('v', 'FAKENOFIB', '3'),
+                                 ('a', 'FAKEBENCH', 'cres/ct-a/'),
+                                 ('b', 'FAKEBENCH', 'cres/ct-o1-b/'),
+                                 ('c', 'FAKEBENCH', 'res-ct-o1-c-'),
+                                 ('e', 'FAKEBENCH', 'mres/ct-o1-e/')):
             o3 = f'{d}/out-whole-{lab}'
             p = subprocess.run(['bash', '-c', script(w, 't', lab, '4-6', o3, cc=f'{d}/cc.py',
                                                      sc=f'{d}/scale.sh'), 'test'],
-                               env=dict(env, **{what: '1'}), capture_output=True, text=True)
+                               env=dict(env, **{what: value}), capture_output=True, text=True)
             if p.returncode != 2 or 'a part failed' not in open(f'{o3}/meas-{lab}.log').read():
-                bad.append(f'{what} in the whole battery: {p.returncode}')
+                bad.append(f'{what}={value} in the whole battery: {p.returncode}')
         # nofib-run's exit 1 over real/eff alone is no failure, and any other is.
         for code, deps, want in (('1', 'real/eff/FS/EffBench.o', 0),
                                  ('1', 'real/eff/FS/Main spectral/simple/Main', 2),
