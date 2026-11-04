@@ -1219,8 +1219,10 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   through `compile-cost.py`, GHC's perf and size tests and the scaling probes.
   Its docstring states each setting once with its reason, nofib's compiler
   under `+RTS -A3G -V0` and the benchmarks with the RTS clock running among
-  them, and `--dry` prints the script it would run. `nbcmp.py` compares two
-  labels' nofib runs, the collections and copied bytes beside the instructions,
+  them, and `--dry` prints the script it would run. `rebuild.py` runs it
+  over a series' base and every commit, each built from nothing, one after
+  another, going on past a step that fails. `nbcmp.py` compares two labels'
+  nofib runs, the collections and copied bytes beside the instructions,
   `pkgcmp.py` their package benchmarks, `perfcmp.py` their perf and size tests
   and which leave the window GHC's CI holds them to, and `alone.py` reruns one
   containers benchmark alone.

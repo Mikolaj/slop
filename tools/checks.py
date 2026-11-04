@@ -59,6 +59,7 @@ STEPS = [
     ('NCG-battery pkgcmp self-test', ['python3', '{root}/NCG-battery/pkgcmp.py', '--self-test']),
     ('NCG-battery perfcmp self-test', ['python3', '{root}/NCG-battery/perfcmp.py', '--self-test']),
     ('NCG-battery alone self-test', ['python3', '{root}/NCG-battery/alone.py', '--self-test']),
+    ('NCG-battery rebuild self-test', ['python3', '{root}/NCG-battery/rebuild.py', '--self-test']),
     ('NCG-fuzz gen self-test', ['python3', '{root}/NCG-fuzz/gen.py', '--self-test']),
     ('NCG-fuzz run self-test', ['python3', '{root}/NCG-fuzz/run.py', '--self-test']),
     ('NCG-scale gen self-test', ['python3', '{root}/NCG-scale/gen.py', '--self-test']),
