@@ -2190,23 +2190,34 @@ MUTANTS = [
     ('NCG-battery failed probe passed', 'NCG-battery/battery.py',
      "        f'[ \"$n\" = 0 ] && grep -q", "        f'grep -q", ST),
     ('NCG-battery failed probes lane passed', 'NCG-battery/battery.py',
-     "'wait $probes || s=2; wait $built || s=2',", "'wait $probes; wait $built || s=2',", ST),
+     "'wait $probes || s=2; wait $built", "'wait $probes; wait $built", ST),
     # The full rebuild's layout (Mikolaj, 2026-11-03): its job counts, its order,
     # the lanes overlapping, and each lane's failure counting.
     ('NCG-battery nofib at -j3', 'NCG-battery/battery.py',
-     "NOFIB_J, CABAL_J = 5, 8  # 6\n", "NOFIB_J, CABAL_J = 3, 8  # 6\n", ST),
+     "NOFIB_J, CABAL_J, A2T_J = 5, 8, 4  # 6, 11\n", "NOFIB_J, CABAL_J, A2T_J = 3, 8, 4  # 6, 11\n", ST),
     ('NCG-battery cabal at -j2', 'NCG-battery/battery.py',
-     "NOFIB_J, CABAL_J = 5, 8  # 6\n", "NOFIB_J, CABAL_J = 5, 2  # 6\n", ST),
+     "NOFIB_J, CABAL_J, A2T_J = 5, 8, 4  # 6, 11\n", "NOFIB_J, CABAL_J, A2T_J = 5, 2, 4  # 6, 11\n", ST),
+    ('NCG-battery A2T at -j8', 'NCG-battery/battery.py',
+     "NOFIB_J, CABAL_J, A2T_J = 5, 8, 4  # 6, 11\n", "NOFIB_J, CABAL_J, A2T_J = 5, 8, 8  # 6, 11\n", ST),
     ('NCG-battery lanes before the builds end', 'NCG-battery/battery.py',
-     "'wait $probes || s=2; wait $built || s=2',", "'wait $probes || s=2',", ST),
+     "'wait $probes || s=2; wait $built || s=2; wait $a2tb || s=2',", "'wait $probes || s=2',", ST),
     ('NCG-battery probes after the builds', 'NCG-battery/battery.py',
      "        *lane('probes', 'scale', p('scale')),\n"
+     "        *lane('a2td', \"A2T's dependencies built\", p('a2t', ('deps',))),\n"
+     "        'wait $a2td || s=2',\n"
      "        *lane('built', 'packages built', *[p(x, build) for x in PKG_PARTS]),\n"
-     "        'wait $probes || s=2; wait $built || s=2',\n",
+     "        *lane('a2tb', 'A2T built', p('a2t', build)),\n"
+     "        'wait $probes || s=2; wait $built || s=2; wait $a2tb || s=2',\n",
+     "        *lane('a2td', \"A2T's dependencies built\", p('a2t', ('deps',))),\n"
+     "        'wait $a2td || s=2',\n"
      "        *lane('built', 'packages built', *[p(x, build) for x in PKG_PARTS]),\n"
-     "        'wait $built || s=2',\n"
+     "        *lane('a2tb', 'A2T built', p('a2t', build)),\n"
+     "        'wait $built || s=2; wait $a2tb || s=2',\n"
      "        *lane('probes', 'scale', p('scale')),\n"
      "        'wait $probes || s=2',\n", ST),
+    ('NCG-battery A2T built after the packages', 'NCG-battery/battery.py',
+     "*[p(x, build) for x in PKG_PARTS]),\n        *lane('a2tb', 'A2T built', p('a2t', build)),",
+     "*[p(x, build) for x in PKG_PARTS], p('a2t', build)),\n        *lane('a2tb', 'A2T built'),", ST),
     ('NCG-battery containers levels in one lane', 'NCG-battery/battery.py',
      "        *lane('c2', 'containers -O2', p('containers-O2', run)),\n"
      "        *lane('c1', 'containers -O1', p('containers-O1', run)),\n",
@@ -2221,10 +2232,17 @@ MUTANTS = [
     ('NCG-battery vector levels reversed', 'NCG-battery/battery.py',
      "p('vector-O2', run), p('vector-O1', run)", "p('vector-O1', run), p('vector-O2', run)", ST),
     ('NCG-battery compilations beside the lanes', 'NCG-battery/battery.py',
-     "        'wait $c2 || s=2; wait $c1 || s=2; wait $vec || s=2; wait $mega || s=2; wait $nb || s=2',\n",
+     "        'wait $c2 || s=2; wait $c1 || s=2; wait $vec || s=2; wait $mega || s=2;'\n"
+     "        ' wait $a2t || s=2; wait $nb || s=2',\n",
      "", ST),
     ('NCG-battery failed build lane passed', 'NCG-battery/battery.py',
-     "'wait $probes || s=2; wait $built || s=2',", "'wait $probes || s=2; wait $built',", ST),
+     "wait $built || s=2; wait $a2tb", "wait $built; wait $a2tb", ST),
+    ('NCG-battery failed A2T build lane passed', 'NCG-battery/battery.py',
+     "wait $a2tb || s=2',", "wait $a2tb',", ST),
+    ('NCG-battery failed A2T dependencies lane passed', 'NCG-battery/battery.py',
+     "'wait $a2td || s=2',", "'wait $a2td',", ST),
+    ('NCG-battery A2T dependencies beside the packages', 'NCG-battery/battery.py',
+     "        'wait $a2td || s=2',\n", "", ST),
     ('NCG-battery failed containers -O2 lane passed', 'NCG-battery/battery.py',
      "'wait $c2 || s=2; wait $c1", "'wait $c2; wait $c1", ST),
     ('NCG-battery failed containers -O1 lane passed', 'NCG-battery/battery.py',
@@ -2232,13 +2250,27 @@ MUTANTS = [
     ('NCG-battery failed vector lane passed', 'NCG-battery/battery.py',
      "wait $vec || s=2; wait $mega", "wait $vec; wait $mega", ST),
     ('NCG-battery failed megaparsec lane passed', 'NCG-battery/battery.py',
-     "wait $mega || s=2; wait $nb", "wait $mega; wait $nb", ST),
+     "wait $mega || s=2;'", "wait $mega;'", ST),
+    ('NCG-battery failed A2T lane passed', 'NCG-battery/battery.py',
+     "wait $a2t || s=2;", "wait $a2t;", ST),
     ('NCG-battery failed nofib lane passed', 'NCG-battery/battery.py',
      "wait $nb || s=2',", "wait $nb',", ST),
     ('NCG-battery rounds erasing the build log', 'NCG-battery/battery.py',
-     "('exec > ' if 'build' in steps else 'exec >> ')", "('exec > ')", ST),
+     "('exec > ' if 'build' in steps else 'exec >> ')\n", "('exec > ')\n", ST),
+    ('NCG-battery A2T counts erasing the build log', 'NCG-battery/battery.py',
+     "('exec > ' if 'deps' in steps else 'exec >> ') + q(f'{v}/ab-", "('exec > ') + q(f'{v}/ab-", ST),
     ('NCG-battery rounds building again', 'NCG-battery/battery.py',
-     "    if 'build' in steps:\n        out += [heredoc", "    if True:\n        out += [heredoc", ST),
+     "    if 'build' in steps:\n        out += [heredoc(f'cabal.project.{lab}', project(",
+     "    if True:\n        out += [heredoc(f'cabal.project.{lab}', project(", ST),
+    ('NCG-battery A2T counts building again', 'NCG-battery/battery.py',
+     "    if 'build' in steps:\n        out += [f'{cabal} build -j{A2T_J}",
+     "    if True:\n        out += [f'{cabal} build -j{A2T_J}", ST),
+    ('NCG-battery A2T dependencies built again', 'NCG-battery/battery.py',
+     "    if 'deps' in steps:\n", "    if True:\n", ST),
+    ('NCG-battery A2T with ASLR on', 'NCG-battery/battery.py',
+     "  r=$(setarch -R python3", "  r=$(python3", ST),
+    ('NCG-battery A2T results overwritten', 'NCG-battery/battery.py',
+     "        f'[ -e {tsv} ] && {{", "        f'[ -e /nonexistent ] && {{", ST),
     # rebuild.py: the order, what a step keeps and each way the run may stop.
     ('NCG-battery rebuild without the base', 'NCG-battery/rebuild.py',
      "enumerate([b] + ups)]", "enumerate(ups)]", ST),
@@ -2261,6 +2293,8 @@ MUTANTS = [
      "    gone = [f'{work}/ghc-{label}', f'{n}/c{label}',", "    gone = [f'{n}/c{label}',", ST),
     ('NCG-battery rebuild keeping builds', 'NCG-battery/rebuild.py',
      "            gone += [f'{v}/{p[\"builddir\"]}-{lab}', ", "            gone += [", ST),
+    ('NCG-battery rebuild keeping the A2T build', 'NCG-battery/rebuild.py',
+     "    gone += [f'{v}/adist-{c}', ", "    gone += [", ST),
     ('NCG-battery rebuild pruning a failed step', 'NCG-battery/rebuild.py',
      "    if st != 0:\n        return f'battery: {st}', ''\n", "", ST),
     ('NCG-battery rebuild stopping at a failed step', 'NCG-battery/rebuild.py',

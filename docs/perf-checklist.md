@@ -1215,17 +1215,18 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
 - `tools/NCG-battery/battery.py` runs the NCG series' measurement battery
   for one GHC tree under one label, or any of its parts alone: nofib at -O2, -O1
   and -O0, the tasty-papi benchmarks of containers, vector and megaparsec at -O2
-  and -O1, the fifteen compilations by the tree's stage-1 and stage-2 compilers
-  through `compile-cost.py`, GHC's perf and size tests and the scaling probes.
+  and -O1, a thin sample of orthotope's A2T counted by `perf-per-call.py`,
+  the fifteen compilations by the tree's stage-1 and stage-2 compilers through
+  `compile-cost.py`, GHC's perf and size tests and the scaling probes.
   Its docstring states each setting once with its reason, nofib's compiler
   under `+RTS -A3G -V0` and the benchmarks with the RTS clock running among
   them, and `--dry` prints the script it would run. `rebuild.py` runs it
   over a series' base and every commit, each built from nothing, one after
   another, going on past a step that fails. `nbcmp.py` compares two labels'
   nofib runs, the collections and copied bytes beside the instructions,
-  `pkgcmp.py` their package benchmarks, `perfcmp.py` their perf and size tests
-  and which leave the window GHC's CI holds them to, and `alone.py` reruns one
-  containers benchmark alone.
+  `pkgcmp.py` their package benchmarks, `a2tcmp.py` their A2T samples,
+  `perfcmp.py` their perf and size tests and which leave the window GHC's CI
+  holds them to, and `alone.py` reruns one containers benchmark alone.
 - `tools/NCG-fuzz/run.py` compiles and runs `gen.py`'s random programs
   under many flag sets, by a GHC tree's stage-2 compiler and a base tree's,
   and reports each disagreement, panic and crash: a test of the NCG's

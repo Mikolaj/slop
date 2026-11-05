@@ -17,9 +17,10 @@ cfr00-fr00 cfr01-fr01`, `o1-fr00 o1-fr01` at -O1. A step:
    ./boot, ./configure, hadrian's default target in battery.py's flavour with
    --docs=none and -V, which logs every compiler command.
 2. battery.py frNN frNN CPUS, the whole battery.
-3. What the comparison tools read kept and the rest deleted: the tree, the
-   packages' build directories, stores and project files, and every file but the
-   tables in nofib's runs. A step that failed keeps all of them, to read.
+3. What the comparison tools read kept and the rest deleted: the tree,
+   the packages' and A2T's build directories, stores and project files,
+   and every file but the tables in nofib's runs. A step that failed keeps all
+   of them, to read.
 
 The run exits once, 0 with every step measured and 2 otherwise, so a session
 waiting on it in the harness's background mode wakes at its end. A failed
@@ -52,8 +53,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from battery import (CONTAINERS_CABAL, FLAVOUR, MBB, NOFIB_RUN, PAPIPKG,  # noqa: E402
-                     PERF_TESTS, PKGS, SPECTRAL_MAKEFILE, WORK, cpu_list, q)
+from battery import (A2T_CELLS, A2T_SRC, CONTAINERS_CABAL, FLAVOUR, MBB,  # noqa: E402
+                     NOFIB_RUN, PAPIPKG, PERF_TESTS, PKGS, SPECTRAL_MAKEFILE, WORK,
+                     cpu_list, q)
 
 REPO = os.path.join(os.path.dirname(WORK), 'ghc')
 BATTERY = os.path.join(HERE, 'battery.py')
@@ -133,7 +135,8 @@ def label_paths(work, label):
             ps += [f'{v}/{p["builddir"]}-{lab}', f'{v}/{p["src"]}/cabal.project.{lab}',
                    f'{v}/{p["log"]}-{lab}.log']
         ps += sorted(glob.glob(f'{v}/res-{glob.escape(lab)}-*.csv'))
-    for s in (f'comp1-{label}.txt', f'comp1-{label}.runs', f'comp2-{label}.txt',
+    ps += [f'{v}/adist-{c}', f'{work}/{A2T_SRC}/cabal.project.{c}', f'{v}/ab-{c}.log']
+    for s in (f'a2t-{label}.tsv', f'comp1-{label}.txt', f'comp1-{label}.runs', f'comp2-{label}.txt',
               f'comp2-{label}.runs', f'perf-{label}.tsv', f'perf-{label}.log',
               f'perf-{label}-summary.txt', f'perf-{label}-size.log',
               f'perf-{label}-size-summary.txt', f'scale-{label}.txt', f'meas-{label}.log',
@@ -163,6 +166,7 @@ def prune(work, label):
     for lab in (c, o1):
         for p in PKGS.values():
             gone += [f'{v}/{p["builddir"]}-{lab}', f'{v}/{p["src"]}/cabal.project.{lab}']
+    gone += [f'{v}/adist-{c}', f'{work}/{A2T_SRC}/cabal.project.{c}']
     for p in gone:
         remove(p)
 
@@ -310,7 +314,8 @@ def main(argv):
         print(f'{e}; nothing run', file=sys.stderr)
         return 2
     missing = [x for x in (NOFIB_RUN, PAPIPKG, PERF_TESTS, MBB, SPECTRAL_MAKEFILE,
-                           CONTAINERS_CABAL, 'ghc-g/.git/modules')
+                           CONTAINERS_CABAL, A2T_SRC + '/orthotope.cabal', A2T_CELLS,
+                           'ghc-g/.git/modules')
                if not os.path.exists(f'{o["work"]}/{x}')]
     if missing and o['battery'] == BATTERY:
         print(f'no {" ".join(missing)} under {o["work"]}; nothing run', file=sys.stderr)
@@ -354,7 +359,9 @@ put(f'{n}/c{tree}/{label}/w/ghc'); put(f'{n}/co/{label}/w/ghc')
 put(f'{v}/store-{c}/x'); put(f'{v}/cdist-{c}/x'); put(f'{v}/mdist-{o1}/x'); put(f'{v}/dist-{c}/x')
 put(f'{v}/cres/{c}/m-1.csv'); put(f'{v}/mres/{o1}/b-1.csv'); put(f'{v}/res-{c}-1.csv')
 put(f'{v}/ctr/cabal.project.{c}'); put(f'{v}/cb-{c}.log')
+put(f'{v}/adist-{c}/x'); put(f'{v}/a2t/cabal.project.{c}'); put(f'{v}/ab-{c}.log')
 put(f'{b}/perf-{label}.tsv'); put(f'{b}/p{label}/a.s'); put(f'{b}/comp2-{label}.runs')
+put(f'{b}/a2t-{label}.tsv')
 if os.environ.get('FAKEHANG') == label:
     subprocess.Popen(['bash', '-c', 'echo $$ > "$FAKEPID"; exec sleep 30']).wait()
 sys.exit(3 if label in os.environ.get('FAKEBATTERY', '').split() else 0)
@@ -479,13 +486,15 @@ def self_test():
                         f'{n}/nofib/_make/o0-{lab}/x/Main.perf.results.tsv',
                         f'{n}/stats/o1-{lab}/1.csv', f'{v}/cres/{c}/m-1.csv', f'{v}/mres/{o1}/b-1.csv',
                         f'{v}/res-{c}-1.csv', f'{v}/cb-{c}.log', f'{w}/battery/perf-{lab}.tsv',
+                        f'{v}/ab-{c}.log', f'{w}/battery/a2t-{lab}.tsv',
                         f'{w}/battery/p{lab}/a.s', f'{w}/battery/comp2-{lab}.runs',
                         f'{logs}/hadrian-{lab}.log.gz', f'{logs}/{lab}.done'):
                 if not os.path.exists(rel):
                     bad.append(f'{rel} was not kept')
             for rel in (f'{w}/ghc-{lab}', f'{n}/nofib/_make/{c}/x/Main', f'{n}/c{lab}', f'{n}/co/{lab}',
                         f'{v}/store-{c}', f'{v}/cdist-{c}', f'{v}/mdist-{o1}', f'{v}/dist-{c}',
-                        f'{v}/ctr/cabal.project.{c}', f'{logs}/hadrian-{lab}.log'):
+                        f'{v}/ctr/cabal.project.{c}', f'{v}/adist-{c}', f'{v}/a2t/cabal.project.{c}',
+                        f'{logs}/hadrian-{lab}.log'):
                 if os.path.exists(rel):
                     bad.append(f'{rel} is still there')
         if 'with 2 warnings' not in open(f'{logs}/fr01.done').read():
