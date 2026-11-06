@@ -68,6 +68,7 @@ STEPS = [
     ('obj-diff self-test', ['python3', '{root}/obj-diff.py', '--self-test']),
     ('one-shot self-test', ['python3', '{root}/one-shot.py', '--self-test']),
     ('perf-per-call self-test', ['python3', '{root}/perf-per-call.py', '--self-test']),
+    ('plan-check self-test', ['python3', '{root}/plan-check.py', '--self-test']),
     ('pragma-calls self-test', ['python3', '{root}/pragma-calls.py', '--self-test']),
     ('pragma-census self-test', ['python3', '{root}/pragma-census.py', '--self-test']),
     ('pragma-map self-test', ['python3', '{root}/pragma-map.py', '--self-test']),
