@@ -52,3 +52,10 @@ cabal convVjpBench
 nofib-common/NofibUtils.hs
 Random/*.hs
 SamplerMonad/*.hs
+
+# Example paths of docs/ghc-issue-dumpdir-source-path.md, in the scratch
+# directory its reproducer makes or under its -dumpdir d, never files of ~/slop.
+src/M.hs
+src/A/B.hs
+d/src/
+d/../src/
