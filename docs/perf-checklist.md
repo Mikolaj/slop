@@ -1115,13 +1115,15 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   cancels the process's setup, `allocs` the heap-pointer bumps executed at least
   half as often as the calls and the info pointers stored into the memory they
   allocate, `region` the executed instructions of one symbol's code in two runs,
-  diffed, and `seq` one run's, filtered by count a call. `kinds` sums two runs'
-  instructions by kind, every conditional jump as `jcc` and a jmp as `jmp` or,
-  indirect, `jmp*`, over the binary or one symbol's code: a change of block
-  layout alone moves `jmp` and nothing else. Its disassembly restarts at every
-  executed address a sweep did not decode: a linear sweep through one of GHC's
-  info tables falls out of step with the code after it, dropping executed
-  instructions and printing the table's bytes as code. In orthotope's
+  diffed, `regincr` the same over `incr`'s four runs, each instruction's
+  increase from N to 2N calls, which cancels the setup the harness runs
+  in that code too, and `seq` one run's, filtered by count a call. `kinds` sums
+  two runs' instructions by kind, every conditional jump as `jcc` and a jmp
+  as `jmp` or, indirect, `jmp*`, over the binary or one symbol's code: a change
+  of block layout alone moves `jmp` and nothing else. Its disassembly restarts
+  at every executed address a sweep did not decode: a linear sweep through one
+  of GHC's info tables falls out of step with the code after it, dropping
+  executed instructions and printing the table's bytes as code. In orthotope's
   specialisation benchmark a run of N calls executes the row N + 2 times, so one
   run's counts over N are high by (N + 2)/N, and `incr`'s are not. `sweep`
   reports whether every `perf record` sample of a range decodes

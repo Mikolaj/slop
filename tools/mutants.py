@@ -2559,6 +2559,22 @@ MUTANTS = [
     ('memguard -s ignored', 'memguard.sh', 's) STOP=$OPTARG;;', 's) ;;', SH),
     ('memguard DONEFILE not watched', 'memguard.sh',
      'until [ -e "$F" ] ||', 'until false ||', SH),
+    # cg-read regincr (2026-11-07): each watched failing its self-test before
+    # it was written down here.
+    ('cg-read regincr setup not cancelled', 'cg-read.py',
+     "        d[' '.join(ins.split('#')[0].split())] += (c2.get(a, 0)\n"
+     "                                                   - c1.get(a, 0)) / n\n",
+     "        d[' '.join(ins.split('#')[0].split())] += c2.get(a, 0) / (2 * n)\n",
+     ST),
+    ('cg-read regincr A - B', 'cg-read.py',
+     '        d = {k: B[k] - A[k] for k in set(A) | set(B)}\n        sa, sb',
+     '        d = {k: A[k] - B[k] for k in set(A) | set(B)}\n        sa, sb', ST),
+    ('cg-read regincr register moves unclassed', 'cg-read.py',
+     "    if op == 'mov' and re.fullmatch(r'%\\w+,%\\w+', args):\n"
+     "        return 'mov r,r'\n", '', ST),
+    ('cg-read regincr --min ignored', 'cg-read.py',
+     '                if abs(v) >= least]\n', '                if abs(v) >= 0.9]\n',
+     ST),
     ('ctx-size another tool taken for Bash', 'ctx-size.py',
      "        c.get('type') == 'tool_use' and c.get('name') == 'Bash'\n",
      "        c.get('type') == 'tool_use'\n", ST),

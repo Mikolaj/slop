@@ -9,6 +9,8 @@ Usage: python3 tools/cg-read.py allocs [--min C] BIN RUN N
        python3 tools/cg-read.py incr [--top K] [--decode] BIN_A RUN_A_N RUN_A_2N
                                      BIN_B RUN_B_N RUN_B_2N N
        python3 tools/cg-read.py region [--min C] BIN_A RUN_A BIN_B RUN_B SYM N
+       python3 tools/cg-read.py regincr [--min C] BIN_A RUN_A_N RUN_A_2N
+                                        BIN_B RUN_B_N RUN_B_2N SYM N
        python3 tools/cg-read.py seq [--raw] BIN RUN SYM N LO HI
        python3 tools/cg-read.py kinds [--top K] [--sym SYM]
                                       BIN_A RUN_A BIN_B RUN_B N
@@ -59,6 +61,16 @@ executed at least C times a call (0.25 by default) in both runs, in
 address order, each `INSTRUCTION xCOUNT` with immediates of five hex digits
 or more written ADDR, diffed by difflib, after the two runs' sums. SYM is a
 symbol's full or stripped name, or a suffix of exactly one.
+regincr: region's code of SYM over incr's four runs, each instruction's
+(I(2N) - I(N))/N in each binary, which cancels the setup the harness runs
+in that code too, summed by instruction text (as region writes it, objdump's
+`#` comment dropped and spaces collapsed), B - A: the totals, the texts
+moving by C a call or more either way (0.9 by default) in ascending order,
+and last the sums by what an instruction moves, those of 0.5 or more:
+`mov r,r` between registers, `store C` and `load C` to and from the C stack
+(`%rsp`), `store Sp` and `load Sp` to and from GHC's Sp (`%rbp`), `xchg`,
+`lea rip` and `other`. Its counts are exact, neither rounded nor cut at a
+minimum as region's are.
 seq: one run's instructions of SYM's code run between LO and HI times a
 call, with their addresses; `--raw` keeps the instruction text as objdump
 prints it and names the symbol an immediate's address is, an info pointer
@@ -651,6 +663,45 @@ def owner_of(b, a, paths):
     return best, most, sum(len(c) for _, c in runs)
 
 
+def move_kind(ins):
+    """regincr's class of an instruction text, spaces collapsed."""
+    op, _, args = ins.partition(' ')
+    if op == 'mov' and re.fullmatch(r'%\w+,%\w+', args):
+        return 'mov r,r'
+    if op.startswith('mov') and re.fullmatch(r'%\w+,%xmm\d+|%xmm\d+,%\w+',
+                                             args):
+        return 'mov r,r'
+    if re.search(r',-?0x\w+\(%rsp\)$', args):
+        return 'store C'
+    if re.match(r'-?0x\w+\(%rsp\),', args):
+        return 'load C'
+    if op.startswith('mov') and re.search(r',-?0x\w+\(%rbp\)$|,\(%rbp\)$',
+                                          args):
+        return 'store Sp'
+    if op.startswith('mov') and re.match(r'-?0x\w+\(%rbp\),', args):
+        return 'load Sp'
+    if op == 'xchg':
+        return 'xchg'
+    if op == 'lea' and 'rip' in args:
+        return 'lea rip'
+    return 'other'
+
+
+def region_incr(b, c1, c2, sym, n):
+    """Instruction text -> (I(2N) - I(N))/N over the code from sym to the
+    next symbol, c1 the N run's counts and c2 the 2N run's."""
+    lo, hi = b.region(sym)
+    addrs = sorted(a for a in set(c1) | set(c2)
+                   if lo <= a < hi and b.inside(a))
+    text = b.decode(addrs)
+    d = collections.Counter()
+    for a in addrs:
+        ins = re.sub(r'<[^>]*>', '', BIG.sub('ADDR', text.get(a, '?')))
+        d[' '.join(ins.split('#')[0].split())] += (c2.get(a, 0)
+                                                   - c1.get(a, 0)) / n
+    return d
+
+
 def region_seq(b, cnt, sym, n, least=0.25, raw=False):
     """[(instruction, count a call to two decimals, address)] of the code
     from sym to the next symbol executed at least least * n times."""
@@ -818,6 +869,24 @@ def run(argv, notes=None):
                 out.append(f'== {op}')
                 out += ['   A ' + x for x in sa[i1:i2]]
                 out += ['   B ' + x for x in sb[j1:j2]]
+    elif cmd == 'regincr':
+        least, argv = option(argv, '--min', float, 0.9)
+        need(argv, 8)
+        n = number(argv[7], 'N')
+        A, B = (region_incr(x, counts_of(x, r1), counts_of(x, r2), argv[6], n)
+                for x, r1, r2 in ((get(argv[0]), argv[1], argv[2]),
+                                  (get(argv[3]), argv[4], argv[5])))
+        d = {k: B[k] - A[k] for k in set(A) | set(B)}
+        sa, sb = sum(A.values()), sum(B.values())
+        out.append(f'total A {sa:.2f} B {sb:.2f} B-A {sb - sa:.2f}')
+        out += [f'{v:+9.2f}  {k}' for k, v in
+                sorted(d.items(), key=lambda kv: (kv[1], kv[0]))
+                if abs(v) >= least]
+        by = collections.Counter()
+        for k, v in d.items():
+            by[move_kind(k)] += v
+        out.append('by kind: ' + ', '.join(
+            f'{c} {v:+.2f}' for c, v in sorted(by.items()) if abs(v) >= 0.5))
     elif cmd == 'seq':
         raw = '--raw' in argv
         argv = [a for a in argv if a != '--raw']
@@ -1177,6 +1246,21 @@ def checks(bad, td):
                           '== replace', '   A mov    %rbx,%rax x1.0',
                           '   B mov    %rbx,%rax x2.0']:
         bad.append(f'region output: {out}')
+    # B's jmp setup alone, as often in its N run as in its 2N run, and
+    # its mov three times a call.
+    rx = {**RUN_A, 0x120: 70, 0x160: 30}
+    setup = (0x000, 0x300, 0x400, 0x120)
+    xb = write_run(os.path.join(td, 'xb.cg'), fix, rx, setup=setup)
+    xb2 = write_run(os.path.join(td, 'xb2.cg'), fix, rx, scale=2, setup=setup)
+    out, rc = run(['regincr', fix, a, a2, fix, xb, xb2, 'foo_info', '10'])
+    if rc != 0 or out != ['total A 6.50 B 7.50 B-A 1.00',
+                          '    -1.00  jmp ADDR', '    +2.00  mov %rbx,%rax',
+                          'by kind: mov r,r +2.00, other -1.00']:
+        bad.append(f'regincr output: {out}')
+    out, rc = run(['regincr', '--min', '1.5', fix, a, a2, fix, xb, xb2,
+                   'foo_info', '10'])
+    if rc != 0 or out[1:-1] != ['    +2.00  mov %rbx,%rax']:
+        bad.append(f'regincr --min 1.5: {out}')
     out, rc = run(['seq', fix, a, 'foo_info', '10', '0.4', '0.6'])
     if rc != 0 or out != [f'{BASE + 0x150:#x}    0.50 add    $ADDR,%r12',
                           'count 1']:
