@@ -7,7 +7,7 @@ the instructions go.
 Usage: python3 tools/compile-cost.py [--cpu CPU] [--rounds R] [--rts OPTS]
            [--cells CELLS] [--tests DIR] [--cmm FILE] [--keep-s DIR]
            [--out FILE] LABEL=GHC[@LIBDIR] [LABEL=GHC[@LIBDIR] ...]
-       python3 tools/compile-cost.py compare FILE...
+       python3 tools/compile-cost.py compare [--base LABEL] [--min PCT] FILE...
        python3 tools/compile-cost.py cg [--cpu CPU] OUT -- COMMAND...
        python3 tools/compile-cost.py cg-show CG
        python3 tools/compile-cost.py cg-diff CG_A CG_B
@@ -52,7 +52,10 @@ with --out every run is appended to FILE as "label name level round
 instructions allocated collections copied assembly-hash". compare reads such
 files, of compilers counted at different times, and prints the same table,
 the compilers in the order the files first name them, the first file's
-first as the base. Exit 0 when the figures were
+first as the base, or LABEL with --base. With --min, a compiler's row
+within PCT percent of the base's in both instructions and allocation, its
+assembly the same, is counted and not printed, and a cell left with only
+the base's row is left out. Exit 0 when the figures were
 printed; 1 when they were and a run collected more than once, or a
 compiler's allocation differed between its rounds, or its instructions
 spread over more than SPAN of the lowest; 2 when they could not be: perf,
@@ -211,13 +214,17 @@ def pct(x, base):
     return f'{100 * (x / base - 1):+.3f}%'
 
 
-def report(runs, ghcs, cells):
-    """The table, and the warnings that make the exit 1."""
+def report(runs, ghcs, cells, least=None):
+    """The table, and the warnings that make the exit 1; with least, compare
+    --min's PCT, a row within it of the first's and its assembly the same
+    counted and not printed, and a cell left with no such row left out."""
     lines, warn = [], []
     labels = [g[0] for g in ghcs]
     differ = {lab: 0 for lab in labels[1:]}
+    quiet = {lab: 0 for lab in labels[1:]}
     for name, level, _ in cells:
-        lines.append(f'{name} {level}')
+        cell = [f'{name} {level}']
+        shown = least is None
         first = None
         for lab in labels:
             rs = runs[(name, level, lab)]
@@ -245,10 +252,21 @@ def report(runs, ghcs, cells):
                 row += (f' {pct(ins, first[0]):>8}  {alloc:>15,} B'
                         f' {pct(alloc, first[1]):>8}  {gcs} GC'
                         f'  asm {"same" if same else "DIFFERS"}')
-            lines.append(row)
+                if least is not None and same and abs(100 * (ins / first[0] - 1)) <= least \
+                        and abs(100 * (alloc / first[1] - 1)) <= least:
+                    quiet[lab] += 1
+                    continue
+                shown = True
+            cell.append(row)
+        if shown:
+            lines += cell
     for lab, n in differ.items():
         lines.append(f'{lab}: assembly differs from {labels[0]}\'s'
                      f' in {n} of {len(cells)} cells')
+    if least is not None:
+        for lab, n in quiet.items():
+            lines.append(f'{lab}: {n} of {len(cells)} cells within {least:g}%'
+                         f' of {labels[0]}\'s, the assembly the same, not printed')
     return lines, warn
 
 
@@ -403,9 +421,20 @@ def main(argv):
         if argv[:1] == ['cg-show'] and len(argv) == 2:
             cg_show(argv[1])
             return 0
-        if argv[:1] == ['compare'] and len(argv) > 1:
-            runs, ghcs, cells = read_runs(argv[1:])
-            lines, warn = report(runs, ghcs, cells)
+        base, least, files = None, None, argv[1:]
+        while argv[:1] == ['compare'] and files[:1] in (['--base'], ['--min']) and len(files) > 1:
+            if files[0] == '--base':
+                base = files[1]
+            else:
+                least = float(files[1])
+            files = files[2:]
+        if argv[:1] == ['compare'] and files:
+            runs, ghcs, cells = read_runs(files)
+            if base is not None:
+                if base not in [g[0] for g in ghcs]:
+                    raise ValueError(f'no label {base} in {" ".join(files)}')
+                ghcs = [g for g in ghcs if g[0] == base] + [g for g in ghcs if g[0] != base]
+            lines, warn = report(runs, ghcs, cells, least)
             print('\n'.join(lines))
             for w in warn:
                 print('WARNING', w)
@@ -569,6 +598,30 @@ def checks():
             if rc != 0 or not re.search(r'\n  B +101,000 +\+1\.000% ', got) \
                     or got.count('asm DIFFERS') != 1:
                 bad.append(f'compare of two --out files: {rc} {got}')
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                rc = main(['compare', '--base', 'B', oa, ob])
+            got = buf.getvalue()
+            if rc != 0 or not got.startswith('one -O0\n  B  ') \
+                    or not re.search(r'\n  A +100,000 +-0\.990% ', got) \
+                    or "A: assembly differs from B's in 1 of 3 cells" not in got:
+                bad.append(f'compare --base B: {rc} {got}')
+            if main(['compare', '--base', 'C', oa, ob]) != 2:
+                bad.append('compare --base of a label no file names did not exit 2')
+            # --min: a cell moving in instructions alone, in allocation alone,
+            # in its assembly alone, and one within PCT in both.
+            ma, mb = os.path.join(td, 'ma'), os.path.join(td, 'mb')
+            with open(ma, 'w') as fh:
+                fh.write(''.join(f'A {c} -O0 0 100000 1000 1 0 h\n' for c in 'xyzw'))
+            with open(mb, 'w') as fh:
+                fh.write('C x -O0 0 100500 1000 1 0 h\nC y -O0 0 100000 1003 1 0 h\n'
+                         'C z -O0 0 100000 1000 1 0 g\nC w -O0 0 100010 1000 1 0 h\n')
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                rc = main(['compare', '--min', '0.1', ma, mb])
+            got = buf.getvalue()
+            if rc != 0 or [x for x in got.split('\n') if x.endswith(' -O0')] != ['x -O0', 'y -O0', 'z -O0'] \
+                    or got.count('\n  C ') != 3 \
+                    or "C: 1 of 4 cells within 0.1% of A's, the assembly the same, not printed" not in got:
+                bad.append(f'compare --min 0.1: {rc} {got}')
             with open(oa, 'a') as fh:
                 fh.write('A one -O0 9 x\n')
             if main(['compare', oa, ob]) != 2:

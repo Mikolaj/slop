@@ -1211,10 +1211,14 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   and collections --- and whether their assembly differs, by default
   over the fifteen compilations of the NCG series' measurements, and says where
   a compile collected more than once, a figure moved between rounds or a compile
-  failed. Its `cg` mode runs one compile under cachegrind and splits
-  its instructions into the collector's, the RTS's with libc's,
-  and the compiler's own, and `cg-diff` gives the last's difference by function,
-  z-decoded: the split and the decoding are Simon Jakobi's
+  failed. `compare` sets the `--out` files of compilers counted at different
+  times in one table, against the first file's first compiler or `--base`'s,
+  and `--min PCT` leaves out a row within PCT percent of the base's in both
+  instructions and allocation whose assembly is the same. Its `cg` mode runs one
+  compile under cachegrind and splits its instructions into the collector's,
+  the RTS's with libc's, and the compiler's own, and `cg-diff` gives the last's
+  difference by function, z-decoded: the split and the decoding are Simon
+  Jakobi's
   [cgwork.py](https://gist.github.com/sjakobi/eed39b23f41b06fc41337d137067bd8b).
   `tools/NCG-scale/run.sh` compiles its scaling probes under the same options
   and records each compile's collections, which `report.py` marks where they
