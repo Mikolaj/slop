@@ -2535,4 +2535,20 @@ MUTANTS = [
      "f' base only {len(b - t)}')", "f' base only {len(t - b)}')", ST),
     ('NCG-fuzz report counts the largest group', 'NCG-fuzz/run.py',
      '                for g in groups[1:]:\n', '                for g in groups:\n', ST),
+    # ctx-size (2026-11-07): each watched failing its self-test before it was
+    # written down here.
+    ('ctx-size cache read left out of the context', 'ctx-size.py',
+     "                     + u.get('cache_read_input_tokens', 0))\n",
+     '                     + 0)\n', ST),
+    ('ctx-size cap not judged', 'ctx-size.py',
+     '    over = cap is not None and n > cap\n', '    over = False\n', ST),
+    ('ctx-size a word in two transcripts taken', 'ctx-size.py',
+     '    if len(hits) != 1:\n', '    if not hits:\n', ST),
+    ('ctx-size other sessions searched', 'ctx-size.py',
+     '    if session:\n        return (glob', '    if False:\n        return (glob', ST),
+    ('ctx-size first call taken, not the last', 'ctx-size.py',
+     '        if u:\n            found = (', '        if u and found is None:\n            found = (', ST),
+    ('ctx-size another tool taken for Bash', 'ctx-size.py',
+     "        c.get('type') == 'tool_use' and c.get('name') == 'Bash'\n",
+     "        c.get('type') == 'tool_use'\n", ST),
 ]

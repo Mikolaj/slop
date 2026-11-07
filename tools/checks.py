@@ -49,6 +49,7 @@ STEPS = [
     ('compile-cost self-test', ['python3', '{root}/compile-cost.py', '--self-test']),
     ('core-diff self-test', ['python3', '{root}/core-diff.py', '--self-test']),
     ('ctime-diff self-test', ['python3', '{root}/ctime-diff.py', '--self-test']),
+    ('ctx-size self-test', ['python3', '{root}/ctx-size.py', '--self-test']),
     ('hascallstack self-test', ['python3', '{root}/hascallstack.py', '--self-test']),
     ('heading-outline self-test', ['python3', '{root}/heading-outline.py', '--self-test']),
     ('hpc-untaken self-test', ['python3', '{root}/hpc-untaken.py', '--self-test']),
