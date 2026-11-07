@@ -1140,7 +1140,14 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   and the cabal unit ids' hashes that cover it in the symbols. Without the masks
   every file of two such builds differs; with them, the builds of GHC's master
   and of the commit after it, which changed only the RTS, compared equal in all
-  431 of nofib's objects.
+  431 of nofib's objects. `--ext` names the kinds of file compared in place
+  of the default ones, `--ext .dump-asm` reaching GHC's assembly dumps, whose
+  timestamp lines are masked too, and two files may stand in for the two
+  directories. `--procs` follows each differing assembly file with the units
+  that differ and their instruction counts, the file split at every `.section`
+  and each unit named by its first label; only the labels a unit defines
+  are renumbered, so that a changed reference to another unit's label still
+  shows. `--show REGEX` prints the diffs of the units it selects.
 - `tools/ticky-diff.py` diffs the per-closure allocation of two ticky-ticky runs
   of one benchmark, closure names normalised across builds. Build both
   with `--ghc-options=-ticky` and run the same `--iters` with `+RTS -rFILE`.
