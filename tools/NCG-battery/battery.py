@@ -3,7 +3,8 @@
 label: nofib at -O2, -O1 and -O0, the tasty-papi benchmarks of containers,
 vector and megaparsec at -O2 and -O1, a thin sample of orthotope's A2T, the
 fifteen compilations by the tree's stage-1 and stage-2 compilers, GHC's perf and
-size tests and the scaling probes; or some of these parts alone.
+size tests, the scaling probes and the tickets' reproducers; or some of these
+parts alone.
 
 Usage: python3 tools/NCG-battery/battery.py [--dry] [--work DIR] [--out DIR]
            TREE LABEL CPUS [PART...]
@@ -13,24 +14,28 @@ TREE names the work directory's ghc-TREE, whose _build/stage0/bin/ghc
 is the stage-1 compiler and _build/stage1/bin/ghc the stage-2 one. CPUS
 is a taskset list of three CPUs or more. With no PART, the whole battery:
 it stops if any of the label's results exist, copies both compilers to ghc-LABEL
-beside themselves, and on CPUS builds A2T's dependencies, then the packages one
-after another and A2T beside them, with only the probes beside the builds,
-on its first CPU; then, all built, runs six lanes at once: containers' rounds
-at -O2; containers' at -O1; vector's at -O2, then at -O1; megaparsec's at -O2,
+beside themselves, writes the wrapper ghcw-LABEL (setting 12), and on CPUS
+builds A2T's dependencies, then the packages one after another and A2T
+beside them, with only the probes and then the tickets' reproducers beside
+the builds, on its first CPU; then, all built, runs six lanes at once:
+containers' rounds at -O2; containers' at -O1; vector's at -O2, then at -O1; megaparsec's at -O2,
 then at -O1; A2T's sample; and nofib; those ended, the compilations, the stage-1
 compiler's on CPUS' second CPU beside the stage-2 compiler's on its third;
 and then the perf and size tests. Its lines go to OUT/meas-LABEL.log. A PART --
 nofib-O2, nofib-O1, nofib-O0, containers-O2, containers-O1, vector-O2,
-vector-O1, megaparsec-O2, megaparsec-O1, a2t, comp1, comp2, perf or scale --
+vector-O1, megaparsec-O2, megaparsec-O1, a2t, comp1, comp2, perf, scale or
+tickets --
 runs alone, in the order given, on CPUS, with ghc-LABEL already in place.
 The battery is a bash script; --dry prints it, every file it generates written
 out in it, and runs nothing. Run it unsandboxed. It exits 0 when every part ran
 and 2 when it stopped over the tree's flavour or the label's results or a part
 failed: a compiler missing, or a build, nofib-run, a benchmark run, an A2T
-count, compile-cost.py, a perf or size test or a probe failing, the part's log
-saying which, or hadrian rebuilding the compiler the perf tests were to run;
-compile-cost.py's warnings fail nothing, nor does nofib-run's exit 1
-over real/eff alone, some of whose programs GHC rejects.
+count, compile-cost.py, a perf or size test or a probe failing or tickets.py
+measuring nothing, the part's log saying which, or hadrian rebuilding the
+compiler the perf tests were to run;
+compile-cost.py's warnings fail nothing, nor does a case of tickets.py's
+failing, its row saying so, nor nofib-run's exit 1 over real/eff alone, some
+of whose programs GHC rejects.
 
 The work directory (--work, dist-ghcho by default) holds the trees, nofib-r
 (the nofib checkout and its built nofib-run), vpapi (the packages' sources
@@ -47,9 +52,9 @@ and pkgcmp.py:
   vector      vpapi/res-cTREE-LABEL-I.csv, res-cTREE-o1-LABEL-I.csv at -O1
   megaparsec  vpapi/mres/cTREE-LABEL/bench-speed-I.csv, cTREE-o1-LABEL
   a2t         OUT/a2t-LABEL.tsv, a line a cell: its name, its instructions
-              a call (- where none were counted) and perf-per-call.py's exit,
-              for a2tcmp.py; built in vpapi/adist-cTREE-LABEL, its log
-              vpapi/ab-cTREE-LABEL.log
+              a call (- where none were counted), perf-per-call.py's exit
+              and its bytes allocated a call (-), for a2tcmp.py; built in
+              vpapi/adist-cTREE-LABEL, its log vpapi/ab-cTREE-LABEL.log
   comp        OUT/compN-LABEL.txt, compile-cost.py's table, OUT/compN-LABEL.runs,
               its --out file, and its first round's assembly in OUT/pLABEL
               (stage 1) and OUT/pLABEL-2 (stage 2)
@@ -59,6 +64,10 @@ and pkgcmp.py:
               OUT/perf-LABEL-size-summary.txt and OUT/perf-LABEL-size.log
   scale       OUT/scale-LABEL.txt, tools/NCG-scale/run.sh's lines, for
               tools/NCG-scale/report.py with the base's file first
+  tickets     OUT/tix-LABEL.tsv, tickets.py's table, for tickets.py compare
+  builds      each build's module dumps in its build directory and the
+              wrapper's records in vpapi/wstats-BUILDDIR-cTREE-LABEL
+              (BUILDDIR cdist, dist, mdist or adist), for bstats.py
 
 The settings, each stated here and nowhere else:
 1. Benchmark programs, nofib's, the packages' and A2T's, run with their own
@@ -75,7 +84,8 @@ The settings, each stated here and nowhere else:
    and vector's benchmark programs run 5 times and megaparsec's 10,
    pkgcmp.py reading their spread; A2T counts each cell once, by
    perf-per-call.py at A2T_CALLS calls and twice as many, with no run again
-   of a cell that moved.
+   of a cell that moved, its bytes allocated a call from the RTS's statistics
+   of the same runs (--alloc), which left the instructions as they were.
 4. The fifteen compilations are counted by tools/compile-cost.py with its
    own defaults: its cells, its rounds and its RTS options, -A3G -V0 after
    GHC's own; `compile-cost.py compare` compares two labels' .runs files.
@@ -135,9 +145,21 @@ The settings, each stated here and nowhere else:
     table are left out. The lane, one count at a time, ends about when
     containers' do (Mikolaj, 2026-11-05: "a single thread, so that it ends when
     the longest of the other package benchmarks ends").
+12. The packages and A2T build with -ddump-timings -ddump-to-file on the
+    packages under test, a ghc-options in each one's stanza, cabal 3.18
+    applying a top-level one to none of the local packages; the flags left
+    vector's objects and benchmark program byte-identical (2026-11-07). They
+    build by ghcw-LABEL beside ghc-LABEL, which runs each --make run, those in
+    cabal's response files included, under perf stat -e instructions:u with
+    the RTS's statistics (-t --machine-readable) and GHC's own RTS options
+    (WRAP_RTS): under nofib's -A3G -V0 each of vector's processes took 3.1
+    to 3.3 GB of heap where GHC's own options took 22 to 320 MB, too much
+    for eight jobs a lane beside A2T's build, and under GHC's own two builds
+    of vector differed by at most 0.46% in a process's instructions.
 """
 
 import contextlib
+import glob
 import io
 import os
 import re
@@ -152,11 +174,15 @@ WORK = '/home/mikolaj/slop/dist-ghcho'
 COMPILE_COST = os.path.join(os.path.dirname(HERE), 'compile-cost.py')
 SCALE_RUN = os.path.join(os.path.dirname(HERE), 'NCG-scale', 'run.sh')
 PER_CALL = os.path.join(os.path.dirname(HERE), 'perf-per-call.py')
+TICKETS = os.path.join(HERE, 'tickets.py')
 
 # The settings of the docstring, by number.
 ROUNDS = {'containers': 5, 'vector': 5, 'megaparsec': 10}  # 3
 A2T_CALLS = 200000  # 3, 11
 NOFIB_RTS = '+RTS -A3G -V0 -RTS'  # 5
+# the packages' and A2T's compiler wrapper's; every module's passes timed
+WRAP_RTS = ''  # 12
+DUMP_FLAGS = '-ddump-timings -ddump-to-file'  # 12
 NOFIB_J, CABAL_J, A2T_J = 5, 8, 4  # 6, 11
 FLAVOUR = 'perf+no_profiled_libs+no_dynamic_libs'  # 10
 
@@ -216,7 +242,7 @@ A2T_TARGET = 'orthotope:bench:specialisation'
 A2T_LIB = 'orthotope:lib:orthotope'
 PARTS = ('nofib-O2', 'nofib-O1', 'nofib-O0', 'containers-O2', 'vector-O2',
          'megaparsec-O2', 'containers-O1', 'vector-O1', 'megaparsec-O1',
-         'a2t', 'comp1', 'comp2', 'perf', 'scale')
+         'a2t', 'comp1', 'comp2', 'perf', 'scale', 'tickets')
 PKG_PARTS = PARTS[3:9]
 EOF = 'NCG_EOF'
 
@@ -277,6 +303,23 @@ def wrapper(tree, label, ghc):
             f'{ghc} {NOFIB_RTS} "$@"\n')
 
 
+def ghcw(tree, label, ghc):
+    """The packages' and A2T's compiler: ghc, each --make run under perf stat
+    with the RTS's statistics where GHCW_STATS names a directory, its
+    arguments, those of cabal's response files written out, beside them."""
+    rts = f'+RTS {WRAP_RTS + " " if WRAP_RTS else ""}-t"$GHCW_STATS/$id.rts" --machine-readable -RTS'
+    return ('#!/bin/sh\n'
+            f'# ghc-{tree}\'s ghc-{label}, each --make run counted into $GHCW_STATS\n'
+            'm=; for a in "$@"; do case $a in --make) m=1;;'
+            ' @*) grep -qx -e --make "${a#@}" 2>/dev/null && m=1;; esac; done\n'
+            f'[ -n "$m" ] && [ -n "${{GHCW_STATS:-}}" ] || exec {ghc} "$@"\n'
+            'id=$$.$(date +%s%N)\n'
+            '{ printf \'%s\\n\' "$PWD"; for a in "$@"; do case $a in @*) cat "${a#@}";;'
+            ' *) printf \'%s\\n\' "$a";; esac; done; } > "$GHCW_STATS/$id.args"\n'
+            'exec perf stat -x, -e instructions:u -o "$GHCW_STATS/$id.csv" -- '
+            f'{ghc} {rts} "$@"\n')
+
+
 def nofib_part(work, tree, label, level):
     n = f'{work}/nofib-r'
     f = f'{work}/ghc-{tree}/_build/stage1/bin'
@@ -328,7 +371,7 @@ def project(work, tree, label, pkg, level):
     g = f'{work}/ghc-{tree}/_build/stage1/bin'
     ci = '' if tree == 'f' else p.get('unless_f', '')
     head = [f'packages: {p["packages"]}{ci} {work}/{PAPIPKG}',
-            f'with-compiler: {g}/ghc-{label}',
+            f'with-compiler: {g}/ghcw-{label}',
             f'with-hc-pkg: {g}/ghc-pkg',
             f'index-state: {INDEX_STATE}',
             f'allow-newer: {ALLOW_NEWER}{p["allow"]}']
@@ -339,10 +382,9 @@ def project(work, tree, label, pkg, level):
         s = [f'package {name}']
         if name in p['flags']:
             s.append(f'  flags: {p["flags"][name]}')
-        if level != 2:
-            s.append(f'  ghc-options: -O{level}')
-        if len(s) > 1:
-            stanzas.append('\n'.join(s) + '\n')
+        # cabal 3.18 applied a top-level ghc-options to none of the local packages
+        s.append(f'  ghc-options: {f"-O{level} " if level != 2 else ""}{DUMP_FLAGS}')
+        stanzas.append('\n'.join(s) + '\n')
     return '\n'.join(head) + '\n' + ''.join('\n' + s for s in stanzas)
 
 
@@ -356,6 +398,7 @@ def pkg_part(work, tree, label, pkg, level, steps=('build', 'run')):
     opts = (f'--project-file=cabal.project.{lab} --builddir='
             + q(f'{v}/{p["builddir"]}-{lab}'))
     progs = p.get('progs') or containers_progs(work)
+    stats = q(f'{v}/wstats-{p["builddir"]}-{lab}')
     out = [f'# {pkg} at -O{level}, label {lab}',
            ('exec > ' if 'build' in steps else 'exec >> ')
            + q(f'{v}/{p["log"]}-{lab}.log') + ' 2>&1',
@@ -364,7 +407,8 @@ def pkg_part(work, tree, label, pkg, level, steps=('build', 'run')):
            'cd ' + q(f'{v}/{p["src"]}') + ' || exit 2']
     if 'build' in steps:
         out += [heredoc(f'cabal.project.{lab}', project(work, tree, label, pkg, level)),
-                f'{cabal} build -j{CABAL_J} {p["build"]} {opts}'
+                f'rm -rf {stats}; mkdir -p {stats}',
+                f'GHCW_STATS={stats} {cabal} build -j{CABAL_J} {p["build"]} {opts}'
                 f' || {{ echo "{p["log"]} {lab} build failed"; exit 2; }}',
                 'echo "built $(date +%T)"']
     if 'run' not in steps:
@@ -391,11 +435,12 @@ def a2t_project(work, tree, label):
     """The full A2T runs' project file, with the battery's compiler."""
     g = f'{work}/ghc-{tree}/_build/stage1/bin'
     return '\n'.join([
-        'packages: .', f'with-compiler: {g}/ghc-{label}', f'with-hc-pkg: {g}/ghc-pkg',
+        'packages: .', f'with-compiler: {g}/ghcw-{label}', f'with-hc-pkg: {g}/ghc-pkg',
         f'index-state: {INDEX_STATE}',
         'allow-newer: base, ghc-prim, ghc-bignum, template-haskell, containers',
         'constraints: hashable ==1.5.0.0', 'tests: True', 'benchmarks: True', '',
-        'package data-default-class', '  ghc-options: -frebindable-known-names', ''])
+        'package data-default-class', '  ghc-options: -frebindable-known-names', '',
+        'package orthotope', f'  ghc-options: {DUMP_FLAGS}', ''])
 
 
 def a2t_part(work, tree, label, outdir, steps=('deps', 'build', 'run'), pc=PER_CALL):
@@ -405,6 +450,7 @@ def a2t_part(work, tree, label, outdir, steps=('deps', 'build', 'run'), pc=PER_C
     tsv = q(f'{outdir}/a2t-{label}.tsv')
     cabal = 'cabal --store-dir=' + q(f'{v}/store-{lab}')
     opts = f'--project-file=cabal.project.{lab} --builddir=' + q(f'{v}/adist-{lab}')
+    stats = q(f'{v}/wstats-adist-{lab}')
     out = [f'# A2T, label {lab}',
            ('exec > ' if 'deps' in steps else 'exec >> ') + q(f'{v}/ab-{lab}.log') + ' 2>&1',
            'echo "start $(date +%T)"',
@@ -412,11 +458,13 @@ def a2t_part(work, tree, label, outdir, steps=('deps', 'build', 'run'), pc=PER_C
            'cd ' + q(f'{work}/{A2T_SRC}') + ' || exit 2']
     if 'deps' in steps:
         out += [heredoc(f'cabal.project.{lab}', a2t_project(work, tree, label)),
-                f'{cabal} build -j{CABAL_J} --only-dependencies {A2T_LIB} {opts}'
+                f'rm -rf {stats}; mkdir -p {stats}',
+                f'GHCW_STATS={stats} {cabal} build -j{CABAL_J} --only-dependencies {A2T_LIB} {opts}'
                 f' || {{ echo "ab {lab} dependencies failed"; exit 2; }}',
                 'echo "dependencies built $(date +%T)"']
     if 'build' in steps:
-        out += [f'{cabal} build -j{A2T_J} --semaphore {A2T_TARGET} {opts}'
+        out += [f'mkdir -p {stats}',
+                f'GHCW_STATS={stats} {cabal} build -j{A2T_J} --semaphore {A2T_TARGET} {opts}'
                 f' || {{ echo "ab {lab} build failed"; exit 2; }}',
                 'echo "built $(date +%T)"']
     if 'run' not in steps:
@@ -427,10 +475,11 @@ def a2t_part(work, tree, label, outdir, steps=('deps', 'build', 'run'), pc=PER_C
         f'B=$({cabal} list-bin {A2T_TARGET} {opts})',
         'f=0',
         'while read -r c; do',
-        f'  r=$(setarch -R python3 {q(pc)} --reps 1 "$B" "$c" {A2T_CALLS} < /dev/null 2>&1);'  # 2
+        f'  r=$(setarch -R python3 {q(pc)} --reps 1 --alloc "$B" "$c" {A2T_CALLS} < /dev/null 2>&1);'  # 2
         ' e=$?',
         "  n=$(printf '%s\\n' \"$r\" | sed -n 's/^A instructions \\([0-9.]*\\) .*/\\1/p')",
-        f"  printf '%s\\t%s\\t%s\\n' \"$c\" \"${{n:--}}\" $e >> {tsv}",
+        "  a=$(printf '%s\\n' \"$r\" | sed -n 's/^A .*  alloc \\([0-9.]*\\) .*/\\1/p')",
+        f"  printf '%s\\t%s\\t%s\\t%s\\n' \"$c\" \"${{n:--}}\" $e \"${{a:--}}\" >> {tsv}",
         '  [ $e = 0 ] && [ -n "$n" ] || { echo "$c: exit $e: $r"; f=2; }',
         f'done < {q(f"{work}/{A2T_CELLS}")}',
         f'echo "ab {lab} DONE $(date +%T)"', 'exit $f'])
@@ -501,6 +550,20 @@ def scale_part(work, tree, label, cpu, outdir, sc=SCALE_RUN):
         f'[ "$n" = 0 ] && grep -q \'^scale DONE\' {q(out)} || exit 2'])
 
 
+def tickets_part(work, tree, label, cpu, outdir, tk=TICKETS):
+    ghc = f'{work}/ghc-{tree}/_build/stage1/bin/ghc-{label}'
+    tsv = f'{outdir}/tix-{label}.tsv'
+    return '\n'.join([
+        "# the tickets' reproducers by the stage-2 compiler",
+        f'[ -x {q(ghc)} ] || {{ echo "tickets {label}: no {ghc}"; exit 2; }}',
+        f'[ -e {q(tsv)} ] && {{ echo "tickets {label}: {tsv} exists"; exit 2; }}',
+        f'mkdir -p {q(outdir)}',
+        f'python3 {q(tk)} run {q(ghc)} {q(tsv)} {cpu}; e=$?',
+        f'echo "tickets {label} exit $e $(date +%T)"',
+        '# 1 is a case failing, its row saying so, 2 nothing measured',
+        '[ $e != 2 ] || exit 2'])
+
+
 def cpu_list(spec):
     out = []
     for item in spec.split(','):
@@ -513,7 +576,7 @@ def cpu_list(spec):
     return out
 
 
-def part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps=None):
+def part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS):
     fam, _, lev = name.partition('-O')
     if fam == 'nofib':
         body = nofib_part(work, tree, label, int(lev))
@@ -525,6 +588,8 @@ def part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps=None):
         body = perf_part(work, tree, label, len(cpus), outdir)
     elif name == 'scale':
         body = scale_part(work, tree, label, cpus[0], outdir, sc)
+    elif name == 'tickets':
+        body = tickets_part(work, tree, label, cpus[0], outdir, tk)
     else:
         stage = int(name[-1])
         body = comp_part(work, tree, label, stage, cpus[stage], outdir, cc)
@@ -532,7 +597,7 @@ def part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps=None):
 
 
 def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
-           sc=SCALE_RUN, pc=PER_CALL):
+           sc=SCALE_RUN, pc=PER_CALL, tk=TICKETS):
     """The bash script of the battery, or of the parts named."""
     for x in (tree, label):
         if not re.fullmatch(r'[A-Za-z0-9_.]+', x):
@@ -548,7 +613,11 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
                   f' || {{ echo "battery STOP, {flavour} does not name {FLAVOUR}"; exit 2; }}')
 
     def p(name, steps=None):
-        return part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps)
+        return part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps, tk)
+    g = f'{work}/ghc-{tree}/_build'
+    wrap = [heredoc(f'{g}/stage1/bin/ghcw-{label}',
+                    ghcw(tree, label, f'{g}/stage1/bin/ghc-{label}')),
+            f'chmod +x {q(f"{g}/stage1/bin/ghcw-{label}")}']
 
     def lane(pid, done, *ps):
         return ['(', pin, 'f=0', *ps, f'echo "{done} DONE {label} $(date +%T)"',
@@ -557,15 +626,17 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
             f'# NCG-battery: tree {tree}, label {label}, CPUs {cpus_spec},'
             f' work {work}, out {outdir}', 'set -u']
     if parts:
-        return '\n'.join(head + [flavour_ok, '(', pin, 'f=0'] + [p(x) for x in parts]
-                         + ['exit $f', ')']) + '\n'
-    n, v, g = f'{work}/nofib-r', f'{work}/vpapi', f'{work}/ghc-{tree}/_build'
+        built = [x for x in parts if x in PKG_PARTS or x == 'a2t']
+        return '\n'.join(head + [flavour_ok] + (wrap if built else []) + ['(', pin, 'f=0']
+                         + [p(x) for x in parts] + ['exit $f', ')']) + '\n'
+    n, v = f'{work}/nofib-r', f'{work}/vpapi'
     stop = [f'{n}/nofib/_make/c{tree}-{label}', f'{n}/nofib/_make/o1-{label}',
             f'{n}/nofib/_make/o0-{label}', f'{v}/cres/c{tree}-{label}',
             f'{v}/mres/c{tree}-{label}', f'{v}/store-c{tree}-{label}',
             f'{outdir}/comp1-{label}.txt', f'{outdir}/comp1-{label}.runs',
             f'{outdir}/comp2-{label}.runs', f'{outdir}/perf-{label}.tsv',
-            f'{outdir}/scale-{label}.txt', f'{outdir}/a2t-{label}.tsv']
+            f'{outdir}/scale-{label}.txt', f'{outdir}/a2t-{label}.tsv',
+            f'{outdir}/tix-{label}.tsv']
     logs = ' '.join([q(f'{v}/{PKGS[k]["log"]}-c{tree}{o}-{label}.log')
                      for k in PKGS for o in ('', '-o1')] + [q(f'{v}/ab-c{tree}-{label}.log')])
     build, run = ('build',), ('run',)
@@ -580,8 +651,9 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
         f'cp {q(g + "/stage0/bin/ghc")} {q(f"{g}/stage0/bin/ghc-{label}")}'
         f' && cp {q(g + "/stage1/bin/ghc")} {q(f"{g}/stage1/bin/ghc-{label}")}'
         ' || { echo "meas STOP, copies failed"; exit 2; }',
+        *wrap,
         's=0',
-        *lane('probes', 'scale', p('scale')),
+        *lane('probes', 'probes', p('scale'), p('tickets')),
         *lane('a2td', "A2T's dependencies built", p('a2t', ('deps',))),
         'wait $a2td || s=2',
         *lane('built', 'packages built', *[p(x, build) for x in PKG_PARTS]),
@@ -676,6 +748,7 @@ case $me in
              for d in ${FAKEDEPENDS:-}; do echo "* Depends on: _make/x/$d"; done
              exit "${FAKENOFIB:-0}";;
   cabal) echo "cabal|$PWD|$*" >> "$FAKELOG"
+         case " $* " in *" build "*) echo "cabal-stats|${GHCW_STATS:-}|$([ -d "${GHCW_STATS:-/nonexistent}" ] && echo dir)" >> "$FAKELOG";; esac
          case " $* " in
            *" list-bin "*) echo "$FAKEBIN/bench";;
            *" build "*) sleep "${FAKESLEEP:-0}"
@@ -711,7 +784,12 @@ FAKE_PC = ('import os, sys, time\nopen(os.environ["FAKELOG"], "a").write('
            'time.sleep(float(os.environ.get("FAKESLEEP", "0")))\n'
            'if os.environ.get("FAKEPCFAIL"):\n    sys.exit("no count")\n'
            'print(sys.argv[-2] + ", per call:")\n'
-           'print("A instructions 5.0 [5.0..5.0]  cycles 3.0 [3.0..3.0]  " + sys.argv[-3])\n')
+           'print("A instructions 5.0 [5.0..5.0]  cycles 3.0 [3.0..3.0]  "'
+           ' + ("alloc 8.0 [8.0..8.0]  " if "--alloc" in sys.argv else "") + sys.argv[-3])\n')
+FAKE_TK = ('import os, sys\nopen(os.environ["FAKELOG"], "a").write('
+           '"tickets|" + " ".join(sys.argv[1:]) + "\\n")\n'
+           'open(sys.argv[3], "w").write("27799 -O2\\tinner\\tsplit\\n")\n'
+           'sys.exit(int(os.environ.get("FAKETK", "0")))\n')
 A2T_SAMPLE = ('Dynamic/size/small/dense/boxed', 'Ranked/<*>/small/runs/Unboxed')
 MAKEFILE = 'TOP = ..\nSUBDIRS = ansi \\\n  minimax \\\n  fish\n\ninclude x\n'
 CABAL = 'name: c\nbenchmark map-benchmarks\n  x\nbenchmark set-benchmarks\n'
@@ -726,7 +804,7 @@ def plant(d):
               os.path.dirname(f'{w}/{NOFIB_RUN}'),
               os.path.dirname(f'{w}/{CONTAINERS_CABAL}')):
         os.makedirs(x, exist_ok=True)
-    for name in ('nofib-run', 'cabal', 'setarch', 'taskset', 'bench', 'ghc', 'build'):
+    for name in ('nofib-run', 'cabal', 'setarch', 'taskset', 'bench', 'ghc', 'build', 'perf'):
         path = (f'{w}/{NOFIB_RUN}' if name == 'nofib-run'
                 else f'{w}/ghc-t/hadrian/build' if name == 'build'
                 else f'{fb}/{name}')
@@ -743,6 +821,8 @@ def plant(d):
         fh.write(FAKE_CC)
     with open(f'{d}/pc.py', 'w') as fh:
         fh.write(FAKE_PC)
+    with open(f'{d}/tk.py', 'w') as fh:
+        fh.write(FAKE_TK)
     with open(f'{d}/scale.sh', 'w') as fh:
         fh.write(FAKE_SCALE)
     with open(f'{w}/ghc-t/_build/flavour', 'w') as fh:
@@ -757,8 +837,8 @@ def self_test():
         o, log = f'{d}/out', f'{d}/fake.log'
         env = dict(os.environ, PATH=fb + os.pathsep + os.environ['PATH'],
                    FAKELOG=log, FAKEBIN=fb)
-        pc = f'{d}/pc.py'
-        text = script(w, 't', 'x', '4-6', o, cc=f'{d}/cc.py', sc=f'{d}/scale.sh', pc=pc)
+        pc, tk = f'{d}/pc.py', f'{d}/tk.py'
+        text = script(w, 't', 'x', '4-6', o, cc=f'{d}/cc.py', sc=f'{d}/scale.sh', pc=pc, tk=tk)
         open(log, 'w').close()
 
         def run():
@@ -806,12 +886,12 @@ def self_test():
         if ([x for x in builds if x not in (a2td, a2tb)] != want or builds[:1] != [a2td]
                 or builds.count(a2td) != 1 or builds.count(a2tb) != 1):
             bad.append(f'cabal built {builds}')
-        want = [f'--reps 1 {fb}/bench {c} {A2T_CALLS}' for c in A2T_SAMPLE]
+        want = [f'--reps 1 --alloc {fb}/bench {c} {A2T_CALLS}' for c in A2T_SAMPLE]
         if of('perf-per-call') != want or of('setarch').count(f'-R python3 {pc} {want[0]}') != 1:
             bad.append(f'A2T counted {of("perf-per-call")}')
         tsv = f'{o}/a2t-x.tsv'
         have = open(tsv).read() if os.path.isfile(tsv) else ''
-        if have != ''.join(f'{c}\t5.0\t0\n' for c in A2T_SAMPLE):
+        if have != ''.join(f'{c}\t5.0\t0\t8.0\n' for c in A2T_SAMPLE):
             bad.append(f'a2t-x.tsv is {have!r}')
         runs = [x for x in got if x.startswith(('setarch|', 'bench|'))
                 and NOFIB_RUN not in x and pc not in x]
@@ -855,24 +935,63 @@ def self_test():
         want = [f'4|{o}/scale-x.txt x={w}/ghc-t/_build/stage1/bin/ghc-x']
         if of('scale') != want:
             bad.append(f'the probes ran {of("scale")}')
+        g1 = f'{w}/ghc-t/_build/stage1/bin'
+        if of('tickets') != [f'run {g1}/ghc-x {o}/tix-x.tsv 4']:
+            bad.append(f'the tickets ran {of("tickets")}')
+        # Every build counted by the wrapper into a directory of its own.
+        want = sorted({f'{w}/vpapi/wstats-{bd}-{lab}|dir' for bd in ('cdist', 'dist', 'mdist')
+                       for lab in ('ct-x', 'ct-o1-x')} | {f'{w}/vpapi/wstats-adist-ct-x|dir'})
+        if sorted(set(of('cabal-stats'))) != want or len(of('cabal-stats')) != 8:
+            bad.append(f'the builds counted into {sorted(set(of("cabal-stats")))}')
+        line = (f'exec perf stat -x, -e instructions:u -o "$GHCW_STATS/$id.csv" -- {g1}/ghc-x'
+                ' +RTS -t"$GHCW_STATS/$id.rts" --machine-readable -RTS "$@"')
+        wr = f'{g1}/ghcw-x'
+        if not os.access(wr, os.X_OK) or line not in open(wr).read().split('\n'):
+            bad.append(f'{wr} lacks the line {line!r}')
+        else:
+            # A --make run is counted, any other runs the compiler alone.
+            sd = f'{d}/ws'
+            os.makedirs(sd)
+            rsp = f'{d}/a.rsp'
+            with open(rsp, 'w') as fh:
+                fh.write('-O\n--make\n-this-unit-id\nu-1\n')
+            for argv, want in ((['--make', '-c', 'M.hs'], f'perf|stat -x, -e instructions:u -o {sd}/'),
+                               ([f'@{rsp}'], f'perf|stat -x, -e instructions:u -o {sd}/'),
+                               (['--info'], 'ghc-x|--info')):
+                wlog = f'{d}/wrapper.log'
+                open(wlog, 'w').close()
+                subprocess.run([wr] + argv, env=dict(env, GHCW_STATS=sd, FAKELOG=wlog),
+                               capture_output=True)
+                had = open(wlog).read()
+                args = sorted(glob.glob(f'{sd}/*.args'))
+                if not had.startswith(want) or (argv[0] == '--make' and (
+                        '-RTS --make -c M.hs' not in had or len(args) != 1)) or (
+                        argv[0].startswith('@') and (len(args) != 2 or sorted(
+                            open(a).read() for a in args)[-1]
+                            != f'{os.getcwd()}\n-O\n--make\n-this-unit-id\nu-1\n')):
+                    bad.append(f'the wrapper on {argv}: {had!r}')
         # A whole file, an -O1 file's stanzas and megaparsec's packages.
         g = f'{w}/ghc-t/_build/stage1/bin'
         want = [('ctr/cabal.project.ct-x', str.__eq__,
                  'packages: containers/containers-tests tasty-bench-papi'
-                 f' {w}/vpapi/tasty-papi-settle2\nwith-compiler: {g}/ghc-x\n'
+                 f' {w}/vpapi/tasty-papi-settle2\nwith-compiler: {g}/ghcw-x\n'
                  f'with-hc-pkg: {g}/ghc-pkg\n'
                  'index-state: hackage.haskell.org 2026-09-19T16:13:55Z\n'
                  'allow-newer: base, ghc-prim, ghc-bignum, template-haskell,'
-                 ' containers, deepseq\ntests: False\nbenchmarks: True\n'),
+                 ' containers, deepseq\ntests: False\nbenchmarks: True\n\n'
+                 'package containers-tests\n  ghc-options: -ddump-timings -ddump-to-file\n'),
                 ('src/cabal.project.ct-o1-x', str.endswith,
-                 'benchmarks: True\n\npackage vector\n  ghc-options: -O1\n'
-                 '\npackage vector-stream\n  ghc-options: -O1\n\npackage'
-                 ' vector-bench-papi\n  flags: +BenchPAPI\n  ghc-options: -O1\n'),
+                 'benchmarks: True\n\npackage vector\n  ghc-options: -O1 -ddump-timings'
+                 ' -ddump-to-file\n\npackage vector-stream\n  ghc-options: -O1 -ddump-timings'
+                 ' -ddump-to-file\n\npackage vector-bench-papi\n  flags: +BenchPAPI\n'
+                 '  ghc-options: -O1 -ddump-timings -ddump-to-file\n'),
                 ('mtr/cabal.project.ct-x', str.startswith,
                  'packages: megaparsec-9.8.1 criterion-papi'
                  f' case-insensitive-1.2.1.0 {w}/vpapi/tasty-papi-settle2\n'),
                 ('a2t/cabal.project.ct-x', str.startswith,
-                 f'packages: .\nwith-compiler: {g}/ghc-x\nwith-hc-pkg: {g}/ghc-pkg\n')]
+                 f'packages: .\nwith-compiler: {g}/ghcw-x\nwith-hc-pkg: {g}/ghc-pkg\n'),
+                ('a2t/cabal.project.ct-x', str.endswith,
+                 '\npackage orthotope\n  ghc-options: -ddump-timings -ddump-to-file\n')]
         for rel, how, piece in want:
             path = f'{w}/vpapi/{rel}'
             have = open(path).read() if os.path.isfile(path) else ''
@@ -1002,10 +1121,10 @@ def self_test():
                                  ('c', 'FAKEBENCH', 'res-ct-o1-c-'),
                                  ('e', 'FAKEBENCH', 'mres/ct-o1-e/'),
                                  ('g', 'FAKEPCFAIL', '1'), ('h', 'FAKEA2TBUILD', '1'),
-                                 ('i', 'FAKEA2TDEPS', '1')):
+                                 ('i', 'FAKEA2TDEPS', '1'), ('j', 'FAKETK', '2')):
             o3 = f'{d}/out-whole-{lab}'
             p = subprocess.run(['bash', '-c', script(w, 't', lab, '4-6', o3, cc=f'{d}/cc.py',
-                                                     sc=f'{d}/scale.sh', pc=pc), 'test'],
+                                                     sc=f'{d}/scale.sh', pc=pc, tk=tk), 'test'],
                                env=dict(env, **{what: value}), capture_output=True, text=True)
             if p.returncode != 2 or 'a part failed' not in open(f'{o3}/meas-{lab}.log').read():
                 bad.append(f'{what}={value} in the whole battery: {p.returncode}')

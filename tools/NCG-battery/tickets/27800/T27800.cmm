@@ -1,0 +1,31 @@
+#include "Cmm.h"
+
+helper (W_ x)
+{
+    return (x + 1);
+}
+
+loop_entry (W_ k, W_ n)
+{
+    W_ acc;
+    acc = 0;
+    goto check;
+
+check:
+    if (n == 12345678) { goto slow; }
+    goto body;
+
+body:
+    acc = acc + n;
+    n = n - k;
+    if (n == 0) { goto done; }
+    goto check;
+
+slow:
+    (W_ r) = call helper(acc);
+    acc = r;
+    goto body;
+
+done:
+    return (acc);
+}

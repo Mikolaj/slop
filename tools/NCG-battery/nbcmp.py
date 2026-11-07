@@ -22,6 +22,7 @@ import glob
 import io
 import math
 import os
+import shutil
 import sys
 import tempfile
 
@@ -67,7 +68,10 @@ def load(n, out):
     tests = sorted(figs, key=len, reverse=True)
 
     def owner(path):
-        rel = os.path.relpath(path, root)
+        # A compile's paths are those of the nofib-r it ran in, which may
+        # since have moved: below the run's _make directory they are n's.
+        _, sep, below = path.rpartition(os.sep + os.path.join('nofib', '_make', out) + os.sep)
+        rel = below if sep else os.path.relpath(path, root)
         for t in tests:
             if rel.startswith(t + os.sep):
                 return t
@@ -234,6 +238,10 @@ def self_test():
                 'spectral/x\t1010\t100\t1500\t6020\t300\t20\t100\t3\t13']
         if got[1:3] != want:
             bad.append(f'table {got[1:3]}, not {want}')
+        # Moved elsewhere, the compiles' recorded paths name the old place.
+        shutil.copytree(n, os.path.join(d, 'moved', 'nofib-r'))
+        if table(os.path.join(d, 'moved', 'nofib-r'), 'B') != table(n, 'B'):
+            bad.append('the moved results lost figures')
         with contextlib.redirect_stderr(io.StringIO()):
             rc = main(['--work', d, 'A', 'C'])
         if rc != 2:

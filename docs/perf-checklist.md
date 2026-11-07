@@ -1083,7 +1083,9 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   and the cycles from the median. Where a build's instruction differences spread
   over more than 1%, it reports that and exits 1. Its instruction counts back
   a wall-time ratio as cachegrind's do, at native speed; its cycles carry
-  the machine's noise.
+  the machine's noise. With `--alloc` it also gives the bytes allocated a call,
+  from the RTS's statistics of the same runs, taken as the instructions are;
+  the benchmark must accept RTS options.
 - `tools/cachegrind-per-call.py` gives instructions and estimated cycles per
   call of one benchmark, from cachegrind runs at `--iters 2N` and `--iters N`,
   for a machine where `perf stat` cannot run. It is deterministic, so it is what
@@ -1217,16 +1219,21 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   and -O0, the tasty-papi benchmarks of containers, vector and megaparsec at -O2
   and -O1, a thin sample of orthotope's A2T counted by `perf-per-call.py`,
   the fifteen compilations by the tree's stage-1 and stage-2 compilers through
-  `compile-cost.py`, GHC's perf and size tests and the scaling probes.
-  Its docstring states each setting once with its reason, nofib's compiler
-  under `+RTS -A3G -V0` and the benchmarks with the RTS clock running among
-  them, and `--dry` prints the script it would run. `rebuild.py` runs it
-  over a series' base and every commit, each built from nothing, one after
-  another, going on past a step that fails. `nbcmp.py` compares two labels'
-  nofib runs, the collections and copied bytes beside the instructions,
-  `pkgcmp.py` their package benchmarks, `a2tcmp.py` their A2T samples,
-  `perfcmp.py` their perf and size tests and which leave the window GHC's CI
-  holds them to, and `alone.py` reruns one containers benchmark alone.
+  `compile-cost.py`, GHC's perf and size tests, the scaling probes
+  and the tickets' reproducers through `tickets.py`. Its docstring states each
+  setting once with its reason, nofib's compiler under `+RTS -A3G -V0`
+  and the benchmarks with the RTS clock running among them, and `--dry` prints
+  the script it would run. `rebuild.py` runs it over a series' base and every
+  commit, each built from nothing, one after another, going on past a step
+  that fails, records each build's compile time, allocation and object size
+  by module through `bstats.py`, and ends with `runreport.py`'s report
+  of the last commit against the base; `--pair` measures the base and the tip
+  alone. `nbcmp.py` compares two labels' nofib runs, the collections and copied
+  bytes beside the instructions, `pkgcmp.py` their package benchmarks,
+  `a2tcmp.py` their A2T samples, `perfcmp.py` their perf and size tests
+  and which leave the window GHC's CI holds them to, `tickets.py compare` their
+  tickets' figures, `bstats.py compare` their builds, and `alone.py` reruns one
+  containers benchmark alone.
 - `tools/NCG-fuzz/run.py` compiles and runs `gen.py`'s random programs
   under many flag sets, by a GHC tree's stage-2 compiler and a base tree's,
   and reports each disagreement, panic and crash: a test of the NCG's

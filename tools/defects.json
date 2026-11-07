@@ -8594,6 +8594,46 @@
    "discovery": "in-use",
    "notes": "2026-11-07: timing the NCG-battery mutants under taskset -c 0-2 and 3-5, at HEAD and after their speed-up, left that mutant uncaught both times; check-all, given more CPUs, had caught it.",
    "no_audit": "other:the-case-is-a-mutant-under-a-narrow-affinity"
+  },
+  {
+   "id": "NCG-battery-07",
+   "program": "NCG-battery/nbcmp.py",
+   "name": "nbcmp.load placed each compile by its .args' recorded working directory, absolute at build time, so nofib results moved to another directory lost every compiler instructions figure",
+   "family": "environment-decides",
+   "fix_rev": "self",
+   "trigger": "a nofib-r moved elsewhere, its stats .args naming the old /.../nofib-r/nofib as the working directory, with the object's -o relative to it or absolute under it",
+   "ok": "each object path is taken relative to the run's _make directory of the nofib-r given, so cinstr is the sum of the moved compiles",
+   "bug": "owner() found no test for a path under the old location, and cinstr was '-' for every benchmark",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-07: nbcmp.py --work archive-rb1 --table cfr00-fr00, over the first rebuild's nofib-r moved to archive-rb1, printed '-' in cinstr on every row; its .args name /home/mikolaj/slop/dist-ghcho/nofib-r/nofib or its shootout subdirectories.",
+   "plant_cmd": "mkdir -p moved/nofib-r/nofib/_make/A/spectral/x moved/nofib-r/stats/A && printf 'spectral/x//run//perf//instructions:u\\t1.0e3\\n' > moved/nofib-r/nofib/_make/A/spectral/x/Main.perf.results.tsv && printf '%s\\n' /elsewhere/nofib-r/nofib -c spectral/x/Main.hs -o _make/A/spectral/x/Main.o > moved/nofib-r/stats/A/x.0.args && printf '# started\\n\\n4000,,instructions:u,9,100.00,,\\n' > moved/nofib-r/stats/A/x.0.csv && printf '%s\\n' /elsewhere/nofib-r/nofib/spectral/x -c Foo.hs -o /elsewhere/nofib-r/nofib/_make/A/spectral/x/Foo.o > moved/nofib-r/stats/A/x.1.args && printf '# started\\n\\n2000,,instructions:u,9,100.00,,\\n' > moved/nofib-r/stats/A/x.1.csv",
+   "invoke": [
+    "--work",
+    "{tmp}/moved",
+    "--table",
+    "A"
+   ],
+   "expect_exit": 0,
+   "expect_text": "spectral/x\t1000\t-\t-\t6000\t",
+   "bug_exit": 0,
+   "bug_text": "spectral/x\t1000\t-\t-\t-\t"
+  },
+  {
+   "id": "NCG-battery-08",
+   "program": "NCG-battery/rebuild.py",
+   "name": "rebuild.py's self-test ran its planted runs under the real MIN_FREE, so with under 30 GB free where the temporary directory lives every run stopped before fr00 and the test crashed on a missing fr01.done",
+   "family": "environment-decides",
+   "fix_rev": "self",
+   "trigger": "rebuild.py --self-test with its temporary directory on a filesystem with under 30 GB free, as the 32 GB tmpfs over /tmp with 28 GB free",
+   "ok": "every planted run passes --min-free 0 but the full-disk check's, which passes its own",
+   "bug": "'rebuild STOP, 30 GB free before fr00, under 30', then FileNotFoundError on fr01.done",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "selftest",
+   "notes": "2026-11-07 11:44: check-all failed the self-test unsandboxed, /tmp a 32 GB tmpfs with 28 GB free; the same self-test had passed there at 11:29, with more free.",
+   "no_audit": "other:depends-on-the-free-space-of-the-machine's-temporary-directory"
   }
  ]
 }

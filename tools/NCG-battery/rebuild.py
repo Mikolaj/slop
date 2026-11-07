@@ -4,7 +4,7 @@ another, each built from nothing in a tree of its own and then measured by
 battery.py with the machine to itself (Mikolaj, 2026-11-03: "you sequentially
 build and benchmark each commit in turn").
 
-Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--work DIR] BASE TIP CPUS
+Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--pair] [--work DIR] BASE TIP CPUS
        python3 tools/NCG-battery/rebuild.py --self-test
 
 BASE and TIP name commits of ~/slop/ghc and CPUS is a taskset list, to which
@@ -15,27 +15,45 @@ cfr00-fr00 cfr01-fr01`, `o1-fr00 o1-fr01` at -O1. A step:
 1. The tree ghc-frNN from nothing: a clone of the work directory's ghc-g, the
    commit fetched from ~/slop/ghc, the submodules from ghc-g's, nofib left out,
    ./boot, ./configure, hadrian's default target in battery.py's flavour with
-   --docs=none and -V, which logs every compiler command.
-2. battery.py frNN frNN CPUS, the whole battery.
+   --docs=none and -V, which logs every compiler command, under perf stat,
+   with HADRIAN_SETTINGS in _build/hadrian.settings, which every hadrian run
+   in the tree loads; then bstats.py's table of the build, WORK/battery/
+   ghcb-frNN.tsv: each module's compile time, allocation and object size,
+   both stages, and the build's wall time and instructions:u. The flags
+   changed no object: against a tree of the same sources built without them,
+   only GHC.Version's commit id differed, and the tree's path in the RTS's C
+   objects of the debug ways, which ghc.hs.opts does not reach (2026-11-07).
+2. battery.py frNN frNN CPUS, the whole battery; then bstats.py's table of
+   the packages' and A2T's builds, WORK/battery/pkgb-frNN.tsv.
 3. What the comparison tools read kept and the rest deleted: the tree,
-   the packages' and A2T's build directories, stores and project files,
-   and every file but the tables in nofib's runs. A step that failed keeps all
-   of them, to read.
+   the packages' and A2T's build directories, stores, project files and
+   wrapper records, and every file but the tables in nofib's runs. A step
+   that failed keeps all of them, to read.
 
 The run exits once, 0 with every step measured and 2 otherwise, so a session
 waiting on it in the harness's background mode wakes at its end. A failed
 step is recorded and the next one starts. It stops early, with 2, only under
 MIN_FREE GB free before a step or after MAX_FAILED steps failing in a row, which
 no one commit explains. A build and a battery are each killed after TIMEOUT
-seconds, which fails the step. Run again with the same arguments, it takes up from
-the steps not measured, each begun again from nothing, and refuses if the commits
-differ from those of the first run, or if another run holds the lock. A first run
-refuses if any step's results exist. --dry prints the steps and the first
-step's commands, and runs nothing. Run it unsandboxed.
+seconds, which fails the step. Run again, it takes up from the steps not
+measured, each begun again from nothing: a step counts as measured when its
+LABEL.done stands and every record of 2026-11-07 exists (ghcb, pkgb and tix,
+and A2T's table with its bytes allocated), so steps measured before then are
+measured again; and a label whose commit is not the one steps.txt names is
+measured again, its old results deleted. It refuses a base other than
+steps.txt's, or a run while another holds the lock; a first run refuses if any
+step's results exist. --pair builds and measures the base and the tip alone,
+under the labels the chain gives them, steps.txt naming the whole chain, so
+that a later run of the chain takes them up where their commits are the same.
+At the end, when the base and the last label are measured, runreport.py's
+report of the last label against fr00, LOGS/report-fr00-frNN.txt, which
+the run's last line names. --dry prints the steps and the first step's
+commands, and runs nothing. Run it unsandboxed.
 
-WORK/battery/rebuild holds rebuild.log, the lines it prints; steps.txt; for each step
-build-LABEL.log, boot-LABEL.log, configure-LABEL.log, hadrian-LABEL.log.gz and
-battery-LABEL.log; LABEL.done or LABEL.failed, holding what the log's line says.
+WORK/battery/rebuild (LOGS) holds rebuild.log, the lines it prints; steps.txt;
+for each step build-LABEL.log, boot-LABEL.log, configure-LABEL.log,
+hadrian-LABEL.log.gz, hperf-LABEL.csv (perf stat's) and battery-LABEL.log;
+LABEL.done or LABEL.failed, holding what the log's line says; the report.
 --repo, --battery, --timeout and --min-free are the self-test's.
 """
 
@@ -56,12 +74,16 @@ sys.path.insert(0, HERE)
 from battery import (A2T_CELLS, A2T_SRC, CONTAINERS_CABAL, FLAVOUR, MBB,  # noqa: E402
                      NOFIB_RUN, PAPIPKG, PERF_TESTS, PKGS, SPECTRAL_MAKEFILE, WORK,
                      Failures, cpu_list, q, run_self_test)
+import bstats  # noqa: E402
+import runreport  # noqa: E402
 
 REPO = os.path.join(os.path.dirname(WORK), 'ghc')
 BATTERY = os.path.join(HERE, 'battery.py')
 MIN_FREE = 30  # GB
 MAX_FAILED = 3
 TIMEOUT = 7200  # s; each takes under half an hour
+# every module's passes timed, a dump a module under its build directory
+HADRIAN_SETTINGS = '*.*.ghc.hs.opts += -ddump-timings -ddump-to-file'
 
 
 def git(repo, *args):
@@ -87,6 +109,7 @@ def steps_of(repo, base, tip):
 def build_script(work, repo, logs, tree, commit, jobs):
     t, g = f'{work}/ghc-{tree}', f'{work}/ghc-g'
     stamp, hlog = f'{logs}/stamp-{tree}', f'{logs}/hadrian-{tree}.log'
+    hperf = f'{logs}/hperf-{tree}.csv'
     return '\n'.join([
         'set -u',
         f'echo "start {tree} $(date +%T)"',
@@ -111,13 +134,20 @@ def build_script(work, repo, logs, tree, commit, jobs):
         f'./boot > {q(f"{logs}/boot-{tree}.log")} 2>&1'
         f' && ./configure > {q(f"{logs}/configure-{tree}.log")} 2>&1'
         f' || {{ echo "tree STOP {tree}, boot or configure failed"; exit 3; }}',
+        # loaded by every hadrian run in the tree, the perf part's included,
+        # which given other arguments would build the compiler again
+        f'mkdir -p _build && echo {q(HADRIAN_SETTINGS)} > _build/hadrian.settings',
         # mtimes on ~/slop step by 1 ms, so every object is newer than the stamp
         f'touch {q(stamp)}; sleep 0.01',
-        f'hadrian/build -j{jobs} -V --flavour={FLAVOUR} --docs=none > {q(hlog)} 2>&1',
-        'e=$?',
+        's0=$(date +%s)',
+        f'perf stat -x, -e instructions:u -o {q(hperf)} --'
+        f' hadrian/build -j{jobs} -V --flavour={FLAVOUR} --docs=none > {q(hlog)} 2>&1',
+        'e=$?; s=$(( $(date +%s) - s0 ))',
         f'old=$(find _build -name \'*.o\' ! -newer {q(stamp)} | wc -l); rm -f {q(stamp)}',
+        f'i=$(sed -n \'s/^\\([0-9]*\\),.*,instructions:u,.*/\\1/p\' {q(hperf)} 2>/dev/null)',
         f'echo "hadrian {tree} exit $e $(date +%T): warnings'
-        f' $(grep -c \'warning:\' {q(hlog)}); objects older than the build: $old"',
+        f' $(grep -c \'warning:\' {q(hlog)}); objects older than the build: $old;'
+        ' wall ${s} s; instructions:u ${i:--}"',
         '[ $e = 0 ] || exit 4',
         '[ "$old" = 0 ] || exit 5'])
 
@@ -137,7 +167,9 @@ def label_paths(work, label):
                    f'{v}/{p["log"]}-{lab}.log']
         ps += sorted(glob.glob(f'{v}/res-{glob.escape(lab)}-*.csv'))
     ps += [f'{v}/adist-{c}', f'{work}/{A2T_SRC}/cabal.project.{c}', f'{v}/ab-{c}.log']
-    for s in (f'a2t-{label}.tsv', f'comp1-{label}.txt', f'comp1-{label}.runs', f'comp2-{label}.txt',
+    ps += [sdir for _, _, sdir in bstats.builds(work, label, label)]
+    for s in (f'a2t-{label}.tsv', f'tix-{label}.tsv', f'ghcb-{label}.tsv', f'pkgb-{label}.tsv',
+              f'comp1-{label}.txt', f'comp1-{label}.runs', f'comp2-{label}.txt',
               f'comp2-{label}.runs', f'perf-{label}.tsv', f'perf-{label}.log',
               f'perf-{label}-summary.txt', f'perf-{label}-size.log',
               f'perf-{label}-size-summary.txt', f'scale-{label}.txt', f'meas-{label}.log',
@@ -168,8 +200,23 @@ def prune(work, label):
         for p in PKGS.values():
             gone += [f'{v}/{p["builddir"]}-{lab}', f'{v}/{p["src"]}/cabal.project.{lab}']
     gone += [f'{v}/adist-{c}', f'{work}/{A2T_SRC}/cabal.project.{c}']
+    gone += [sdir for _, _, sdir in bstats.builds(work, label, label)]
     for p in gone:
         remove(p)
+
+
+def unrecorded(work, label):
+    """The records a measured step of this label lacks: those added on
+    2026-11-07, which steps measured before then lack."""
+    out = f'{work}/battery'
+    miss = [f'{out}/{s}-{label}.tsv' for s in ('ghcb', 'pkgb', 'tix')
+            if not os.path.exists(f'{out}/{s}-{label}.tsv')]
+    a2t = f'{out}/a2t-{label}.tsv'
+    with open(a2t) if os.path.exists(a2t) else open(os.devnull) as fh:
+        first = fh.readline()
+    if len(first.rstrip('\n').split('\t')) != 4:
+        miss.append(f'{a2t}, its bytes allocated')
+    return miss
 
 
 def free_gb(work):
@@ -203,8 +250,14 @@ def step(o, label, commit, jobs):
         return f'build: {st}', ''
     t1 = time.time()
     with open(build) as fh:
-        m = re.search(r'warnings (\d+);', fh.read())
+        text = fh.read()
+    m = re.search(r'warnings (\d+);', text)
     warnings = m.group(1) if m else '?'
+    m = re.search(r'; wall (\d+) s;', text)
+    os.makedirs(f'{o["work"]}/battery', exist_ok=True)
+    bstats.write(f'{o["work"]}/battery/ghcb-{label}.tsv',
+                 bstats.ghc_rows(f'{o["work"]}/ghc-{label}', f'{logs}/hperf-{label}.csv',
+                                 float(m.group(1)) if m else 0))
     hlog = f'{logs}/hadrian-{label}.log'
     if os.path.exists(hlog):
         subprocess.run(['gzip', '-f', hlog])
@@ -213,6 +266,7 @@ def step(o, label, commit, jobs):
     if st != 0:
         return f'battery: {st}', ''
     t2 = time.time()
+    bstats.write(f'{o["work"]}/battery/pkgb-{label}.tsv', bstats.pkg_rows(o['work'], label, label))
     prune(o['work'], label)
     return None, (f'built in {(t1 - t0) / 60:.0f} min with {warnings} warnings,'
                   f' measured in {(t2 - t1) / 60:.0f} min')
@@ -236,28 +290,40 @@ def run(o, steps):
         sys.stdout.flush()
     listing = ''.join(f'{lab} {h}\n' for lab, h in steps)
     path = f'{logs}/steps.txt'
+    changed = []
     if os.path.exists(path):
         with open(path) as fh:
-            if fh.read() != listing:
-                say(f'rebuild STOP, {path} names other commits')
-                return 2
+            had = dict(line.split() for line in fh if line.strip())
+        if had.get(steps[0][0]) != steps[0][1]:
+            say(f'rebuild STOP, {path} names another base, {had.get(steps[0][0], "none")[:10]}')
+            return 2
+        changed = [lab for lab, h in steps if had.get(lab, h) != h]
     else:
         there = [p for lab, _ in steps for p in label_paths(work, lab) if os.path.lexists(p)]
         if there:
             say(f'rebuild STOP, {len(there)} results exist, the first {there[0]}')
             return 2
-        with open(path, 'w') as fh:
-            fh.write(listing)
+    with open(path, 'w') as fh:
+        fh.write(listing)
+    for lab in changed:  # its commit is another now: its results are stale
+        say(f'{lab} names another commit than before, {had[lab][:10]}: measured again')
+        for p in label_paths(work, lab) + [f'{logs}/{lab}.done', f'{logs}/{lab}.failed']:
+            remove(p)
     os.sched_setaffinity(0, {int(c) for c in cpu_list(o['cpus'])})
     jobs = len(cpu_list(o['cpus']))
+    todo = [steps[0], steps[-1]] if o.get('pair') else steps
     done, failed, row = 0, [], 0
-    say(f'rebuild start: {len(steps)} steps, {steps[0][1][:10]} to {steps[-1][1][:10]},'
+    say(f'rebuild start: {len(todo)} of {len(steps)} steps, {steps[0][1][:10]} to {steps[-1][1][:10]},'
         f' CPUs {o["cpus"]}')
-    for label, commit in steps:
+    for label, commit in todo:
         mark = f'{logs}/{label}'
         if os.path.exists(mark + '.done'):
-            done += 1
-            continue
+            miss = unrecorded(work, label)
+            if not miss:
+                done += 1
+                continue
+            say(f'{label} measured without {len(miss)} records, the first {miss[0]}: measured again')
+            os.unlink(mark + '.done')
         free = free_gb(work)
         if free < o['min_free']:
             say(f'rebuild STOP, {free:.0f} GB free before {label}, under {o["min_free"]}')
@@ -282,8 +348,16 @@ def run(o, steps):
         else:
             done += 1
             row = 0
-    say(f'rebuild DONE: {done} of {len(steps)} steps measured,'
-        f' failed: {" ".join(failed) or "none"}; {free_gb(work):.0f} GB free')
+    a, b = steps[0][0], steps[-1][0]
+    if all(os.path.exists(f'{logs}/{x}.done') for x in (a, b)):
+        try:
+            rep = '; report ' + runreport.report(work, a, b, f'{logs}/report-{a}-{b}.txt')
+        except Exception as e:  # the run's own figures stand
+            rep = f'; no report, {type(e).__name__}: {e}'
+    else:
+        rep = f'; no report, {a} or {b} not measured'
+    say(f'rebuild DONE: {done} of {len(todo)} steps measured,'
+        f' failed: {" ".join(failed) or "none"}; {free_gb(work):.0f} GB free{rep}')
     return 2 if failed else 0
 
 
@@ -296,6 +370,8 @@ def main(argv):
         name = argv[0][2:].replace('-', '_')
         if name == 'dry':
             dry, argv = True, argv[1:]
+        elif name == 'pair':
+            o['pair'], argv = True, argv[1:]
         elif name in o and len(argv) >= 2:
             o[name] = type(o[name])(argv[1])
             argv = argv[2:]
@@ -322,7 +398,7 @@ def main(argv):
         print(f'no {" ".join(missing)} under {o["work"]}; nothing run', file=sys.stderr)
         return 2
     if dry:
-        for label, commit in steps:
+        for label, commit in ([steps[0], steps[-1]] if o.get('pair') else steps):
             print(label, commit)
         print(build_script(o['work'], o['repo'], o['logs'], steps[0][0], steps[0][1], jobs))
         print(shlex.join([sys.executable, o['battery'], '--work', o['work'],
@@ -335,10 +411,18 @@ def main(argv):
 # only record what they are given, a battery that plants results, real git.
 
 RECORD = 'echo "$(basename "$0")|$(basename "$PWD")" >> "$FAKELOG"\n'
+# perf stat around hadrian, a count of its own
+PERF = r'''#!/bin/bash
+o=; while [ "$1" != -- ]; do [ "$1" = -o ] && o=$2; shift; done; shift
+"$@"; e=$?
+echo "123456,,instructions:u,9,100.00,," > "$o"; exit $e
+'''
 HADRIAN = r'''#!/bin/bash
 t=$(basename "$PWD")
-echo "hadrian|$t|$(git rev-parse HEAD)|$*|$(taskset -cp $$ | sed 's/.*: //')|$(ls -d ../ghc-fr* | wc -l)|$(cat libs/x/f)" >> "$FAKELOG"
-mkdir -p _build; touch _build/a.o
+echo "hadrian|$t|$(git rev-parse HEAD)|$*|$(taskset -cp $$ | sed 's/.*: //')|$(ls -d ../ghc-fr* | wc -l)|$(cat libs/x/f)|$(cat _build/hadrian.settings)" >> "$FAKELOG"
+mkdir -p _build/stage1/compiler/build/compiler/GHC _build/stage1/compiler/build/GHC; touch _build/a.o
+printf 'P [GHC.X]: alloc=100 time=2.0\n' > _build/stage1/compiler/build/compiler/GHC/X.dump-timings
+echo xx > _build/stage1/compiler/build/GHC/X.o
 echo 'x: warning: one'; echo 'y: warning: two'
 [ "${FAKEHADRIAN:-}" = "$t" ] && exit 1
 exit 0
@@ -362,7 +446,10 @@ put(f'{v}/cres/{c}/m-1.csv'); put(f'{v}/mres/{o1}/b-1.csv'); put(f'{v}/res-{c}-1
 put(f'{v}/ctr/cabal.project.{c}'); put(f'{v}/cb-{c}.log')
 put(f'{v}/adist-{c}/x'); put(f'{v}/a2t/cabal.project.{c}'); put(f'{v}/ab-{c}.log')
 put(f'{b}/perf-{label}.tsv'); put(f'{b}/p{label}/a.s'); put(f'{b}/comp2-{label}.runs')
-put(f'{b}/a2t-{label}.tsv')
+put(f'{b}/tix-{label}.tsv'); open(f'{b}/a2t-{label}.tsv', 'w').write('c\t1.0\t0\t2.0\n')
+os.makedirs(f'{v}/wstats-cdist-{c}', exist_ok=True)
+open(f'{v}/wstats-cdist-{c}/1.args', 'w').write('/x\n--make\n-this-unit-id\nu-0\n-no-link\n')
+open(f'{v}/wstats-cdist-{c}/1.csv', 'w').write('77,,instructions:u,9,100.00,,\n')
 if os.environ.get('FAKEHANG') == label:
     subprocess.Popen(['bash', '-c', 'echo $$ > "$FAKEPID"; exec sleep 4']).wait()
 sys.exit(3 if label in os.environ.get('FAKEBATTERY', '').split() else 0)
@@ -405,6 +492,10 @@ def plant(d):
         os.makedirs(f'{w}/{rel}', exist_ok=True)
     with open(f'{d}/battery.py', 'w') as fh:
         fh.write(FAKE_BATTERY)
+    os.makedirs(f'{d}/bin')
+    with open(f'{d}/bin/perf', 'w') as fh:
+        fh.write(PERF)
+    os.chmod(f'{d}/bin/perf', 0o755)
     return r, w
 
 
@@ -426,9 +517,12 @@ def self_test():
 
         def go(args=(base, tip, spec), work=w, opts=(), **extra):
             open(log, 'w').close()
-            env = dict(os.environ, FAKELOG=log, FAKEPID=f'{d}/pid', **extra)
+            env = dict(os.environ, FAKELOG=log, FAKEPID=f'{d}/pid',
+                       PATH=f'{d}/bin' + os.pathsep + os.environ['PATH'], **extra)
+            # the disk's free space no input of the test (NCG-battery-08)
             p = subprocess.run([sys.executable, os.path.abspath(__file__), '--work', work,
-                                '--repo', r, '--battery', f'{d}/battery.py', *opts, *args],
+                                '--repo', r, '--battery', f'{d}/battery.py', '--min-free', '0',
+                                *opts, *args],
                                env=env, capture_output=True, text=True)
             with open(log) as fh:
                 return p, fh.read().split('\n')[:-1]
@@ -440,6 +534,9 @@ def self_test():
         p, lines = go(opts=('--dry',))
         if p.returncode or lines or os.path.exists(logs) or hashes[0] not in p.stdout:
             bad.append(f'--dry: {p.returncode}, ran {lines[:2]}')
+        p, lines = go(opts=('--dry', '--pair'))
+        if p.returncode or lines or [x.split()[0] for x in p.stdout.split('\n')[:2]] != ['fr00', 'fr04']:
+            bad.append(f'--dry --pair: {p.returncode}, {p.stdout[:120]!r}')
         p = subprocess.run([sys.executable, os.path.abspath(__file__), '--work', w, '--repo', r,
                             '--dry', base, tip, spec], capture_output=True, text=True)
         if p.returncode != 2 or NOFIB_RUN not in p.stderr:
@@ -480,6 +577,8 @@ def self_test():
                 bad.append(f'{lab} built beside {f[5]} trees')
             if f[6] != 'sub':
                 bad.append(f'{lab} without its submodule: {f[6]!r}')
+            if f[7] != HADRIAN_SETTINGS:
+                bad.append(f'{lab} built under the settings {f[7]!r}')
         for x in [y for y in lines if y.startswith('battery|')]:
             f = x.split('|')
             if f[1] != f[2] or f[3] != spec:
@@ -499,24 +598,55 @@ def self_test():
             for rel in (f'{w}/ghc-{lab}', f'{n}/nofib/_make/{c}/x/Main', f'{n}/c{lab}', f'{n}/co/{lab}',
                         f'{v}/store-{c}', f'{v}/cdist-{c}', f'{v}/mdist-{o1}', f'{v}/dist-{c}',
                         f'{v}/ctr/cabal.project.{c}', f'{v}/adist-{c}', f'{v}/a2t/cabal.project.{c}',
+                        f'{v}/wstats-cdist-{c}',
                         f'{logs}/hadrian-{lab}.log'):
                 if os.path.exists(rel):
                     bad.append(f'{rel} is still there')
         if 'with 2 warnings' not in open(f'{logs}/fr01.done').read():
             bad.append('the warnings were not counted: ' + open(f'{logs}/fr01.done').read())
+        # GHC's build and the packages' recorded before the prune.
+        ghcb = open(f'{w}/battery/ghcb-fr01.tsv').read().split('\n')
+        pkgb = open(f'{w}/battery/pkgb-fr01.tsv').read().split('\n')
+        if 'process\tghc\thadrian\tinstructions\t123456' not in ghcb \
+                or 'module\tghc/stage1\tcompiler/build/GHC/X.o\talloc\t100' not in ghcb \
+                or not any(x.startswith('process\tghc\thadrian\twall_s\t') for x in ghcb) \
+                or 'process\tcontainers-O2\tu-0\tinstructions\t77' not in pkgb \
+                or 'instructions:u 123456' not in open(f'{logs}/build-fr01.log').read():
+            bad.append(f'the build records: {ghcb} {pkgb}')
+        rep = f'{logs}/report-fr00-fr04.txt'
+        if not p.stdout.rstrip('\n').endswith(f'; report {rep}') or not os.path.exists(rep) \
+                or 'fr04 against fr00' not in open(rep).read():
+            bad.append(f'the report: {p.stdout[-200:]}')
         # Measured steps are not done again, and other commits are refused.
         p, lines = go()
         if p.returncode != 0 or lines:
             bad.append(f'a second run: {p.returncode}, ran {lines[:2]}')
         p, lines = go((hashes[1], tip, spec))
-        if p.returncode != 2 or lines or 'other commits' not in p.stdout:
-            bad.append(f'other commits: {p.returncode} {p.stdout[-200:]}')
+        if p.returncode != 2 or lines or 'another base' not in p.stdout:
+            bad.append(f'another base: {p.returncode} {p.stdout[-200:]}')
         # Another run holding the lock.
         with open(f'{logs}/lock', 'w') as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             p, lines = go()
             if p.returncode != 2 or lines or 'lock' not in p.stdout:
                 bad.append(f'the lock: {p.returncode} {p.stdout[-200:]}')
+
+        # A measured step lacking a record of 2026-11-07 is measured again,
+        # and so is one whose commit is another now.
+        os.unlink(f'{w}/battery/tix-fr02.tsv')
+        with open(f'{w}/battery/a2t-fr03.tsv', 'w') as fh:
+            fh.write('c\t1.0\t0\n')
+        p, lines = go()
+        if p.returncode != 0 or measured(lines) != ['fr02', 'fr03'] or 'measured without' not in p.stdout:
+            bad.append(f'steps lacking records: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
+        with open(f'{logs}/steps.txt') as fh:
+            st = fh.read()
+        with open(f'{logs}/steps.txt', 'w') as fh:
+            fh.write(st.replace(f'fr01 {hashes[1]}', f'fr01 {hashes[2]}'))
+        p, lines = go()
+        if p.returncode != 0 or measured(lines) != ['fr01'] or 'names another commit' not in p.stdout \
+                or open(f'{logs}/steps.txt').read() != st:
+            bad.append(f'a step of another commit: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
 
         def fresh(name):
             w2 = f'{d}/{name}'
@@ -526,6 +656,17 @@ def self_test():
                 for path in label_paths(w2, lab):
                     remove(path)
             return w2
+        # The pair alone, the base and the tip, under the chain's labels, and then
+        # the chain taking up the rest.
+        w7 = fresh('w7')
+        p, lines = go(work=w7, opts=('--pair',))
+        if p.returncode != 0 or measured(lines) != ['fr00', 'fr04'] \
+                or 'rebuild DONE: 2 of 2' not in p.stdout or 'report-fr00-fr04.txt' not in p.stdout \
+                or open(f'{w7}/battery/rebuild/steps.txt').read() != st:
+            bad.append(f'--pair: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
+        p, lines = go(work=w7)
+        if p.returncode != 0 or measured(lines) != ['fr01', 'fr02', 'fr03']:
+            bad.append(f'the chain after the pair: {p.returncode} {measured(lines)}')
         # A failed step keeps its files and the next one starts; run again, only it runs.
         w2 = fresh('w2')
         p, lines = go(work=w2, FAKEBATTERY='fr01')
@@ -550,8 +691,10 @@ def self_test():
         with open(bin4, 'w') as fh:
             fh.write('import sys\nsys.exit(3)\n')
         p = subprocess.run([sys.executable, os.path.abspath(__file__), '--work', w4, '--repo', r,
-                            '--battery', bin4, base, tip, spec],
-                           env=dict(os.environ, FAKELOG=log), capture_output=True, text=True)
+                            '--battery', bin4, '--min-free', '0', base, tip, spec],
+                           env=dict(os.environ, FAKELOG=log,
+                                    PATH=f'{d}/bin' + os.pathsep + os.environ['PATH']),
+                           capture_output=True, text=True)
         if p.returncode != 2 or 'rebuild STOP, 3 steps failed in a row' not in p.stdout \
                 or 'fr03' in p.stdout or 'rebuild DONE' in p.stdout:
             bad.append(f'failing in a row: {p.returncode} {p.stdout[-300:]}')

@@ -2,7 +2,7 @@
 """Instructions and cycles per call of one criterion benchmark across
 builds, from `perf stat`.
 
-Usage: python3 tools/perf-per-call.py [--cpu CPU] [--reps R]
+Usage: python3 tools/perf-per-call.py [--cpu CPU] [--reps R] [--alloc]
                                       BIN [BIN ...] NAME N
        python3 tools/perf-per-call.py --self-test
 
@@ -33,6 +33,14 @@ noise. This is the native counterpart of tools/cachegrind-per-call.py,
 which estimates cycles from a cache model where `perf stat` cannot run,
 at fifty times the run time or more.
 
+With `--alloc` every run also writes the RTS's statistics, `+RTS -tFILE
+--machine-readable -RTS` after the benchmark's arguments, and the bytes
+allocated a call are taken from them as the instructions are, the lowest
+2N figure less the lowest N one, over N, printed after the cycles as
+`alloc`. The benchmark must take RTS options. On six cells of orthotope's
+A2T sample the statistics left the instructions a call as they were to the
+0.1 printed (2026-11-07).
+
 Exit 0 when the figures were printed, 1 when they were and some build's
 instruction differences spread over more than 1% of its figure, 2 when
 they could not be: perf, or taskset with `--cpu`, missing, a run failing,
@@ -40,6 +48,7 @@ or its output without a counted instructions:u and cycles:u.
 """
 
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -56,12 +65,23 @@ SPAN = 0.01
 PERF = ['perf']
 
 
-def command(binary, name, iters, out, cpu):
-    """One counted run, pinned to cpu unless it is None."""
+def command(binary, name, iters, out, cpu, stats=None):
+    """One counted run, pinned to cpu unless it is None, the RTS's
+    statistics written to stats unless it is None."""
+    rts = ['+RTS', '-t' + stats, '--machine-readable', '-RTS'] if stats else []
     return ((['taskset', '-c', cpu] if cpu is not None else []) + PERF
             + ['stat', '-x', ',', '-o', out,
                '-e', ','.join(e + ':u' for e in EVENTS), '--',
-               binary, '--iters', str(iters), '-m', 'glob', name])
+               binary, '--iters', str(iters), '-m', 'glob', name] + rts)
+
+
+def allocated(path):
+    """The bytes allocated of a `+RTS -t --machine-readable` file."""
+    with open(path) as fh:
+        m = re.search(r'\("bytes allocated", "(\d+)"\)', fh.read())
+    if not m:
+        raise ValueError(f'{path} has no bytes allocated')
+    return int(m.group(1))
 
 
 def counts(path):
@@ -85,18 +105,19 @@ def counts(path):
 
 def per_call(c1, c2, n):
     """Event -> count per call, from the N and 2N runs."""
-    return {e: (c2[e] - c1[e]) / n for e in EVENTS}
+    return {e: (c2[e] - c1[e]) / n for e in c1}
 
 
 def estimate(runs, n):
     """Event -> (per call, lowest, highest), from one BIN's runs: the
-    instructions the lowest 2N count less the lowest N count, the cycles
-    the median of the repetitions' differences, the bounds theirs."""
+    instructions, and the bytes allocated where they were read, the lowest
+    2N count less the lowest N count, the cycles the median of the
+    repetitions' differences, the bounds theirs."""
     diffs = [per_call(c1, c2, n) for c1, c2 in zip(runs[1], runs[2])]
     est = {}
-    for e in EVENTS:
+    for e in runs[1][0]:
         xs = [d[e] for d in diffs]
-        if e == 'instructions':
+        if e != 'cycles':
             mid = (min(c[e] for c in runs[2]) - min(c[e] for c in runs[1])) / n
         else:
             mid = statistics.median(xs)
@@ -104,17 +125,21 @@ def estimate(runs, n):
     return est
 
 
-def run(binary, name, iters, cpu, out):
-    cmd = command(binary, name, iters, out, cpu)
+def run(binary, name, iters, cpu, out, alloc=False):
+    stats = out + '.rts' if alloc else None
+    cmd = command(binary, name, iters, out, cpu, stats)
     r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                        text=True)
     if r.returncode != 0:
         raise ValueError(f'{" ".join(cmd)} exited {r.returncode}:\n'
                          + r.stderr[-2000:])
-    return counts(out)
+    found = counts(out)
+    if stats:
+        found['alloc'] = allocated(stats)
+    return found
 
 
-def measure(bins, name, n, reps, cpu, td):
+def measure(bins, name, n, reps, cpu, td, alloc=False):
     """Per BIN, k -> the counts of its runs at k * N, one a repetition."""
     got = [{1: [], 2: []} for _ in bins]
     out = os.path.join(td, 'perf.txt')
@@ -122,7 +147,7 @@ def measure(bins, name, n, reps, cpu, td):
         for i in range(len(bins)):
             j = (i + r) % len(bins)
             for k in ((1, 2) if r % 2 == 0 else (2, 1)):
-                got[j][k].append(run(bins[j], name, k * n, cpu, out))
+                got[j][k].append(run(bins[j], name, k * n, cpu, out, alloc))
     return got
 
 
@@ -138,6 +163,11 @@ with open({calls!r}, 'a') as fh:
     fh.write(tag + ' ' + str(iters) + chr(10))
 if tag == 'F':
     sys.exit(1)
+if '+RTS' in rest:
+    t = [x for x in rest[rest.index('+RTS'):] if x.startswith('-t')][0][2:]
+    with open(t, 'w') as fh:
+        fh.write(' [("bytes allocated", "' + str(4000 + {{'A': 16, 'B': 24}}[tag] * iters)
+                 + '")' + chr(10) + ' ,("num_GCs", "2")' + chr(10) + ' ]' + chr(10))
 ins, cyc = {{'A': (7, 3), 'B': (9, 4), 'U': (7, 3), 'M': (7, 3),
             'Q': (7, 3), 'W': (7, 3)}}[tag]
 with open({calls!r}) as fh:
@@ -183,6 +213,12 @@ def self_test():
             if order != [('A', '10'), ('A', '20'), ('B', '10'), ('B', '20'),
                          ('B', '20'), ('B', '10'), ('A', '20'), ('A', '10')]:
                 bad.append(f'not rotated and swapped: {order}')
+            got = [estimate(g, 10)['alloc']
+                   for g in measure([a, b], 'g/x', 10, 2, None, td, True)]
+            if got != [(16.0, 16.0, 16.0), (24.0, 24.0, 24.0)]:
+                bad.append(f'bytes allocated a call: {got}')
+            if '+RTS' in command('x', 'g/x', 5, 'o', None):
+                bad.append('a run without --alloc given RTS options')
             q = os.path.join(td, 'Q')
             got = estimate(measure([q], 'g/x', 10, 3, None, td)[0], 10)
             if got != {'instructions': (7.0, 7.0, 57.0),
@@ -215,8 +251,11 @@ def self_test():
 def main(argv):
     if argv == ['--self-test']:
         return self_test()
-    cpu, reps = None, 3
-    while argv[:1] in (['--cpu'], ['--reps']):
+    cpu, reps, alloc = None, 3, False
+    while argv[:1] in (['--cpu'], ['--reps'], ['--alloc']):
+        if argv[0] == '--alloc':
+            alloc, argv = True, argv[1:]
+            continue
         if len(argv) < 2 or (argv[0] == '--reps' and not argv[1].isdigit()):
             print(f'{argv[0]} needs a value', file=sys.stderr)
             return 2
@@ -236,7 +275,7 @@ def main(argv):
             return 2
     with tempfile.TemporaryDirectory() as td:
         try:
-            got = measure(bins, name, n, reps, cpu, td)
+            got = measure(bins, name, n, reps, cpu, td, alloc)
         except (ValueError, OSError) as e:
             print(e, file=sys.stderr)
             return 2
@@ -247,7 +286,7 @@ def main(argv):
     for j, (b, g) in enumerate(zip(bins, est)):
         label = chr(ord('A') + j)
         cells = []
-        for e in EVENTS:
+        for e in EVENTS + (('alloc',) if alloc else ()):
             mid, lo, hi = g[e]
             base = est[0][e][0]
             cells.append(f'{e} {mid:.1f} [{lo:.1f}..{hi:.1f}]'
