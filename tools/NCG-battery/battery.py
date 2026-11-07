@@ -7,7 +7,8 @@ size tests, the scaling probes and the tickets' reproducers; or some of these
 parts alone.
 
 Usage: python3 tools/NCG-battery/battery.py [--dry] [--work DIR] [--out DIR]
-           [--compilers GHC0|full] [--a2t-lock FILE] TREE LABEL CPUS [PART...]
+           [--compilers GHC0|full] [--a2t-lock FILE] [--min-free GIB]
+           TREE LABEL CPUS [PART...]
        python3 tools/NCG-battery/battery.py --self-test
 
 TREE names the work directory's ghc-TREE, whose _build/stage0/bin/ghc
@@ -38,11 +39,12 @@ and _build/stage1/bin/ghc-LABEL a wrapper running it with -B over the tree's
 _build/stage0/lib, so that every other part measures GHC0 with the libraries
 the tree's stage-1 compiler built. GHC0 is refused with perf, which tests
 the tree's own stage-2 compiler, and so with the whole battery. --a2t-lock
-FILE takes a lock over A2T's builds, setting 13.
+FILE takes a lock over A2T's builds, setting 13. --min-free GIB, MIN_FREE
+by default, is the free space nothing runs without, setting 14.
 The battery is a bash script; --dry prints it, every file it generates written
 out in it, and runs nothing. Run it unsandboxed. It exits 0 when every part ran
-and 2 when it stopped over the tree's flavour or the label's results or a part
-failed: a compiler missing, or a build, nofib-run, a benchmark run, an A2T
+and 2 when it stopped over the tree's flavour, the label's results or the disk's
+free space or a part failed: a compiler missing, or a build, nofib-run, a benchmark run, an A2T
 count, compile-cost.py, a perf or size test or a probe failing or tickets.py
 measuring nothing, the part's log saying which, or hadrian rebuilding the
 compiler the perf tests were to run;
@@ -175,6 +177,12 @@ The settings, each stated here and nowhere else:
     25 GB, runs at a time on the machine, and never without the memory; the run
     step counts outside the lock. In the whole battery A2T's dependencies
     and its build take the lock each in its own lane.
+14. Nothing runs, and no compiler is copied, unless df gives the work
+    directory's disk MIN_FREE GiB free or more (its 1024-byte blocks over
+    1048576, GiB as in setting 13, where rebuild.py's --min-free counts 10^9
+    bytes), checked after the flavour and, in the whole battery, the label's
+    results. The scripts this replaces each refused under some free space,
+    MIN_FREE the commonest of their values.
 """
 
 import contextlib
@@ -210,6 +218,7 @@ NOFIB_J, CABAL_J, A2T_J = 5, 8, 4  # 6, 11
 FLAVOUR = 'perf+no_profiled_libs+no_dynamic_libs'  # 10
 A2T_MEM, A2T_POLL = 30, 30  # 13: GiB, seconds
 MEMINFO = '/proc/meminfo'
+MIN_FREE = 20  # 14: GiB
 
 # Under the work directory.
 NOFIB_RUN = ('nofib-r/nofib/dist-newstyle/build/x86_64-linux/ghc-9.12.4/'
@@ -641,6 +650,14 @@ def a2t_held(body, label, lock, meminfo, poll):
         body])
 
 
+def disk_ok(work, min_free):
+    """The work directory's free space checked (setting 14)."""
+    return '\n'.join([
+        f'free=$(df -k --output=avail {q(work)} | tail -1 | tr -dc 0-9)',
+        f'[ "${{free:-0}}" -ge {int(min_free * 1048576)} ] || {{ echo "battery STOP,'
+        f' $((${{free:-0}} / 1048576)) GiB free on {work}, under {min_free:g}"; exit 2; }}'])
+
+
 def compilers(work, tree, label, ghc0):
     """--compilers: the label's two compilers put in place, the tree's own
     (full) or GHC0's, the docstring's."""
@@ -683,9 +700,9 @@ def parse_parts(parts):
 
 def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
            sc=SCALE_RUN, pc=PER_CALL, tk=TICKETS, ghc0=None, a2t_lock=None,
-           meminfo=MEMINFO, poll=A2T_POLL):
+           meminfo=MEMINFO, poll=A2T_POLL, min_free=MIN_FREE):
     """The bash script of the battery, or of the parts named; ghc0 is
-    --compilers', a2t_lock --a2t-lock's."""
+    --compilers', a2t_lock --a2t-lock's, min_free --min-free's."""
     for x in (tree, label):
         if not re.fullmatch(r'[A-Za-z0-9_.]+', x):
             raise ValueError(f'a tree or label is letters, digits, _ and .: {x!r}')
@@ -698,6 +715,8 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
                              " the tree's own stage-2 compiler, and so with the whole battery")
     if a2t_lock is not None and not os.path.isabs(a2t_lock):
         raise ValueError(f'--a2t-lock is a path: {a2t_lock!r}')
+    if not (isinstance(min_free, (int, float)) and min_free >= 0):
+        raise ValueError(f'--min-free is GiB, 0 or more: {min_free!r}')
     cpus = cpu_list(cpus_spec)
     pin = f'taskset -cp {q(cpus_spec)} $BASHPID > /dev/null || exit 2'
     flavour = f'{work}/ghc-{tree}/_build/flavour'
@@ -731,7 +750,8 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
     if parts:
         built = [n for n, _ in named if n in PKG_PARTS or n == 'a2t']
         setup = compilers(work, tree, label, ghc0) if ghc0 is not None else []
-        return '\n'.join(head + [flavour_ok] + setup + (wrap if built else [])
+        return '\n'.join(head + [flavour_ok, disk_ok(work, min_free)] + setup
+                         + (wrap if built else [])
                          + ['(', pin, 'f=0'] + [p(n, s) for n, s in named]
                          + ['exit $f', ')']) + '\n'
     n, v = f'{work}/nofib-r', f'{work}/vpapi'
@@ -753,6 +773,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
         f'for p in {" ".join(q(x) for x in stop)}; do',
         '  [ -e "$p" ] && { echo "meas STOP, $p exists"; exit 2; }',
         'done',
+        disk_ok(work, min_free),
         f'cp {q(g + "/stage0/bin/ghc")} {q(f"{g}/stage0/bin/ghc-{label}")}'
         f' && cp {q(g + "/stage1/bin/ghc")} {q(f"{g}/stage1/bin/ghc-{label}")}'
         ' || { echo "meas STOP, copies failed"; exit 2; }',
@@ -790,8 +811,9 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
 def main(argv):
     if argv == ['--self-test']:
         return run_self_test('battery.py', self_test)
-    dry, work, outdir, ghc0, lock = False, WORK, None, None, None
-    while argv[:1] and argv[0] in ('--dry', '--work', '--out', '--compilers', '--a2t-lock'):
+    dry, work, outdir, ghc0, lock, free = False, WORK, None, None, None, MIN_FREE
+    while argv[:1] and argv[0] in ('--dry', '--work', '--out', '--compilers', '--a2t-lock',
+                                   '--min-free'):
         if argv[0] == '--dry':
             dry, argv = True, argv[1:]
         elif len(argv) < 2:
@@ -804,8 +826,13 @@ def main(argv):
                 outdir = argv[1]
             elif argv[0] == '--compilers':
                 ghc0 = argv[1] if argv[1] == 'full' else os.path.abspath(argv[1])
-            else:
+            elif argv[0] == '--a2t-lock':
                 lock = os.path.abspath(argv[1])
+            else:
+                try:
+                    free = float(argv[1])
+                except ValueError:
+                    free = argv[1]
             argv = argv[2:]
     if len(argv) < 3:
         print(__doc__.split('\n\n')[1], file=sys.stderr)
@@ -814,7 +841,7 @@ def main(argv):
     outdir = os.path.abspath(outdir or os.path.join(work, 'battery'))
     try:
         text = script(work, argv[0], argv[1], argv[2], outdir, argv[3:],
-                      ghc0=ghc0, a2t_lock=lock)
+                      ghc0=ghc0, a2t_lock=lock, min_free=free)
     except ValueError as e:
         print(f'{e}; nothing run', file=sys.stderr)
         return 2
@@ -882,6 +909,7 @@ case $me in
          exit "${FAKEPERF:-0}";;
   taskset) echo "taskset|$1 $2" >> "$FAKELOG"; [ "$1" = -cp ] && exit 0
            shift 2; exec "$@";;
+  df) echo "df|$*" >> "$FAKELOG"; printf 'Avail\n%s\n' "${FAKEDF:-1073741824}";;
   *) echo "$me|$*" >> "$FAKELOG"; exit "${FAKEFAIL:-0}";;
 esac
 '''
@@ -920,7 +948,8 @@ def plant(d):
               os.path.dirname(f'{w}/{NOFIB_RUN}'),
               os.path.dirname(f'{w}/{CONTAINERS_CABAL}')):
         os.makedirs(x, exist_ok=True)
-    for name in ('nofib-run', 'cabal', 'setarch', 'taskset', 'bench', 'ghc', 'build', 'perf'):
+    for name in ('nofib-run', 'cabal', 'setarch', 'taskset', 'bench', 'ghc', 'build', 'perf',
+                 'df'):
         path = (f'{w}/{NOFIB_RUN}' if name == 'nofib-run'
                 else f'{w}/ghc-t/hadrian/build' if name == 'build'
                 else f'{fb}/{name}')
@@ -1035,6 +1064,8 @@ def self_test():
             bad.append(f'compile-cost ran {of("compile-cost")}')
         if of('taskset') != ['-cp 4-6'] * 12:
             bad.append(f'taskset ran {of("taskset")}')
+        if of('df') != [f'-k --output=avail {w}'] or got[:1] != [f'df|-k --output=avail {w}']:
+            bad.append(f'the free space checked first by {of("df")}')
         for k, lv in (('vb', ''), ('vb', 'o1-'), ('mb', ''), ('mb', 'o1-'),
                       ('cb', ''), ('cb', 'o1-'), ('ab', '')):
             t = open(f'{w}/vpapi/{k}-ct-{lv}x.log').read()
@@ -1188,6 +1219,32 @@ def self_test():
                                f' {p.returncode}, ran {open(log).read()[:80]!r}')
         with open(flav, 'w') as fh:
             fh.write(FLAVOUR + '\n')
+        # Short of free space nothing runs and no compiler is copied, whether
+        # by the whole battery or by a part; MIN_FREE GiB or more is enough.
+        for parts, min_free, kib, want in (((), MIN_FREE, MIN_FREE * 1048576 - 1, 2),
+                                           (('scale',), MIN_FREE, MIN_FREE * 1048576 - 1, 2),
+                                           (('scale',), MIN_FREE, MIN_FREE * 1048576, 0),
+                                           (('scale',), 1.5, 1572863, 2),
+                                           (('scale',), 0, 0, 0)):
+            o4 = f'{d}/out-disk'
+            shutil.rmtree(o4, ignore_errors=True)
+            for st in ('stage0', 'stage1'):
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(f'{w}/ghc-t/_build/{st}/bin/ghc-z')
+            open(log, 'w').close()
+            p = subprocess.run(['bash', '-c', script(w, 't', 'z', '4-6', o4, parts,
+                                                     ghc0='full' if parts else None,
+                                                     cc=f'{d}/cc.py', sc=f'{d}/scale.sh',
+                                                     min_free=min_free), 'test'],
+                               env=dict(env, FAKEDF=str(kib)), capture_output=True, text=True)
+            meas = f'{o4}/meas-z.log'
+            said = p.stdout + (open(meas).read() if os.path.isfile(meas) else '')
+            ran_ = [x for x in open(log).read().split('\n') if x and not x.startswith('df|')]
+            copied = os.path.exists(f'{w}/ghc-t/_build/stage1/bin/ghc-z')
+            if p.returncode != want or (want and (ran_ or copied or f'GiB free on {w}, under'
+                                                  not in said)) or (not want and not ran_):
+                bad.append(f'{kib} KiB free under --min-free {min_free}, parts {parts}: exited'
+                           f' {p.returncode}, ran {ran_[:2]}, compilers copied {copied}')
         # The perf tests start when the lanes have ended.
         lines = open(log0).read().split('\n')
         last = max(i for i, x in enumerate(lines)
@@ -1374,12 +1431,17 @@ def self_test():
             os.chdir(here)
         if rc or f'exec {ghc0} -B' not in out.getvalue() or f'9>> {lock} ' not in out.getvalue():
             bad.append(f'--dry with relative --compilers and --a2t-lock: {rc}')
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = main(['--dry', '--work', w, '--min-free', '7', 't', 'x', '4-6', 'scale'])
+        if rc or '-ge 7340032 ]' not in out.getvalue():
+            bad.append(f'--dry with --min-free 7: {rc}')
         for args in (['t', 'x', '4-5'], ['t', 'x', '4-6', 'nofib-O3'],
                      ['t', 'x/y', '4-6'], ['t', 'x', '4-6', 'nofib-O2:build'],
                      ['t', 'x', '4-6', 'a2t:count'], ['t', 'x', '4-6', 'a2t:'],
                      ['t', 'x', '4-6', 'containers-O2:deps'], ['t', 'x', '4-6', 'a2t:run,run'],
                      ['--compilers', ghc0, 't', 'x', '4-6', 'comp1', 'perf'],
-                     ['--compilers', ghc0, 't', 'x', '4-6']):
+                     ['--compilers', ghc0, 't', 'x', '4-6'],
+                     ['--min-free', '-1', 't', 'x', '4-6'], ['--min-free', 'x', 't', 'x', '4-6']):
             with contextlib.redirect_stderr(io.StringIO()):
                 rc = main(['--dry', '--work', w] + args)
             if rc != 2:

@@ -1235,20 +1235,21 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   the script it would run. A package's part or A2T's may name its steps,
   `containers-O2:build` or `a2t:deps,build`, so that a build and its runs go
   in separate calls; `--compilers` puts the label's compilers in place,
-  the tree's own or a stage-1 compiler built elsewhere; and `--a2t-lock FILE`
-  holds a lock over A2T's dependencies and build, which wait for memory while
-  it is held. `rebuild.py` runs it over a series' base and every commit, each
-  built from nothing, one after another, going on past a step that fails,
-  records each build's compile time, allocation and object size by module
-  through `bstats.py`, and ends with `runreport.py`'s report of the last commit
-  against the base; `--pair` measures the base and the tip alone, and `--build`
-  builds one tree behind the machine's memory and disk gates and measures
-  nothing. `nbcmp.py` compares two labels' nofib runs, the collections
-  and copied bytes beside the instructions, `pkgcmp.py` their package
-  benchmarks, `a2tcmp.py` their A2T samples, `perfcmp.py` their perf and size
-  tests and which leave the window GHC's CI holds them to, `tickets.py compare`
-  their tickets' figures, `bstats.py compare` their builds, and `alone.py`
-  reruns one containers benchmark alone.
+  the tree's own or a stage-1 compiler built elsewhere; `--a2t-lock FILE` holds
+  a lock over A2T's dependencies and build, which wait for memory while
+  it is held; and `--min-free GIB` refuses to start under that much free
+  on the work directory's disk. `rebuild.py` runs it over a series' base
+  and every commit, each built from nothing, one after another, going on past
+  a step that fails, records each build's compile time, allocation and object
+  size by module through `bstats.py`, and ends with `runreport.py`'s report
+  of the last commit against the base; `--pair` measures the base and the tip
+  alone, and `--build` builds one tree behind the machine's memory and disk
+  gates and measures nothing. `nbcmp.py` compares two labels' nofib runs,
+  the collections and copied bytes beside the instructions, `pkgcmp.py` their
+  package benchmarks, `a2tcmp.py` their A2T samples, `perfcmp.py` their perf
+  and size tests and which leave the window GHC's CI holds them to,
+  `tickets.py compare` their tickets' figures, `bstats.py compare` their builds,
+  and `alone.py` reruns one containers benchmark alone.
 - `tools/memguard.sh` stops a process group, a chain started by `setsid`, while
   MemAvailable is under one bar and continues it once it is over another,
   so that a chain beside a build taking most of the memory waits rather
