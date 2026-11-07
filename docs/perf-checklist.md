@@ -1233,12 +1233,13 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   that fails, records each build's compile time, allocation and object size
   by module through `bstats.py`, and ends with `runreport.py`'s report
   of the last commit against the base; `--pair` measures the base and the tip
-  alone. `nbcmp.py` compares two labels' nofib runs, the collections and copied
-  bytes beside the instructions, `pkgcmp.py` their package benchmarks,
-  `a2tcmp.py` their A2T samples, `perfcmp.py` their perf and size tests
-  and which leave the window GHC's CI holds them to, `tickets.py compare` their
-  tickets' figures, `bstats.py compare` their builds, and `alone.py` reruns one
-  containers benchmark alone.
+  alone, and `--build` builds one tree behind the machine's memory and disk
+  gates and measures nothing. `nbcmp.py` compares two labels' nofib runs,
+  the collections and copied bytes beside the instructions, `pkgcmp.py` their
+  package benchmarks, `a2tcmp.py` their A2T samples, `perfcmp.py` their perf
+  and size tests and which leave the window GHC's CI holds them to,
+  `tickets.py compare` their tickets' figures, `bstats.py compare` their builds,
+  and `alone.py` reruns one containers benchmark alone.
 - `tools/memguard.sh` stops a process group, a chain started by `setsid`, while
   MemAvailable is under one bar and continues it once it is over another,
   so that a chain beside a build taking most of the memory waits rather

@@ -5,6 +5,8 @@ battery.py with the machine to itself (Mikolaj, 2026-11-03: "you sequentially
 build and benchmark each commit in turn").
 
 Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--pair] [--work DIR] BASE TIP CPUS
+       python3 tools/NCG-battery/rebuild.py --build [--patch P]... [--target T]
+           [--setting L]... [--logs DIR] [--max-wait S] [--work DIR] TREE COMMIT CPUS
        python3 tools/NCG-battery/rebuild.py --self-test
 
 BASE and TIP name commits of ~/slop/ghc and CPUS is a taskset list, to which
@@ -55,6 +57,22 @@ for each step build-LABEL.log, boot-LABEL.log, configure-LABEL.log,
 hadrian-LABEL.log.gz, hperf-LABEL.csv (perf stat's) and battery-LABEL.log;
 LABEL.done or LABEL.failed, holding what the log's line says; the report.
 --repo, --battery, --timeout and --min-free are the self-test's.
+
+--build builds the one tree WORK/ghc-TREE at COMMIT by step 1's script
+and measures nothing. Each P is applied by patch -p1, in the order given,
+after the check that the tree is clean at COMMIT and before ./boot; T is
+a hadrian target in place of the default one, such as _build/stage0/bin/ghc
+for a stage-1 tree; each L is a line appended to _build/hadrian.settings
+after HADRIAN_SETTINGS. It first waits until MemAvailable reaches MIN_MEM GB,
+for at most S seconds where --max-wait is given, and then refuses under
+MIN_FREE GB free on the work directory's disk, both exiting 9 with nothing
+built; GB is 10^9 bytes in both. The build runs under taskset over CPUS,
+hadrian at -j their count, with ulimit -v ULIMIT_V, its lines in
+LOGS/build-TREE.log beside the script's other logs, LOGS the current
+directory unless --logs names one; it prints the log's last line and exits
+with the script's status. A tree named frNN, a label of the rebuild's, is
+refused. --build's --repo, --min-free, --min-mem, --meminfo and --poll are
+the self-test's.
 """
 
 import fcntl
@@ -84,6 +102,11 @@ MAX_FAILED = 3
 TIMEOUT = 7200  # s; each takes under half an hour
 # every module's passes timed, a dump a module under its build directory
 HADRIAN_SETTINGS = '*.*.ghc.hs.opts += -ddump-timings -ddump-to-file'
+# --build's gate and limit, common.md's
+MIN_MEM = 12  # GB
+ULIMIT_V = 40000000  # kB
+MEMINFO = '/proc/meminfo'
+POLL = 20  # s between readings of MEMINFO
 
 
 def git(repo, *args):
@@ -106,8 +129,11 @@ def steps_of(repo, base, tip):
     return [(f'fr{i:02d}', h) for i, h in enumerate([b] + ups)]
 
 
-def build_script(work, repo, logs, tree, commit, jobs):
+def build_script(work, repo, logs, tree, commit, jobs, patches=(), target=None, settings=()):
+    """The build of ghc-TREE at COMMIT, step 1; the patches, the target and
+    the settings lines are --build's."""
     t, g = f'{work}/ghc-{tree}', f'{work}/ghc-g'
+    tgt = f' {q(target)}' if target else ''
     stamp, hlog = f'{logs}/stamp-{tree}', f'{logs}/hadrian-{tree}.log'
     hperf = f'{logs}/hperf-{tree}.csv'
     return '\n'.join([
@@ -131,17 +157,22 @@ def build_script(work, repo, logs, tree, commit, jobs):
         ' && [ -z "$(git status --porcelain -uno | grep -v \' nofib$\')" ]'
         f' || {{ echo "tree STOP {tree}, not at {commit}"; exit 2; }}',
         f'echo "ghc-{tree} at $(git log -1 --format=\'%h %s\')"',
+        *[f'patch -p1 --forward --batch < {q(p)}'
+          f' || {{ echo {q(f"tree STOP {tree}, patch {p} failed")}; exit 2; }}' for p in patches],
+        *(['echo "changed: $(git status --porcelain | grep -v \' nofib$\' | tr \'\\n\' \' \')"']
+          if patches else []),
         f'./boot > {q(f"{logs}/boot-{tree}.log")} 2>&1'
         f' && ./configure > {q(f"{logs}/configure-{tree}.log")} 2>&1'
         f' || {{ echo "tree STOP {tree}, boot or configure failed"; exit 3; }}',
         # loaded by every hadrian run in the tree, the perf part's included,
         # which given other arguments would build the compiler again
         f'mkdir -p _build && echo {q(HADRIAN_SETTINGS)} > _build/hadrian.settings',
+        *[f'echo {q(s)} >> _build/hadrian.settings' for s in settings],
         # mtimes on ~/slop step by 1 ms, so every object is newer than the stamp
         f'touch {q(stamp)}; sleep 0.01',
         's0=$(date +%s)',
         f'perf stat -x, -e instructions:u -o {q(hperf)} --'
-        f' hadrian/build -j{jobs} -V --flavour={FLAVOUR} --docs=none > {q(hlog)} 2>&1',
+        f' hadrian/build -j{jobs} -V --flavour={FLAVOUR} --docs=none{tgt} > {q(hlog)} 2>&1',
         'e=$?; s=$(( $(date +%s) - s0 ))',
         f'old=$(find _build -name \'*.o\' ! -newer {q(stamp)} | wc -l); rm -f {q(stamp)}',
         f'i=$(sed -n \'s/^\\([0-9]*\\),.*,instructions:u,.*/\\1/p\' {q(hperf)} 2>/dev/null)',
@@ -361,9 +392,81 @@ def run(o, steps):
     return 2 if failed else 0
 
 
+def mem_gb(path):
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith('MemAvailable:'):
+                return int(line.split()[1]) * 1024 / 1e9
+    raise ValueError(f'no MemAvailable in {path}')
+
+
+def build_main(argv):
+    """--build: the gate, then build_script under taskset, -j and the ulimit."""
+    o = {'work': WORK, 'repo': REPO, 'logs': os.getcwd(), 'target': '', 'max_wait': -1.0,
+         'min_free': float(MIN_FREE), 'min_mem': float(MIN_MEM), 'meminfo': MEMINFO,
+         'poll': float(POLL)}
+    patches, settings = [], []
+    while argv[:1] and argv[0].startswith('--'):
+        name = argv[0][2:].replace('-', '_')
+        if len(argv) < 2 or name not in ('patch', 'setting', *o):
+            print(f'{argv[0]}: no such option of --build, or it needs a value', file=sys.stderr)
+            return 2
+        if name == 'patch':
+            patches.append(os.path.abspath(argv[1]))
+        elif name == 'setting':
+            settings.append(argv[1])
+        else:
+            o[name] = type(o[name])(argv[1])
+        argv = argv[2:]
+    if len(argv) != 3:
+        print(__doc__.split('\n\n')[1], file=sys.stderr)
+        return 2
+    tree, commit, cpus = argv
+    work, logs = os.path.abspath(o['work']), os.path.abspath(o['logs'])
+    p = git(o['repo'], 'rev-parse', '--verify', commit + '^{commit}')
+    n = subprocess.run(['taskset', '-c', cpus, 'nproc'], capture_output=True, text=True)
+    why = ([f'a tree is letters, digits, _ and .: {tree!r}']
+           if not re.fullmatch(r'[A-Za-z0-9_.]+', tree) else [])
+    why += [f'ghc-{tree} would be a tree of the rebuild\'s'] if re.fullmatch(r'fr\d+', tree) else []
+    why += [f'no commit {commit} in {o["repo"]}'] if p.returncode else []
+    why += [f'CPUS is not a taskset list taskset takes: {cpus!r}'] if n.returncode else []
+    why += [f'no patch {x}' for x in patches if not os.path.isfile(x)]
+    if why:
+        print(f'{"; ".join(why)}; nothing built', file=sys.stderr)
+        return 2
+    jobs = int(n.stdout)
+    script = build_script(work, o['repo'], logs, tree, p.stdout.strip(), jobs,
+                          patches, o['target'] or None, settings)
+    t0 = time.time()
+    while mem_gb(o['meminfo']) < o['min_mem']:
+        if 0 <= o['max_wait'] <= time.time() - t0:
+            print(f'{tree}: {mem_gb(o["meminfo"]):.1f} GB available after {time.time() - t0:.0f} s,'
+                  f' under {o["min_mem"]:g}; nothing built', flush=True)
+            return 9
+        time.sleep(o['poll'])
+    free = free_gb(work)
+    if free < o['min_free']:
+        print(f'{tree}: {free:.0f} GB free on {work}, under {o["min_free"]:g}; nothing built', flush=True)
+        return 9
+    os.makedirs(logs, exist_ok=True)
+    log = f'{logs}/build-{tree}.log'
+    open(log, 'w').close()
+    print(f'{tree} start {time.strftime("%T")}: {mem_gb(o["meminfo"]):.1f} GB available,'
+          f' {free:.0f} GB free, CPUs {cpus} at -j{jobs}', flush=True)
+    t1 = time.time()
+    st = run_logged(['taskset', '-c', cpus, 'bash', '-c', f'ulimit -v {ULIMIT_V}; {script}'],
+                    log, None)
+    with open(log) as fh:
+        last = (fh.read().strip().splitlines() or [''])[-1]
+    print(f'{tree} exit {st} in {(time.time() - t1) / 60:.0f} min: {last}', flush=True)
+    return st
+
+
 def main(argv):
     if argv == ['--self-test']:
         return run_self_test('rebuild.py', self_test)
+    if argv[:1] == ['--build']:
+        return build_main(argv[1:])
     o = {'work': WORK, 'repo': REPO, 'battery': BATTERY, 'timeout': TIMEOUT, 'min_free': MIN_FREE}
     dry = False
     while argv[:1] and argv[0].startswith('--'):
@@ -419,7 +522,7 @@ echo "123456,,instructions:u,9,100.00,," > "$o"; exit $e
 '''
 HADRIAN = r'''#!/bin/bash
 t=$(basename "$PWD")
-echo "hadrian|$t|$(git rev-parse HEAD)|$*|$(taskset -cp $$ | sed 's/.*: //')|$(ls -d ../ghc-fr* | wc -l)|$(cat libs/x/f)|$(cat _build/hadrian.settings)" >> "$FAKELOG"
+echo "hadrian|$t|$(git rev-parse HEAD)|$*|$(taskset -cp $$ | sed 's/.*: //')|$(ls -d ../ghc-fr* | wc -l)|$(cat libs/x/f)|$(paste -sd';' _build/hadrian.settings)|$(ulimit -v)" >> "$FAKELOG"
 mkdir -p _build/stage1/compiler/build/compiler/GHC _build/stage1/compiler/build/GHC; touch _build/a.o
 printf 'P [GHC.X]: alloc=100 time=2.0\n' > _build/stage1/compiler/build/compiler/GHC/X.dump-timings
 echo xx > _build/stage1/compiler/build/GHC/X.o
@@ -722,6 +825,95 @@ def self_test():
             time.sleep(0.01)
         else:
             bad.append("a hung battery's child survived it")
+
+        # --build: one tree, at a commit named short, with two patches the
+        # second of which needs the first, a target and two settings lines, on
+        # two CPUs; and the gate, each way it stops or waits.
+        two = mine[:2]
+        blogs, meminfo = f'{d}/blogs', f'{d}/meminfo'
+        for name, text in (('p1.diff', '--- /dev/null\n+++ b/p1\n@@ -0,0 +1 @@\n+one\n'),
+                           ('p2.diff', '--- a/p1\n+++ b/p1\n@@ -1 +1,2 @@\n one\n+two\n'),
+                           ('bad.diff', '--- a/c\n+++ b/c\n@@ -1 +1 @@\n-nosuch\n+x\n')):
+            with open(f'{d}/{name}', 'w') as fh:
+                fh.write(text)
+
+        def avail(gb):
+            with open(meminfo, 'w') as fh:
+                fh.write(f'MemTotal: 1 kB\nMemAvailable: {int(gb * 1e9 / 1024)} kB\n')
+
+        def cpus_of(s):
+            return sorted(c for x in s.split(',')
+                          for c in range(int(x.split('-')[0]), int(x.split('-')[-1]) + 1))
+
+        def build(tree, *opts, commit=hashes[2][:10], cpus=','.join(map(str, two)),
+                  min_free='0', during=None):
+            open(log, 'w').close()
+            env = dict(os.environ, FAKELOG=log, PATH=f'{d}/bin' + os.pathsep + os.environ['PATH'])
+            p = subprocess.Popen([sys.executable, os.path.abspath(__file__), '--build', '--work', w,
+                                  '--repo', r, '--logs', blogs, '--min-free', min_free,
+                                  '--meminfo', meminfo, '--poll', '0.05', *opts, tree, commit, cpus],
+                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if during:
+                during(p)
+            try:
+                out, err = p.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                out, err = p.communicate()
+                err += ' (killed after 30 s)'
+            with open(log) as fh:
+                return p.returncode, out, err, fh.read().split('\n')[:-1]
+        avail(20)
+        rc, out, err, lines = build('tb1', '--patch', f'{d}/p1.diff', '--patch', f'{d}/p2.diff',
+                                    '--target', '_build/stage0/bin/ghc',
+                                    '--setting', 'a.b += -x', '--setting', 'c.d += -y')
+        h = [x.split('|') for x in lines if x.startswith('hadrian|')]
+        if rc != 0 or len(h) != 1 or 'tb1 exit 0 in' not in out or 'hadrian tb1 exit 0' not in out:
+            bad.append(f'--build: {rc} {out[-300:]} {err[-300:]}')
+        else:
+            f = h[0]
+            if f[2] != hashes[2]:
+                bad.append(f'--build built {f[2]}, not {hashes[2]}')
+            if f[3] != f'-j2 -V --flavour={FLAVOUR} --docs=none _build/stage0/bin/ghc':
+                bad.append(f'--build ran hadrian with {f[3]!r}')
+            if cpus_of(f[4]) != two:
+                bad.append(f'--build ran on CPUs {f[4]}, not {two}')
+            if f[7] != f'{HADRIAN_SETTINGS};a.b += -x;c.d += -y':
+                bad.append(f'--build under the settings {f[7]!r}')
+            if f[8] != str(ULIMIT_V):
+                bad.append(f'--build under ulimit -v {f[8]}')
+            if not os.path.exists(f'{w}/ghc-tb1/p1') or open(f'{w}/ghc-tb1/p1').read() != 'one\ntwo\n':
+                bad.append('--build: the patches not applied in order')
+            if not os.path.exists(f'{blogs}/build-tb1.log') \
+                    or 'changed: ?? p1' not in open(f'{blogs}/build-tb1.log').read():
+                bad.append('--build: no log in LOGS naming what the patches changed')
+        rc, out, err, lines = build('tb2', '--patch', f'{d}/bad.diff')
+        if rc != 2 or lines or f'tree STOP tb2, patch {d}/bad.diff failed' not in out:
+            bad.append(f'--build, a patch failing: {rc} {lines[:2]} {out[-200:]}')
+        # Too little memory: waited for at most --max-wait, or until there is enough.
+        avail(1)
+        rc, out, err, lines = build('tb3', '--max-wait', '0.2')
+        if rc != 9 or lines or 'GB available after' not in out or os.path.exists(f'{w}/ghc-tb3'):
+            bad.append(f'--build, memory short past --max-wait: {rc} {lines[:2]} {out[-200:]} {err[-100:]}')
+
+        def later(p):
+            time.sleep(0.5)
+            if p.poll() is not None or open(log).read():
+                bad.append(f'--build did not wait for memory: {p.poll()}')
+            avail(20)
+        rc, out, err, lines = build('tb4', during=later)
+        if rc != 0 or not [x for x in lines if x.startswith('hadrian|ghc-tb4|')]:
+            bad.append(f'--build after waiting for memory: {rc} {out[-200:]} {err[-200:]}')
+        rc, out, err, lines = build('tb5', min_free='100000000')
+        if rc != 9 or lines or 'GB free on' not in out:
+            bad.append(f'--build, a full disk: {rc} {lines[:2]} {out[-200:]}')
+        for args, word in ((('fr07',), "a tree of the rebuild's"),
+                           (('tb6', '--patch', f'{d}/none.diff'), 'no patch'),
+                           (('tb6',), 'no commit'), (('tb6',), 'taskset')):
+            kw = {'commit': 'nosuch'} if word == 'no commit' else {'cpus': 'x'} if word == 'taskset' else {}
+            rc, out, err, lines = build(args[0], *args[1:], **kw)
+            if rc != 2 or lines or word not in err:
+                bad.append(f'--build refusing {args} {kw}: {rc} {lines[:2]} {err[-200:]}')
     for x in bad:
         print('FAIL', x)
     print('ok   rebuild.py self-test' if not bad else f'{len(bad)} failed')
