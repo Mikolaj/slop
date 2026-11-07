@@ -10,8 +10,8 @@ Usage: python3 tools/NCG-battery/tickets.py run GHC OUT CPU
 
 `run` writes OUT, a line a figure: the case, the figure, its value. The
 reproducers are in tickets/ beside this file, copied from the saved tickets
-(dist-ghcho/tmp-save-2026-10-30/tix/T/src) and from the loops measured by
-hand for the MR description (finding 726: tipall/rb/more/h30 and Repro742).
+and from the loops measured by hand for the MR description (finding 726:
+tipall/rb/more/h30 and Repro742).
 
 1. STATIC: each case compiled to assembly (-S) once at each level it runs
    at, -O1 and -O2 where its ticket or file sets neither (Mikolaj,

@@ -226,7 +226,7 @@ NOFIB_RUN = ('nofib-r/nofib/dist-newstyle/build/x86_64-linux/ghc-9.12.4/'
 PAPIPKG = 'vpapi/tasty-papi-settle2'
 PERF_TESTS = 'ghc-g/testsuite/tests/perf/compiler'
 SIZE_TESTS = 'testsuite/tests/perf/size'
-MBB = 'tmp-save-2026-10-30/m9/gen/ManyBasicBlocks.cmm'
+MBB = 'battery-inputs/ManyBasicBlocks.cmm'
 CONTAINERS_CABAL = 'vpapi/ctr/containers/containers-tests/containers-tests.cabal'
 SPECTRAL_MAKEFILE = 'nofib-r/nofib/spectral/Makefile'
 # nofib's GHCi, which no compiled benchmark runs.
