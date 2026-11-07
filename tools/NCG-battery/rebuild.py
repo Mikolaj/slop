@@ -55,7 +55,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from battery import (A2T_CELLS, A2T_SRC, CONTAINERS_CABAL, FLAVOUR, MBB,  # noqa: E402
                      NOFIB_RUN, PAPIPKG, PERF_TESTS, PKGS, SPECTRAL_MAKEFILE, WORK,
-                     cpu_list, q)
+                     Failures, cpu_list, q, run_self_test)
 
 REPO = os.path.join(os.path.dirname(WORK), 'ghc')
 BATTERY = os.path.join(HERE, 'battery.py')
@@ -111,7 +111,8 @@ def build_script(work, repo, logs, tree, commit, jobs):
         f'./boot > {q(f"{logs}/boot-{tree}.log")} 2>&1'
         f' && ./configure > {q(f"{logs}/configure-{tree}.log")} 2>&1'
         f' || {{ echo "tree STOP {tree}, boot or configure failed"; exit 3; }}',
-        f'touch {q(stamp)}; sleep 0.1',
+        # mtimes on ~/slop step by 1 ms, so every object is newer than the stamp
+        f'touch {q(stamp)}; sleep 0.01',
         f'hadrian/build -j{jobs} -V --flavour={FLAVOUR} --docs=none > {q(hlog)} 2>&1',
         'e=$?',
         f'old=$(find _build -name \'*.o\' ! -newer {q(stamp)} | wc -l); rm -f {q(stamp)}',
@@ -288,7 +289,7 @@ def run(o, steps):
 
 def main(argv):
     if argv == ['--self-test']:
-        return self_test()
+        return run_self_test('rebuild.py', self_test)
     o = {'work': WORK, 'repo': REPO, 'battery': BATTERY, 'timeout': TIMEOUT, 'min_free': MIN_FREE}
     dry = False
     while argv[:1] and argv[0].startswith('--'):
@@ -363,7 +364,7 @@ put(f'{v}/adist-{c}/x'); put(f'{v}/a2t/cabal.project.{c}'); put(f'{v}/ab-{c}.log
 put(f'{b}/perf-{label}.tsv'); put(f'{b}/p{label}/a.s'); put(f'{b}/comp2-{label}.runs')
 put(f'{b}/a2t-{label}.tsv')
 if os.environ.get('FAKEHANG') == label:
-    subprocess.Popen(['bash', '-c', 'echo $$ > "$FAKEPID"; exec sleep 30']).wait()
+    subprocess.Popen(['bash', '-c', 'echo $$ > "$FAKEPID"; exec sleep 4']).wait()
 sys.exit(3 if label in os.environ.get('FAKEBATTERY', '').split() else 0)
 '''
 
@@ -408,8 +409,12 @@ def plant(d):
 
 
 def self_test():
-    bad = []
-    cpus = sorted(os.sched_getaffinity(0))[:3]
+    bad = Failures()
+    mine = sorted(os.sched_getaffinity(0))
+    if len(mine) < 4:  # a run pinned to three of them tells its CPUs from the test's
+        print(f'the self-test needs four CPUs and has {len(mine)}; nothing run')
+        return 2
+    cpus = mine[:3]
     spec = ','.join(str(c) for c in cpus)
     with tempfile.TemporaryDirectory(prefix='ncg-rebuild-') as d:
         r, w = plant(d)
@@ -555,16 +560,24 @@ def self_test():
         p, lines = go(work=w6, FAKEBATTERY='fr00 fr02 fr04')
         if p.returncode != 2 or 'rebuild DONE: 2 of 5' not in p.stdout or measured(lines) != all_labels:
             bad.append(f'failures apart: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
-        # A hung battery is killed with its children, which fails the step alone.
-        w5 = fresh('w5')
-        p, lines = go(work=w5, opts=('--timeout', '5'), FAKEHANG='fr03')
+        # A hung battery is killed with its children, which fails the step alone:
+        # the whole run's fr03 and fr04 done again, fr03's battery outliving
+        # the timeout by 3 s.
+        w5 = f'{d}/w5'
+        shutil.copytree(w, w5, symlinks=True)
+        for lab in ('fr03', 'fr04'):
+            os.unlink(f'{w5}/battery/rebuild/{lab}.done')
+        p, lines = go(work=w5, opts=('--timeout', '1'), FAKEHANG='fr03')
         if p.returncode != 2 or 'fr03 FAILED, battery: killed' not in p.stdout \
-                or measured(lines) != all_labels:
-            bad.append(f'a hung battery: {p.returncode} {p.stdout[-300:]}')
+                or measured(lines) != ['fr03', 'fr04']:
+            bad.append(f'a hung battery: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
         with open(f'{d}/pid') as fh:
             pid = fh.read().strip()
-        time.sleep(0.2)
-        if os.path.exists(f'/proc/{pid}'):
+        for _ in range(50):  # until the killed child is reaped
+            if not os.path.exists(f'/proc/{pid}'):
+                break
+            time.sleep(0.01)
+        else:
             bad.append("a hung battery's child survived it")
     for x in bad:
         print('FAIL', x)

@@ -29,6 +29,9 @@ COPY = 'clone'
 SIBLINGS = []
 # bang-lazy-check's self-test compiles probe modules.
 TIMEOUT = 600
+# A self-test that honours it stops at its first failure, the exit being all
+# a judge reads: NCG-battery's battery.py and rebuild.py (their Failures).
+ENV = {'SELFTEST_FIRST_FAILURE': '1'}
 
 ST = ['python3', '{file}', '--self-test']
 

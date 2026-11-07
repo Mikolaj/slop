@@ -612,7 +612,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
 
 def main(argv):
     if argv == ['--self-test']:
-        return self_test()
+        return run_self_test('battery.py', self_test)
     dry, work, outdir = False, WORK, None
     while argv[:1] and argv[0] in ('--dry', '--work', '--out'):
         if argv[0] == '--dry':
@@ -644,6 +644,30 @@ def main(argv):
 
 # --- self-test: the script run in a planted work directory, every program it
 # names faked by one that records its arguments.
+
+class Failures(list):
+    """A self-test's failures, rebuild.py's too. Under SELFTEST_FIRST_FAILURE,
+    which mutants.py sets for every judge, the first one ends the self-test:
+    a mutant is caught by the exit alone, and the checks after it cost time."""
+
+    class Stop(BaseException):  # past any `except Exception` of a test
+        pass
+
+    def append(self, x):
+        super().append(x)
+        if os.environ.get('SELFTEST_FIRST_FAILURE'):
+            raise Failures.Stop(x)
+
+
+def run_self_test(name, test):
+    """main's --self-test: test's status, and 1 where Failures stopped it."""
+    try:
+        return test()
+    except Failures.Stop as e:
+        print('FAIL', e.args[0])
+        print(f'{name} self-test stopped at its first failure')
+        return 1
+
 
 FAKE = r'''#!/bin/bash
 me=$(basename "$0")
@@ -727,7 +751,7 @@ def plant(d):
 
 
 def self_test():
-    bad = []
+    bad = Failures()
     with tempfile.TemporaryDirectory(prefix='ncg-battery-') as d:
         w, fb = plant(d)
         o, log = f'{d}/out', f'{d}/fake.log'

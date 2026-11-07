@@ -8579,6 +8579,21 @@
    "discovery": "review",
    "notes": "2026-11-04: while filling the MR description's allocation sentence, containers' graph dfs.star,n=1000000 was found +11.39%, exact at every run, after a regression list of the same session had said nothing of it.",
    "no_audit": "other:fake-nofib-run-lives-in-the-tools-own-self-test"
+  },
+  {
+   "id": "NCG-battery-06",
+   "program": "NCG-battery/rebuild.py",
+   "name": "rebuild.py's self-test, on exactly three CPUs, checked its builds' pinning against the CPUs they inherit anyway, so it passed with the driver's pinning removed; on fewer it crashed",
+   "family": "vacuous-check",
+   "fix_rev": "self",
+   "trigger": "rebuild.py --self-test under an affinity of three CPUs or fewer, as under taskset -c 0-2",
+   "ok": "it exits 2, saying it needs four CPUs; on four or more it pins its run to three of them and fails with the pinning removed",
+   "bug": "on three the mutant 'NCG-battery rebuild off its CPUs' survived; on one the refused run made no log directory and the test raised FileNotFoundError in shutil.rmtree",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "in-use",
+   "notes": "2026-11-07: timing the NCG-battery mutants under taskset -c 0-2 and 3-5, at HEAD and after their speed-up, left that mutant uncaught both times; check-all, given more CPUs, had caught it.",
+   "no_audit": "other:the-case-is-a-mutant-under-a-narrow-affinity"
   }
  ]
 }
