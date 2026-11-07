@@ -34,6 +34,7 @@ TIMEOUT = 600
 ENV = {'SELFTEST_FIRST_FAILURE': '1'}
 
 ST = ['python3', '{file}', '--self-test']
+SH = ['bash', '{file}', '--self-test']
 
 HORDE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(
     __file__)), '..', 'horde-ad'))
@@ -2548,6 +2549,16 @@ MUTANTS = [
      '    if session:\n        return (glob', '    if False:\n        return (glob', ST),
     ('ctx-size first call taken, not the last', 'ctx-size.py',
      '        if u:\n            found = (', '        if u and found is None:\n            found = (', ST),
+    # memguard (2026-11-07): each watched failing its self-test before it was
+    # written down here.
+    ('memguard continued over the stop bar', 'memguard.sh',
+     '[ $stopped = 1 ] && [ "$a" -gt "$CONT" ]',
+     '[ $stopped = 1 ] && [ "$a" -gt "$STOP" ]', SH),
+    ('memguard group left stopped at its exit', 'memguard.sh',
+     '[ $stopped = 1 ] && kill -CONT -- -"$P"\n', '\n', SH),
+    ('memguard -s ignored', 'memguard.sh', 's) STOP=$OPTARG;;', 's) ;;', SH),
+    ('memguard DONEFILE not watched', 'memguard.sh',
+     'until [ -e "$F" ] ||', 'until false ||', SH),
     ('ctx-size another tool taken for Bash', 'ctx-size.py',
      "        c.get('type') == 'tool_use' and c.get('name') == 'Bash'\n",
      "        c.get('type') == 'tool_use'\n", ST),

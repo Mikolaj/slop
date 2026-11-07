@@ -1234,6 +1234,11 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   and which leave the window GHC's CI holds them to, `tickets.py compare` their
   tickets' figures, `bstats.py compare` their builds, and `alone.py` reruns one
   containers benchmark alone.
+- `tools/memguard.sh` stops a process group, a chain started by `setsid`, while
+  MemAvailable is under one bar and continues it once it is over another,
+  so that a chain beside a build taking most of the memory waits rather
+  than running the machine out of it. It measures nothing, and exits 0 once
+  the group ends or a done file appears, 2 on a usage error.
 - `tools/NCG-fuzz/run.py` compiles and runs `gen.py`'s random programs
   under many flag sets, by a GHC tree's stage-2 compiler and a base tree's,
   and reports each disagreement, panic and crash: a test of the NCG's

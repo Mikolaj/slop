@@ -55,6 +55,7 @@ STEPS = [
     ('hpc-untaken self-test', ['python3', '{root}/hpc-untaken.py', '--self-test']),
     ('lazy-reads self-test', ['python3', '{root}/lazy-reads.py', '--self-test']),
     ('loop-reloads self-test', ['python3', '{root}/loop-reloads.py', '--self-test']),
+    ('memguard self-test', ['bash', '{root}/memguard.sh', '--self-test']),
     ('NCG-battery battery self-test', ['python3', '{root}/NCG-battery/battery.py', '--self-test']),
     ('NCG-battery nbcmp self-test', ['python3', '{root}/NCG-battery/nbcmp.py', '--self-test']),
     ('NCG-battery pkgcmp self-test', ['python3', '{root}/NCG-battery/pkgcmp.py', '--self-test']),
