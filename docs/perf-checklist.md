@@ -1097,6 +1097,9 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   exact to two decimals; give a cell of large arrays 100 calls or more,
   a collection still moving its level by up to 0.8% at 100 (M). `--cpu` pins
   the runs to one CPU, and `--arg` passes the benchmark an argument.
+  With `--callgrind PREFIX` the N and 2N runs of each of two binaries
+  are callgrind's instead, in the form `cg-read.py` reads, kept, a finished one
+  reused, and followed by `cg-read.py incr` over the pair.
 - `tools/cg-read.py` reads a benchmark binary's callgrind runs, made
   with `valgrind --tool=callgrind --dump-instr=yes --compress-pos=no`, names
   compressed or not, against the binary's symbols and disassembly, each symbol's
