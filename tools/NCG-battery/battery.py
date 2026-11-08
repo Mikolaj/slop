@@ -7,8 +7,8 @@ size tests, the scaling probes and the tickets' reproducers; or some of these
 parts alone.
 
 Usage: python3 tools/NCG-battery/battery.py [--dry] [--work DIR] [--out DIR]
-           [--compilers GHC0|full] [--a2t-lock FILE] [--min-free GIB]
-           TREE LABEL CPUS [PART...]
+           [--compilers GHC0|full] [--build DIR] [--bin DIR]
+           [--a2t-lock FILE] [--min-free GIB] TREE LABEL CPUS [PART...]
        python3 tools/NCG-battery/battery.py --self-test
 
 TREE names the work directory's ghc-TREE, whose _build/stage0/bin/ghc
@@ -37,10 +37,17 @@ themselves where the copies differ, as the whole battery does;
 compiler built elsewhere: _build/stage0/bin/ghc-LABEL a copy of it, for comp1,
 and _build/stage1/bin/ghc-LABEL a wrapper running it with -B over the tree's
 _build/stage0/lib, so that every other part measures GHC0 with the libraries
-the tree's stage-1 compiler built. GHC0 is refused with perf, which tests
-the tree's own stage-2 compiler, and so with the whole battery. --a2t-lock
-FILE takes a lock over A2T's builds, setting 13. --min-free GIB, MIN_FREE
-by default, is the free space nothing runs without, setting 14.
+the tree's stage-1 compiler built. GHC0 is refused with perf, which tests the
+tree's own stage-2 compiler, and so with the whole battery. --build DIR puts
+the build directory DIR in place of ghc-TREE's _build, TREE then naming the
+results alone: the flavour checked is DIR's, and the parts use its stage0/lib
+and its stage1/bin/ghc-pkg; it is refused with perf, which runs hadrian over
+ghc-TREE, and so with the whole battery. --bin DIR, with --compilers GHC0, puts
+the label's stage-2 compiler, the wrapper running GHC0, at DIR/ghc-LABEL beside
+DIR/ghcw-LABEL and copies GHC0 nowhere, so that the battery writes nothing into
+the build; it is refused with comp1, which runs that copy. --a2t-lock FILE takes
+a lock over A2T's builds, setting 13. --min-free GIB, MIN_FREE by default, is
+the free space nothing runs without, setting 14.
 The battery is a bash script; --dry prints it, every file it generates written
 out in it, and runs nothing. Run it unsandboxed. It exits 0 when every part ran
 and 2 when it stopped over the tree's flavour, the label's results or the disk's
@@ -185,6 +192,7 @@ The settings, each stated here and nowhere else:
     MIN_FREE the commonest of their values.
 """
 
+import collections
 import contextlib
 import fcntl
 import filecmp
@@ -329,6 +337,18 @@ def containers_progs(work):
     return out
 
 
+Tree = collections.namedtuple('Tree', 'name build bin0 bin1')
+
+
+def tree_of(work, name, build=None, bindir=None):
+    """TREE's build directory and the directories of the label's stage-1 and
+    stage-2 compilers: ghc-TREE's _build and its stage0/bin and stage1/bin,
+    or --build's; under --bin, --bin's for the stage-2 compiler and none for
+    the stage-1 copy."""
+    g = build or f'{work}/ghc-{name}/_build'
+    return Tree(name, g, None if bindir else f'{g}/stage0/bin', bindir or f'{g}/stage1/bin')
+
+
 def wrapper(tree, label, ghc):
     return ('#!/bin/sh\n'
             f'# ghc-{tree}\'s ghc-{label} under perf stat, with the battery\'s'
@@ -357,12 +377,11 @@ def ghcw(tree, label, ghc):
             f'{ghc} {rts} "$@"\n')
 
 
-def nofib_part(work, tree, label, level):
+def nofib_part(work, t, label, level):
     n = f'{work}/nofib-r'
-    f = f'{work}/ghc-{tree}/_build/stage1/bin'
-    ghc = f'{f}/ghc-{label}'
+    ghc = f'{t.bin1}/ghc-{label}'
     if level == 2:
-        tag, wdir, res = f'nbf {label}', f'{n}/c{tree}/{label}', f'c{tree}-{label}'
+        tag, wdir, res = f'nbf {label}', f'{n}/c{t.name}/{label}', f'c{t.name}-{label}'
         lines, log = f'{n}/nbf.log', f'{n}/nbf-{label}.log'
         tests, opt = [], []
     else:
@@ -383,9 +402,9 @@ def nofib_part(work, tree, label, level):
         f'# {tag}: nofib at -O{level}',
         f'[ -x {q(ghc)} ] || {{ echo "{tag}: no {ghc}" >> {q(lines)}; exit 2; }}',
         f'rm -rf {q(wdir)}; mkdir -p {q(w)}',
-        heredoc(f'{w}/ghc', wrapper(tree, label, ghc)),
+        heredoc(f'{w}/ghc', wrapper(t.name, label, ghc)),
         f'chmod +x {q(w + "/ghc")}',
-        f'ln -s {q(f + "/ghc-pkg")} {q(w + "/ghc-pkg")}',
+        f'ln -s {q(t.build + "/stage1/bin/ghc-pkg")} {q(w + "/ghc-pkg")}',
         f'cd {q(n + "/nofib")} || exit 2',
         f'rm -rf {q("_make/" + res)} {q(stats)}; mkdir -p {q(stats)}',
         f'echo "{tag} start $(date +%T)" >> {q(lines)}',
@@ -403,13 +422,12 @@ def nofib_part(work, tree, label, level):
         ' ! printf \'%s\\n\' "$d" | grep -qv /real/eff/; } || exit 2'])
 
 
-def project(work, tree, label, pkg, level):
+def project(work, t, label, pkg, level):
     p = PKGS[pkg]
-    g = f'{work}/ghc-{tree}/_build/stage1/bin'
-    ci = '' if tree == 'f' else p.get('unless_f', '')
+    ci = '' if t.name == 'f' else p.get('unless_f', '')
     head = [f'packages: {p["packages"]}{ci} {work}/{PAPIPKG}',
-            f'with-compiler: {g}/ghcw-{label}',
-            f'with-hc-pkg: {g}/ghc-pkg',
+            f'with-compiler: {t.bin1}/ghcw-{label}',
+            f'with-hc-pkg: {t.build}/stage1/bin/ghc-pkg',
             f'index-state: {INDEX_STATE}',
             f'allow-newer: {ALLOW_NEWER}{p["allow"]}']
     head += [p['constraints']] if p['constraints'] else []
@@ -425,13 +443,13 @@ def project(work, tree, label, pkg, level):
     return '\n'.join(head) + '\n' + ''.join('\n' + s for s in stanzas)
 
 
-def pkg_part(work, tree, label, pkg, level, steps=('build', 'run')):
+def pkg_part(work, t, label, pkg, level, steps=('build', 'run')):
     p = PKGS[pkg]
     v = f'{work}/vpapi'
-    ghc = f'{work}/ghc-{tree}/_build/stage1/bin/ghc-{label}'
-    lab = f'c{tree}-{label}' if level == 2 else f'c{tree}-o{level}-{label}'
+    ghc = f'{t.bin1}/ghc-{label}'
+    lab = f'c{t.name}-{label}' if level == 2 else f'c{t.name}-o{level}-{label}'
     # the -O1 builds share the -O2 store: the dependencies are built as there
-    cabal = 'cabal --store-dir=' + q(f'{v}/store-c{tree}-{label}')
+    cabal = 'cabal --store-dir=' + q(f'{v}/store-c{t.name}-{label}')
     opts = (f'--project-file=cabal.project.{lab} --builddir='
             + q(f'{v}/{p["builddir"]}-{lab}'))
     progs = p.get('progs') or containers_progs(work)
@@ -443,7 +461,7 @@ def pkg_part(work, tree, label, pkg, level, steps=('build', 'run')):
            f'[ -x {q(ghc)} ] || {{ echo "no compiler {ghc}"; exit 2; }}',
            'cd ' + q(f'{v}/{p["src"]}') + ' || exit 2']
     if 'build' in steps:
-        out += [heredoc(f'cabal.project.{lab}', project(work, tree, label, pkg, level)),
+        out += [heredoc(f'cabal.project.{lab}', project(work, t, label, pkg, level)),
                 f'rm -rf {stats}; mkdir -p {stats}',
                 f'GHCW_STATS={stats} {cabal} build -j{CABAL_J} {p["build"]} {opts}'
                 f' || {{ echo "{p["log"]} {lab} build failed"; exit 2; }}',
@@ -468,11 +486,11 @@ def pkg_part(work, tree, label, pkg, level, steps=('build', 'run')):
     return '\n'.join(out)
 
 
-def a2t_project(work, tree, label):
+def a2t_project(work, t, label):
     """The full A2T runs' project file, with the battery's compiler."""
-    g = f'{work}/ghc-{tree}/_build/stage1/bin'
     return '\n'.join([
-        'packages: .', f'with-compiler: {g}/ghcw-{label}', f'with-hc-pkg: {g}/ghc-pkg',
+        'packages: .', f'with-compiler: {t.bin1}/ghcw-{label}',
+        f'with-hc-pkg: {t.build}/stage1/bin/ghc-pkg',
         f'index-state: {INDEX_STATE}',
         'allow-newer: base, ghc-prim, ghc-bignum, template-haskell, containers',
         'constraints: hashable ==1.5.0.0', 'tests: True', 'benchmarks: True', '',
@@ -480,10 +498,10 @@ def a2t_project(work, tree, label):
         'package orthotope', f'  ghc-options: {DUMP_FLAGS}', ''])
 
 
-def a2t_part(work, tree, label, outdir, steps=('deps', 'build', 'run'), pc=PER_CALL):
+def a2t_part(work, t, label, outdir, steps=('deps', 'build', 'run'), pc=PER_CALL):
     v = f'{work}/vpapi'
-    ghc = f'{work}/ghc-{tree}/_build/stage1/bin/ghc-{label}'
-    lab = f'c{tree}-{label}'
+    ghc = f'{t.bin1}/ghc-{label}'
+    lab = f'c{t.name}-{label}'
     tsv = q(f'{outdir}/a2t-{label}.tsv')
     cabal = 'cabal --store-dir=' + q(f'{v}/store-{lab}')
     opts = f'--project-file=cabal.project.{lab} --builddir=' + q(f'{v}/adist-{lab}')
@@ -494,7 +512,7 @@ def a2t_part(work, tree, label, outdir, steps=('deps', 'build', 'run'), pc=PER_C
            f'[ -x {q(ghc)} ] || {{ echo "no compiler {ghc}"; exit 2; }}',
            'cd ' + q(f'{work}/{A2T_SRC}') + ' || exit 2']
     if 'deps' in steps:
-        out += [heredoc(f'cabal.project.{lab}', a2t_project(work, tree, label)),
+        out += [heredoc(f'cabal.project.{lab}', a2t_project(work, t, label)),
                 f'rm -rf {stats}; mkdir -p {stats}',
                 f'GHCW_STATS={stats} {cabal} build -j{CABAL_J} --only-dependencies {A2T_LIB} {opts}'
                 f' || {{ echo "ab {lab} dependencies failed"; exit 2; }}',
@@ -522,8 +540,8 @@ def a2t_part(work, tree, label, outdir, steps=('deps', 'build', 'run'), pc=PER_C
         f'echo "ab {lab} DONE $(date +%T)"', 'exit $f'])
 
 
-def comp_part(work, tree, label, stage, cpu, outdir, cc=COMPILE_COST):
-    ghc = f'{work}/ghc-{tree}/_build/stage{stage - 1}/bin/ghc-{label}'
+def comp_part(work, t, label, stage, cpu, outdir, cc=COMPILE_COST):
+    ghc = f'{t.bin0 if stage == 1 else t.bin1}/ghc-{label}'
     keep = f'{outdir}/p{label}' + ('' if stage == 1 else '-2')
     runs = f'{outdir}/comp{stage}-{label}.runs'
     txt = f'{outdir}/comp{stage}-{label}.txt'
@@ -542,8 +560,8 @@ def comp_part(work, tree, label, stage, cpu, outdir, cc=COMPILE_COST):
         '[ $e != 2 ] || exit 2'])
 
 
-def perf_part(work, tree, label, jobs, outdir):
-    t = f'{work}/ghc-{tree}'
+def perf_part(work, tr, label, jobs, outdir):
+    t = f'{work}/ghc-{tr.name}'
     ghc = '_build/stage1/bin/ghc'
     base = f'{outdir}/perf-{label}'
     tsv = q(base + '.tsv')
@@ -573,8 +591,8 @@ def perf_part(work, tree, label, jobs, outdir):
         '[ $e = 0 ] && [ $e2 = 0 ] || exit 2'])
 
 
-def scale_part(work, tree, label, cpu, outdir, sc=SCALE_RUN):
-    ghc = f'{work}/ghc-{tree}/_build/stage1/bin/ghc-{label}'
+def scale_part(work, t, label, cpu, outdir, sc=SCALE_RUN):
+    ghc = f'{t.bin1}/ghc-{label}'
     out = f'{outdir}/scale-{label}.txt'
     return '\n'.join([
         '# the scaling probes by the stage-2 compiler',
@@ -587,8 +605,8 @@ def scale_part(work, tree, label, cpu, outdir, sc=SCALE_RUN):
         f'[ "$n" = 0 ] && grep -q \'^scale DONE\' {q(out)} || exit 2'])
 
 
-def tickets_part(work, tree, label, cpu, outdir, tk=TICKETS):
-    ghc = f'{work}/ghc-{tree}/_build/stage1/bin/ghc-{label}'
+def tickets_part(work, t, label, cpu, outdir, tk=TICKETS):
+    ghc = f'{t.bin1}/ghc-{label}'
     tsv = f'{outdir}/tix-{label}.tsv'
     return '\n'.join([
         "# the tickets' reproducers by the stage-2 compiler",
@@ -613,28 +631,28 @@ def cpu_list(spec):
     return out
 
 
-def part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS):
-    body = part_body(name, work, tree, label, cpus, outdir, cc, sc, pc, steps, tk)
+def part(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS):
+    body = part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk)
     return f'(\n{body}\n) || f=2'
 
 
-def part_body(name, work, tree, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS):
+def part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS):
     fam, _, lev = name.partition('-O')
     if fam == 'nofib':
-        body = nofib_part(work, tree, label, int(lev))
+        body = nofib_part(work, t, label, int(lev))
     elif fam in PKGS:
-        body = pkg_part(work, tree, label, fam, int(lev), steps or ('build', 'run'))
+        body = pkg_part(work, t, label, fam, int(lev), steps or ('build', 'run'))
     elif name == 'a2t':
-        body = a2t_part(work, tree, label, outdir, steps or ('deps', 'build', 'run'), pc)
+        body = a2t_part(work, t, label, outdir, steps or ('deps', 'build', 'run'), pc)
     elif name == 'perf':
-        body = perf_part(work, tree, label, len(cpus), outdir)
+        body = perf_part(work, t, label, len(cpus), outdir)
     elif name == 'scale':
-        body = scale_part(work, tree, label, cpus[0], outdir, sc)
+        body = scale_part(work, t, label, cpus[0], outdir, sc)
     elif name == 'tickets':
-        body = tickets_part(work, tree, label, cpus[0], outdir, tk)
+        body = tickets_part(work, t, label, cpus[0], outdir, tk)
     else:
         stage = int(name[-1])
-        body = comp_part(work, tree, label, stage, cpus[stage], outdir, cc)
+        body = comp_part(work, t, label, stage, cpus[stage], outdir, cc)
     return body
 
 
@@ -658,11 +676,11 @@ def disk_ok(work, min_free):
         f' $((${{free:-0}} / 1048576)) GiB free on {work}, under {min_free:g}"; exit 2; }}'])
 
 
-def compilers(work, tree, label, ghc0):
+def compilers(work, t, label, ghc0):
     """--compilers: the label's two compilers put in place, the tree's own
-    (full) or GHC0's, the docstring's."""
-    g = f'{work}/ghc-{tree}/_build'
-    c0, c1 = f'{g}/stage0/bin/ghc-{label}', f'{g}/stage1/bin/ghc-{label}'
+    (full) or GHC0's, the docstring's; under --bin GHC0's wrapper alone."""
+    g = t.build
+    c0, c1 = t.bin0 and f'{t.bin0}/ghc-{label}', f'{t.bin1}/ghc-{label}'
     stop = '{ echo "battery STOP, copies failed"; exit 2; }'
     if ghc0 == 'full':
         out = [f'cmp -s {q(f"{g}/{s}/bin/ghc")} {q(c)} || cp {q(f"{g}/{s}/bin/ghc")} {q(c)}'
@@ -671,11 +689,12 @@ def compilers(work, tree, label, ghc0):
         lib = f'{g}/stage0/lib'
         out = [f'[ -x {q(ghc0)} ] || {{ echo "battery STOP, no {ghc0}"; exit 2; }}',
                f'[ -d {q(lib)} ] || {{ echo "battery STOP, no {lib}"; exit 2; }}',
+               *([] if c0 else [f'mkdir -p {q(t.bin1)} || {stop}']),
                heredoc(c1 + '.new', f'#!/bin/sh\nexec {q(ghc0)} -B{q(lib)} "$@"\n'),
                f'chmod +x {q(c1 + ".new")}',
                f'if cmp -s {q(c1 + ".new")} {q(c1)}; then rm {q(c1 + ".new")};'
                f' else mv {q(c1 + ".new")} {q(c1)} || {stop}; fi',
-               f'cmp -s {q(ghc0)} {q(c0)} || cp {q(ghc0)} {q(c0)} || {stop}']
+               *([f'cmp -s {q(ghc0)} {q(c0)} || cp {q(ghc0)} {q(c0)} || {stop}'] if c0 else [])]
     return out + [f'{q(c1)} --info | grep -E \'"Global Package DB"|"Project version"\'']
 
 
@@ -700,9 +719,10 @@ def parse_parts(parts):
 
 def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
            sc=SCALE_RUN, pc=PER_CALL, tk=TICKETS, ghc0=None, a2t_lock=None,
-           meminfo=MEMINFO, poll=A2T_POLL, min_free=MIN_FREE):
+           meminfo=MEMINFO, poll=A2T_POLL, min_free=MIN_FREE, build=None, bindir=None):
     """The bash script of the battery, or of the parts named; ghc0 is
-    --compilers', a2t_lock --a2t-lock's, min_free --min-free's."""
+    --compilers', a2t_lock --a2t-lock's, min_free --min-free's, build
+    --build's and bindir --bin's."""
     for x in (tree, label):
         if not re.fullmatch(r'[A-Za-z0-9_.]+', x):
             raise ValueError(f'a tree or label is letters, digits, _ and .: {x!r}')
@@ -715,31 +735,40 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
                              " the tree's own stage-2 compiler, and so with the whole battery")
     if a2t_lock is not None and not os.path.isabs(a2t_lock):
         raise ValueError(f'--a2t-lock is a path: {a2t_lock!r}')
+    for x, opt in ((build, '--build'), (bindir, '--bin')):
+        if x is not None and not os.path.isabs(x):
+            raise ValueError(f'{opt} is a path: {x!r}')
+    if build is not None and (not parts or 'perf' in [n for n, _ in named]):
+        raise ValueError('--build is refused with perf, which runs hadrian over ghc-TREE,'
+                         ' and so with the whole battery')
+    if bindir is not None and (ghc0 in (None, 'full') or 'comp1' in [n for n, _ in named]):
+        raise ValueError("--bin holds GHC0's wrapper and no copy of a compiler: it needs"
+                         ' --compilers GHC0 and is refused with comp1, which runs the copy')
     if not (isinstance(min_free, (int, float)) and min_free >= 0):
         raise ValueError(f'--min-free is GiB, 0 or more: {min_free!r}')
     cpus = cpu_list(cpus_spec)
+    t = tree_of(work, tree, build, bindir)
     pin = f'taskset -cp {q(cpus_spec)} $BASHPID > /dev/null || exit 2'
-    flavour = f'{work}/ghc-{tree}/_build/flavour'
+    flavour = f'{t.build}/flavour'
     flavour_ok = (f'[ "$(cat {q(flavour)} 2>/dev/null)" = {q(FLAVOUR)} ]'
                   f' || {{ echo "battery STOP, {flavour} does not name {FLAVOUR}"; exit 2; }}')
 
     def p(name, steps=None):
         if name != 'a2t' or a2t_lock is None:
-            return part(name, work, tree, label, cpus, outdir, cc, sc, pc, steps, tk)
+            return part(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk)
         steps = steps or A2T_STEPS
         held = tuple(x for x in A2T_STEPS[:2] if x in steps)
         pieces = []
         if held:
-            pieces.append(a2t_held(part_body(name, work, tree, label, cpus, outdir, cc, sc, pc,
+            pieces.append(a2t_held(part_body(name, work, t, label, cpus, outdir, cc, sc, pc,
                                              held, tk), label, a2t_lock, meminfo, poll))
         if 'run' in steps:
-            pieces.append(part_body(name, work, tree, label, cpus, outdir, cc, sc, pc,
+            pieces.append(part_body(name, work, t, label, cpus, outdir, cc, sc, pc,
                                     ('run',), tk))
         return ' && '.join(f'(\n{x}\n)' for x in pieces) + ' || f=2'
-    g = f'{work}/ghc-{tree}/_build'
-    wrap = [heredoc(f'{g}/stage1/bin/ghcw-{label}',
-                    ghcw(tree, label, f'{g}/stage1/bin/ghc-{label}')),
-            f'chmod +x {q(f"{g}/stage1/bin/ghcw-{label}")}']
+    g = t.build
+    wrap = [heredoc(f'{t.bin1}/ghcw-{label}', ghcw(tree, label, f'{t.bin1}/ghc-{label}')),
+            f'chmod +x {q(f"{t.bin1}/ghcw-{label}")}']
 
     def lane(pid, done, *ps):
         return ['(', pin, 'f=0', *ps, f'echo "{done} DONE {label} $(date +%T)"',
@@ -749,7 +778,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
             f' work {work}, out {outdir}', 'set -u']
     if parts:
         built = [n for n, _ in named if n in PKG_PARTS or n == 'a2t']
-        setup = compilers(work, tree, label, ghc0) if ghc0 is not None else []
+        setup = compilers(work, t, label, ghc0) if ghc0 is not None else []
         return '\n'.join(head + [flavour_ok, disk_ok(work, min_free)] + setup
                          + (wrap if built else [])
                          + ['(', pin, 'f=0'] + [p(n, s) for n, s in named]
@@ -812,8 +841,9 @@ def main(argv):
     if argv == ['--self-test']:
         return run_self_test('battery.py', self_test)
     dry, work, outdir, ghc0, lock, free = False, WORK, None, None, None, MIN_FREE
+    build = bindir = None
     while argv[:1] and argv[0] in ('--dry', '--work', '--out', '--compilers', '--a2t-lock',
-                                   '--min-free'):
+                                   '--min-free', '--build', '--bin'):
         if argv[0] == '--dry':
             dry, argv = True, argv[1:]
         elif len(argv) < 2:
@@ -828,6 +858,10 @@ def main(argv):
                 ghc0 = argv[1] if argv[1] == 'full' else os.path.abspath(argv[1])
             elif argv[0] == '--a2t-lock':
                 lock = os.path.abspath(argv[1])
+            elif argv[0] == '--build':
+                build = os.path.abspath(argv[1])
+            elif argv[0] == '--bin':
+                bindir = os.path.abspath(argv[1])
             else:
                 try:
                     free = float(argv[1])
@@ -841,7 +875,7 @@ def main(argv):
     outdir = os.path.abspath(outdir or os.path.join(work, 'battery'))
     try:
         text = script(work, argv[0], argv[1], argv[2], outdir, argv[3:],
-                      ghc0=ghc0, a2t_lock=lock, min_free=free)
+                      ghc0=ghc0, a2t_lock=lock, min_free=free, build=build, bindir=bindir)
     except ValueError as e:
         print(f'{e}; nothing run', file=sys.stderr)
         return 2
@@ -1370,6 +1404,45 @@ def self_test():
                     os.utime(c, (1e9, 1e9))
         if script(w, 't', 'x', '4-6', o, ghc0='full') != script(w, 't', 'x', '4-6', o):
             bad.append('--compilers full changes the whole battery')
+        # --build and --bin: another build's flavour, libraries and ghc-pkg,
+        # GHC0's wrapper and ghcw in --bin, nothing written into either build;
+        # a wrong flavour in --build's stops.
+        b2, bn = f'{d}/b2', f'{d}/bn'
+        for x in (f'{b2}/stage0/lib', f'{b2}/stage1/bin'):
+            os.makedirs(x)
+        shutil.copy(f'{fb}/ghc', f'{b2}/stage1/bin/ghc-pkg')
+
+        def files():
+            return sorted((r, f, os.stat(os.path.join(r, f)).st_mtime)
+                          for top in (b2, f'{w}/ghc-t/_build') for r, _, fs in os.walk(top)
+                          for f in fs)
+        for flav, want in (('perf', 2), (FLAVOUR, 0)):
+            with open(f'{b2}/flavour', 'w') as fh:
+                fh.write(flav + '\n')
+            before = files()
+            p = go('n', f'{d}/out-n', ('scale', 'containers-O2:build', 'a2t:deps', 'nofib-O1'),
+                   ghc0=ghc0, build=b2, bindir=bn)
+            c1, nw = f'{bn}/ghc-n', f'{w}/nofib-r/co/n/w'
+            have = open(c1).read() if os.path.isfile(c1) else ''
+            pt = ''.join(open(x).read() for x in (f'{w}/vpapi/ctr/cabal.project.ct-n',
+                                                   f'{w}/{A2T_SRC}/cabal.project.ct-n')
+                         if os.path.isfile(x))
+            nofib = (os.path.islink(f'{nw}/ghc-pkg') and os.readlink(f'{nw}/ghc-pkg'),
+                     os.path.isfile(f'{nw}/ghc') and f' -- {c1} ' in open(f'{nw}/ghc').read())
+            if want and (p.returncode != 2 or f'{b2}/flavour does not name' not in p.stdout
+                         or os.path.exists(bn) or ran('scale')):
+                bad.append(f'--build over a {flav} build: exited {p.returncode}')
+            elif not want and (
+                    p.returncode or have != f'#!/bin/sh\nexec {ghc0} -B{b2}/stage0/lib "$@"\n'
+                    or not os.access(f'{bn}/ghcw-n', os.X_OK) or files() != before
+                    or ran('ghc0') != [f'-B{b2}/stage0/lib --info']
+                    or ran('scale') != [f'4|{d}/out-n/scale-n.txt n={c1}']
+                    or pt.count(f'with-compiler: {bn}/ghcw-n\n') != 2
+                    or pt.count(f'with-hc-pkg: {b2}/stage1/bin/ghc-pkg\n') != 2
+                    or nofib != (f'{b2}/stage1/bin/ghc-pkg', True)):
+                bad.append(f'--build and --bin: exited {p.returncode}, wrapper {have!r},'
+                           f' builds {"un" if files() == before else ""}changed, nofib {nofib},'
+                           f' ran {ran("ghc0")} {ran("scale")}')
         # --a2t-lock: A2T's builds hold the lock and its count does not;
         # the builds wait for the memory with the lock held.
         lock, mi = f'{d}/a2t.lock', f'{d}/meminfo'
@@ -1426,11 +1499,13 @@ def self_test():
             os.chdir(d)
             with contextlib.redirect_stdout(io.StringIO()) as out:
                 rc = main(['--dry', '--work', w, '--compilers', 'ghc0', '--a2t-lock', 'a2t.lock',
-                           't', 'x', '4-6', 'a2t:deps'])
+                           '--build', 'b2', '--bin', 'bn', 't', 'x', '4-6', 'a2t:deps'])
         finally:
             os.chdir(here)
-        if rc or f'exec {ghc0} -B' not in out.getvalue() or f'9>> {lock} ' not in out.getvalue():
-            bad.append(f'--dry with relative --compilers and --a2t-lock: {rc}')
+        if (rc or f'exec {ghc0} -B{b2}/stage0/lib' not in out.getvalue()
+                or f'9>> {lock} ' not in out.getvalue()
+                or f'with-compiler: {bn}/ghcw-x' not in out.getvalue()):
+            bad.append(f'--dry with relative --compilers, --a2t-lock, --build and --bin: {rc}')
         with contextlib.redirect_stdout(io.StringIO()) as out:
             rc = main(['--dry', '--work', w, '--min-free', '7', 't', 'x', '4-6', 'scale'])
         if rc or '-ge 7340032 ]' not in out.getvalue():
@@ -1441,6 +1516,10 @@ def self_test():
                      ['t', 'x', '4-6', 'containers-O2:deps'], ['t', 'x', '4-6', 'a2t:run,run'],
                      ['--compilers', ghc0, 't', 'x', '4-6', 'comp1', 'perf'],
                      ['--compilers', ghc0, 't', 'x', '4-6'],
+                     ['--bin', bn, 't', 'x', '4-6', 'scale'],
+                     ['--bin', bn, '--compilers', 'full', 't', 'x', '4-6', 'scale'],
+                     ['--bin', bn, '--compilers', ghc0, 't', 'x', '4-6', 'comp1'],
+                     ['--build', b2, 't', 'x', '4-6', 'perf'], ['--build', b2, 't', 'x', '4-6'],
                      ['--min-free', '-1', 't', 'x', '4-6'], ['--min-free', 'x', 't', 'x', '4-6']):
             with contextlib.redirect_stderr(io.StringIO()):
                 rc = main(['--dry', '--work', w] + args)

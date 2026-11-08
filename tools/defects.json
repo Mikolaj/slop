@@ -8793,6 +8793,48 @@
    ],
    "bug_exit": 0,
    "bug_absent": "$fFRFreeRegs3"
+  },
+  {
+   "id": "NCG-battery-12",
+   "program": "NCG-battery/battery.py",
+   "name": "battery.py measured only ghc-TREE's _build, --compilers GHC0 writing the label's compilers into its bin directories, so stage-1 copies over another build directory, ghc-fold's _build-r12, could not be measured without writing into a build another agent owned",
+   "family": "other:fixed-layout",
+   "fix_rev": "self",
+   "trigger": "--build DIR and --bin DIR with --compilers GHC0, a part named: the copies' libraries in DIR/stage0/lib, ghc-TREE's _build another build",
+   "ok": "the flavour checked is DIR's, the wrapper runs GHC0 with -B over DIR/stage0/lib from --bin's directory, and nothing names the build's stage0/bin or stage1/bin compilers",
+   "bug": "no option named another build: --build was taken for TREE and refused, \"a tree or label is letters, digits, _ and .: '--build'\"",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-08: agent sl3's battery of ghc-sl3a against ghc-sl2z, copies in ghc-fold/_build-r12/stage0/bin, was not reached (finding 949), the battery taking ghc-fold's _build, an older build, and writing into a tree agent r13 owned; agent bt2 ran it with --build and --bin.",
+   "invoke": [
+    "--dry",
+    "--work",
+    "{tmp}",
+    "--build",
+    "{tmp}/b",
+    "--bin",
+    "{tmp}/bin",
+    "--compilers",
+    "{tmp}/g0",
+    "fold",
+    "x",
+    "1,14,15",
+    "tickets"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "/b/flavour 2>/dev/null",
+    "/g0 -B",
+    "/b/stage0/lib \"$@\"",
+    "/bin/ghc-x /"
+   ],
+   "expect_absent": [
+    "stage0/bin",
+    "stage1/bin/ghc-x"
+   ],
+   "bug_exit": 2,
+   "bug_text": "a tree or label is letters, digits, _ and .: '--build'"
   }
  ]
 }
