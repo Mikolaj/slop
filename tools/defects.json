@@ -8767,6 +8767,32 @@
     "M.hs:5 walk arg 2/3",
     "M.hs:11 step (local) arg 1/2"
    ]
+  },
+  {
+   "id": "spec-audit-12",
+   "program": "spec-audit.py",
+   "name": "a dictionary of a class outside the listed ones, though the tree's own dumps define it with a type headed by its class, was passed over, so an unspecialised call handing the tree's own instance to a function was not reported",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "Linear's exit join: allocateRealRegs, @X86_64.FreeRegs and GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3 on three lines, and FreeRegs' dump typing $fFRFreeRegs3 :: FR X86_64.FreeRegs beside $fFRFreeRegs17 :: CallStack, a binding GHC floated out of an FR instance",
+   "ok": "allocateRealRegs $fFRFreeRegs3 reported once, exit 1; $fFRFreeRegs17 and $fShowFreeRegs not reported",
+   "bug": "nothing reported, exit 0",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on GHC's NCG series (2026-11-08): x86's $w$sprocessBlock calls allocateRealRegs with X86_64's FR dictionary at four sites, which agent chk3 found by hand and the audit had not reported. chk3 put it down to the dictionary standing on its own line after the type application; that layout was already read, the same lines reporting the call once FR is renamed Ord. The fixture is cut from that dump.",
+   "plant_cmd": "mkdir -p A/compiler/GHC/CmmToAsm/Reg/Linear && cat > A/compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.dump-simpl <<'EOF'\nGHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs17\n  :: GHC.Internal.Stack.Types.CallStack\nGHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs17\n  = GHC.Internal.Stack.Types.PushCallStack\n      GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs19\n      GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs18\n      GHC.Internal.Stack.Types.EmptyCallStack\n\nGHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3\n  :: FR X86_64.FreeRegs\nGHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3\n  = GHC.CmmToAsm.Reg.Linear.FreeRegs.C:FR\n      @X86_64.FreeRegs\n      GHC.CmmToAsm.Reg.Linear.X86_64.$fShowFreeRegs\nEOF\ncat > A/compiler/GHC/CmmToAsm/Reg/Linear.dump-simpl <<'EOF'\n            join {\n              exit\n                :: GHC.CmmToAsm.Reg.Linear.State.RA_Result\n                     X86_64.FreeRegs [NatBasicBlock X86.Instr]\n              exit\n                = case (allocateRealRegs\n                          @X86_64.FreeRegs\n                          GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3\n                          ((GHC.Data.Word64Map.Internal.Nil @RegWithFormat)\n                           `cast` (Sym (GHC.Types.Unique.FM.N:UniqFM\n                                            <*>_N <RegWithFormat>_P) <RegWithFormat>_N\n                                   ; Sym (GHC.Types.Unique.Set.N:UniqSet <RegWithFormat>_R)\n                                   ; Sym GHC.CmmToAsm.Reg.Regs.N:Regs\n                                   :: Word64Map RegWithFormat ~R# Regs))\n                          ds22)\n                       `cast` (GHC.CmmToAsm.Reg.Linear.X86_64.N:FreeRegs\n                               :: X86_64.FreeRegs ~R# Word64)\n                  of\n                  { GHC.Internal.Word.W64# ww16 ->\n                  jump $j1 ww16\nEOF",
+   "invoke": [
+    "{tmp}/A"
+   ],
+   "expect_exit": 1,
+   "expect_text": "allocateRealRegs  $fFRFreeRegs3: 1",
+   "expect_absent": [
+    "$fFRFreeRegs17",
+    "$fShowFreeRegs"
+   ],
+   "bug_exit": 0,
+   "bug_absent": "$fFRFreeRegs3"
   }
  ]
 }

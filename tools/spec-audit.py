@@ -13,9 +13,10 @@ library's function from the client's own. Two lists are printed:
 
 - calls that hand a function an instance dictionary of a class whose methods
   do the work --- `Vector`, `Unbox`, `Storable`, `Prim`, `Num` and the other
-  numeric classes, `Eq`, `Ord`, `Enum`, `Bits`, `NFData`, `IsList` --- such
-  as `Data.Array.Internal.DynamicU.$wscalar $fUnboxDouble`: a function GHC
-  did not specialise, given the instance at run time. Grouped by module,
+  numeric classes, `Eq`, `Ord`, `Enum`, `Bits`, `NFData`, `IsList`, and any
+  class whose dictionary the tree's own dumps define, GHC's `FR` say ---
+  such as `Data.Array.Internal.DynamicU.$wscalar $fUnboxDouble`: a function
+  GHC did not specialise, given the instance at run time. Grouped by module,
   callee and dictionary, with the count and the line of the first;
 - bindings that take a dictionary as a lambda argument, a `$d...` or an
   `irred`, which is how a type-family constraint such as orthotope's
@@ -32,8 +33,10 @@ whose name begins with a listed one's, as horde-ad's `EqH` or ox-arrays'
 `NumElt`, counts as one of them, and a specialised dictionary,
 `$fEqList_$s$fEqList1`, as one dictionary. A name
 of a module outside the tree, base's say, or qualified by an import's
-alias, is taken for a dictionary. A `$d` argument of an unboxed type,
-a worker's field of a dictionary, is not one.
+alias, is taken for a dictionary of a listed class; of another class,
+a name is one only where the tree types it so, `$fFRFreeRegs3 :: FR
+X86_64.FreeRegs`, and a library's `Show` dictionary stays out. A `$d`
+argument of an unboxed type, a worker's field of a dictionary, is not one.
 
 The callee is a guess, and each finding is read in the dump before anything
 is done about it. It is the token before the dictionary on its line, its
@@ -72,6 +75,9 @@ CLASSES = ('Vector|MVector|Unbox|Storable|Prim|Num|Fractional|Floating|'
 # A whole name, behind its qualifiers, to an instance method's $c: without
 # the boundary and the $, $fEqList_$s$fEqList1 read as two (spec-audit-09).
 DICT = re.compile(r"(?<![\w$'])\$f(" + CLASSES + r")[A-Z](?:(?!\$c)[\w$'])*")
+# The same of any class, a dictionary where the tree's dumps type it so: an
+# unlisted class's, FR's, was passed over whatever its type (spec-audit-12).
+ANY_DICT = re.compile(r"(?<![\w$'])\$f[A-Z](?:(?!\$c)[\w$'])*")
 OPS = r"[!#$%&*+./<=>?\\^|~:-]+"
 # A class's data constructor, an operator's instance method, an identifier
 # with its trailing #s, or an operator, each behind its qualifiers.
@@ -210,7 +216,8 @@ def audit(txt, ignore, resolve=lambda module: None):
                 ('Rec {', 'end Rec', '--', '====', 'Result size'))):
             cur = line.split()[0]
         owner.append(cur)
-        for m in DICT.finditer(line):
+        for m in ANY_DICT.finditer(line):
+            listed = DICT.fullmatch(m.group(0))
             qual = re.search(QUAL + '$', line[:m.start()]).group()
             # The binding's own name, in its signature or its definition.
             if (re.fullmatch(QUAL, line[:m.start()])
@@ -225,10 +232,15 @@ def audit(txt, ignore, resolve=lambda module: None):
                 ty = (resolve(module[:-1]) or {}).get(module + m.group(0))
             # Its class is its type's head, which may extend the listed one,
             # NumScalar Num's (spec-audit-08), and which its name begins
-            # with; a floated binding's type is headed otherwise.
+            # with; a floated binding's type is headed otherwise. A class
+            # not listed counts only where the tree gives that type.
             head = type_head(ty) or '' if ty is not None else None
-            if head is not None and not (head.startswith(m.group(1))
-                                         and m.group(0)[2:].startswith(head)):
+            if not listed:
+                if not head or not m.group(0)[2:].startswith(head):
+                    continue
+            elif head is not None and not (
+                    head.startswith(listed.group(1))
+                    and m.group(0)[2:].startswith(head)):
                 continue
             c = callee(lines, i, m.start())
             if c is None:
@@ -305,10 +317,12 @@ def self_test():
     library's, bindings floated out of dictionaries, here and in the library,
     two instance methods and a name ending in # as callees, two constructors,
     an unboxed `$d` binder and binders running onto further lines, a
-    dictionary of a class extending a listed one's and a specialised
-    dictionary; a library dump with its own original; a component whose
-    floated binding shares its name with another component's dictionary; and
-    a client dump with nothing to find."""
+    dictionary of a class extending a listed one's, a specialised dictionary,
+    and a dictionary of an unlisted class the dump types, on its own line after
+    a type application, beside a binding floated out of it and a library's
+    `Show` dictionary; a library dump with its own original; a component whose
+    floated binding shares its name with another component's dictionary; and a
+    client dump with nothing to find."""
     import tempfile
     head = ('\n==================== Tidy Core ====================\n'
             'Result size of Tidy Core\n  = {terms: 9, types: 1}\n\n')
@@ -362,7 +376,19 @@ def self_test():
         'Client.$fNumScalarDouble :: NumScalar Double\n'
         'Client.$fNumScalarDouble = Client.mk\n\n'
         'num = \\ (x :: Double) -> Lib.go @Double Client.$fNumScalarDouble x\n\n'
-        'spc = Lib.sort GHC.Classes.$fEqList_$s$fEqList1 xs\n')
+        'spc = Lib.sort GHC.Classes.$fEqList_$s$fEqList1 xs\n'
+        '\nClient.$fFRT :: FR T\n'
+        'Client.$fFRT = Client.C:FR @T Client.alloc\n\n'
+        'Client.$fFRT1 :: Int\n'
+        'Client.$fFRT1 = GHC.Types.I# 1#\n\n'
+        'own\n  = \\ (x :: T) ->\n'
+        '      case (Lib.alloc\n'
+        '              @T\n'
+        '              Client.$fFRT\n'
+        '              x)\n'
+        '      of\n      { __DEFAULT -> x }\n\n'
+        'flo = \\ (x :: Int) -> Lib.g Client.$fFRT1 x\n\n'
+        'shw = \\ (x :: Int) -> Lib.g GHC.Show.$fShowInt x\n')
     lib = head + ('Lib.h = \\ (@v) ($dUnbox :: Unbox v) -> '
                   'Lib.g @v $dUnbox\n\n'
                   'Lib.$fNumT3\n  :: Int\nLib.$fNumT3 = GHC.Types.I# 3#\n\n'
@@ -400,6 +426,7 @@ def self_test():
                 'line 55',
                 '  src/Client  Lib.$windex  $fStorableDouble: 1, line 37',
                 '  src/Client  Lib.$wscalar  $fUnboxDouble: 1, line 6',
+                '  src/Client  Lib.alloc  $fFRT: 1, line 95',
                 '  src/Client  Lib.go  $fNumScalarDouble: 1, line 81',
                 '  src/Client  Lib.k  $fOrdDouble: 1, line 14',
                 '  src/Client  Lib.peek  $fStorableE: 1, line 49',
@@ -409,7 +436,7 @@ def self_test():
                 '  src/Client  fam  irred :: VecElem v Double: 1, line 24',
                 '  src/Client  multi  $dEq :: Eq a: 1, line 70',
                 '  src/Client  poly  $dNum :: Num a: 1, line 22']
-        if got != want or found != 13 or read != 1:
+        if got != want or found != 14 or read != 1:
             bad.append(f'client report ({found} found, {read} read):\n  '
                        + '\n  '.join(got))
         got, found, _ = report(os.path.join(td, 'C'), 'Comp', [])
