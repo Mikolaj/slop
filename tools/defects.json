@@ -6633,15 +6633,15 @@
    "proved": "ran",
    "harm": "latent",
    "discovery": "review",
-   "notes": "Found 2026-10-19 by a /simplify reviewer: the six other walkers under tools/ prune every hidden directory and every dist one, and now share hssource.hs_paths.",
-   "plant_cmd": "mkdir -p R/dist-seq && printf 'module M where\\nf :: Int -> Int -> Int\\nf !x 0 = x\\nf x _ = 1\\n' > R/dist-seq/M.hs && printf 'module N where\\ng :: Int\\ng = 1\\n' > R/N.hs",
+   "notes": "Found 2026-10-19 by a /simplify reviewer: the six other walkers under tools/ prune every hidden directory and every dist one, and now share hssource.hs_paths. Its bang sits right of the 0: left of it, it is forced on entry (bang-lazy-check-09), and f is dropped whatever the defect does.",
+   "plant_cmd": "mkdir -p R/dist-seq && printf 'module M where\\nf :: Int -> Int -> Int\\nf 0 !x = x\\nf _ x = 1\\n' > R/dist-seq/M.hs && printf 'module N where\\ng :: Int\\ng = 1\\n' > R/N.hs",
    "invoke": [
     "{tmp}/R"
    ],
    "expect_absent": "dist-seq",
    "expect_exit": 0,
    "bug_exit": 0,
-   "bug_text": "dist-seq/M.hs:3 f arg 1/2",
+   "bug_text": "dist-seq/M.hs:3 f arg 2/2",
    "fix_in": {
     "repo": "horde-ad",
     "branch": "post-inlining-catalogue",
@@ -6798,21 +6798,21 @@
    "name": "the block-comment tracker was one flag cleared by the first -}, so a pragma's #-} or a nested comment inside a block ended it, and the commented-out code after it was read as equations",
    "family": "scan-for-parse",
    "fix_rev": "8b18f94bec66",
-   "trigger": "{- note, then {-# INLINE f #-}, then f !x 0 = x and f x _ = 1, then -}",
+   "trigger": "{- note, then {-# INLINE f #-}, then f 0 !x = x and f _ x = 1, then -}",
    "ok": "no candidate, the whole block a comment",
    "bug": "f arg 1/2 a candidate at line 4, exit 0",
    "proved": "ran",
    "harm": "latent",
    "discovery": "review",
-   "notes": "Found 2026-10-19 by a /simplify reviewer; the docstring had said block comments were tracked only crudely. The fix blanks the source's comments with hssource, which nests them, columns kept.",
-   "plant_cmd": "mkdir -p R && printf 'module M where\\n{- f once carried a pragma:\\n{-# INLINE f #-}\\nf !x 0 = x\\nf x _ = 1\\n-}\\ng :: Int\\ng = 1\\n' > R/M.hs",
+   "notes": "Found 2026-10-19 by a /simplify reviewer; the docstring had said block comments were tracked only crudely. The fix blanks the source's comments with hssource, which nests them, columns kept. Its bang sits right of the 0: left of it, it is forced on entry (bang-lazy-check-09), and f is dropped whatever the defect does.",
+   "plant_cmd": "mkdir -p R && printf 'module M where\\n{- f once carried a pragma:\\n{-# INLINE f #-}\\nf 0 !x = x\\nf _ x = 1\\n-}\\ng :: Int\\ng = 1\\n' > R/M.hs",
    "invoke": [
     "{tmp}/R"
    ],
    "expect_exit": 0,
    "expect_absent": "f arg",
    "bug_exit": 0,
-   "bug_text": "M.hs:4 f arg 1/2",
+   "bug_text": "M.hs:4 f arg 2/2",
    "fix_in": {
     "repo": "horde-ad",
     "branch": "post-inlining-catalogue",
@@ -6825,7 +6825,7 @@
    "name": "a top-level binding absent from its dumped module's demand signatures was put down to INLINE, though the dump lists exported bindings alone, so a binding the module does not export, its Core kept, was sent to look for an INLINE pragma it does not carry",
    "family": "other:proxy-for-property",
    "fix_rev": "self",
-   "trigger": "module M (g) where, f !x 0 = x and f x _ = 1 NOINLINE and not exported, and a demand dump naming M.g alone",
+   "trigger": "module M (g) where, f 0 !x = x and f _ x = 1 NOINLINE and not exported, and a demand dump naming M.g alone",
    "ok": "f's verdict says M does not export it",
    "bug": "f's verdict asks whether it was inlined away",
    "proved": "ran",
@@ -6833,7 +6833,7 @@
    "harm_count": 1,
    "discovery": "in-use",
    "notes": "Fired on orthotope (2026-10-24), on a snapshot of pr-mikolaj-toVectorListT: bench/Summed.hs's sumView, which Summed does not export and whose copies its Core keeps. Watched the same day on GHC HEAD 10.1.20261019 and 9.12.4: a NOINLINE f that M does not export stays in M's Core and is missing from M.dump-dmd-signatures. The case's dump is written by hand in that format.",
-   "plant_cmd": "mkdir S && printf 'module M (g) where\\n\\nf :: Int -> Int -> Int\\nf !x 0 = x\\nf x _ = 1\\n{-# NOINLINE f #-}\\n\\ng :: Int -> Int\\ng y = f y y\\n' > S/M.hs && printf '\\n==================== Demand signatures ====================\\n\\nM.g: <1L>\\n' > M.dump-dmd-signatures",
+   "plant_cmd": "mkdir S && printf 'module M (g) where\\n\\nf :: Int -> Int -> Int\\nf 0 !x = x\\nf _ x = 1\\n{-# NOINLINE f #-}\\n\\ng :: Int -> Int\\ng y = f y y\\n' > S/M.hs && printf '\\n==================== Demand signatures ====================\\n\\nM.g: <1L>\\n' > M.dump-dmd-signatures",
    "invoke": [
     "{tmp}/S",
     "--dumps",
@@ -8732,6 +8732,41 @@
    "expect_absent": "List.o\talloc\t140",
    "bug_exit": 0,
    "bug_text": "module\tghc/stage1\tlibraries/base/build/Data/List.o\talloc\t140"
+  },
+  {
+   "id": "bang-lazy-check-09",
+   "program": "bang-lazy-check.py",
+   "name": "a bang left of the first equation's first refutable pattern, which every call reaches, was taken for a bang binding its own equation alone, so its argument, strict, was flagged wherever a later equation leaves that position a variable or a wildcard",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "walk !_ !a [] = a and walk i a (d : ds) = walk i (a + d) ds, and a where-bound step !acc [] = acc and step acc (x : xs) = step (acc + x) xs",
+   "ok": "walk and step no candidate; right [] !acc (a bang right of a refutable pattern), later's !n (a bang in the second equation only) and hidden's go (its first equation on the where line, which the parser does not read) still flagged STRONG",
+   "bug": "walk arg 1/3, walk arg 2/3 and step arg 1/2 flagged WEAK",
+   "proved": "ran",
+   "harm": "fired",
+   "harm_count": 16,
+   "discovery": "in-use",
+   "notes": "Fired on GHC's NCG series (2026-11-08): agent chk3's run over the tip's changed modules with their dmd-signature dumps printed 18 candidates, 16 of this shape, refuted by the Core's demand signatures ($wwalk Int# Int#, $wstarts Int#, among them); the other two, CmmToAsm's go [] ngs !_ !us, have their bangs right of the [] and stay flagged. The fixture's top-level walk compiles with GHC 9.12.4 at -O to walk: <1!A><1!P(L)><1L>, strict in both banged arguments, while right's second argument and later's first are <ML>.",
+   "plant_cmd": "mkdir S && printf '{-# LANGUAGE BangPatterns #-}\\nmodule M where\\n\\nwalk :: Int -> Int -> [Int] -> Int\\nwalk !_ !a [] = a\\nwalk i a (d : ds) = walk i (a + d) ds\\n\\nouter :: [Int] -> Int\\nouter = step 0\\n  where\\n    step !acc [] = acc\\n    step acc (x : xs) = step (acc + x) xs\\n\\nright :: [Int] -> Int -> Int\\nright [] !acc = acc\\nright (x : _) _ = x\\n\\nlater :: Int -> [Int] -> Int\\nlater _ (x : _) = x\\nlater !n [] = n\\n\\nhidden :: [Int] -> Int\\nhidden = go 0\\n  where go _ [] = 0\\n        go !acc [x] = acc + x\\n        go _ (_ : xs) = go 1 xs\\n' > S/M.hs",
+   "invoke": [
+    "{tmp}/S"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "M.hs:15 right arg 2/2",
+    "M.hs:19 later arg 1/2",
+    "M.hs:25 go (local) arg 1/2"
+   ],
+   "expect_absent": [
+    "walk arg",
+    "step (local) arg"
+   ],
+   "bug_exit": 0,
+   "bug_text": [
+    "M.hs:5 walk arg 1/3",
+    "M.hs:5 walk arg 2/3",
+    "M.hs:11 step (local) arg 1/2"
+   ]
   }
  ]
 }

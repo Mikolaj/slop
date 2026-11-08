@@ -160,6 +160,32 @@ MUTANTS = [
     ('bang-lazy-check --allow gate disarmed', 'bang-lazy-check.py',
      "    if allow is not None and (unlisted or stale):\n        return 1\n",
      "    if allow is not None and (unlisted or stale):\n        return 0\n", ST),
+    # bang-lazy-check: a bang forced on entry no longer reaches the later
+    # equations' paths, so entW and the other on-entry probes are flagged
+    # again (bang-lazy-check-09)
+    ('bang-lazy-check on-entry bangs bind their own equation alone', 'bang-lazy-check.py',
+     "                if entered and s != 'force':\n", "                if False:\n", ST),
+    # bang-lazy-check: every pattern read as irrefutable, so entR's bang right
+    # of [] counts on entry and entR is dropped (bang-lazy-check-09)
+    ('bang-lazy-check refutable patterns read as irrefutable', 'bang-lazy-check.py',
+     "            return (tok == '_' or tok.startswith('~')\n",
+     "            return (True or tok == '_' or tok.startswith('~')\n", ST),
+    # bang-lazy-check: an equation the parser missed no longer stops the rule,
+    # so entH, below a first equation with a backtick, is dropped
+    # (bang-lazy-check-09)
+    ('bang-lazy-check missed equation ignored', 'bang-lazy-check.py',
+     "        hid = first_hidden(lines, grp)\n", "        hid = None\n", ST),
+    # bang-lazy-check: a first equation on the where line no longer counts as
+    # missed, so hidWhere's goW is dropped (bang-lazy-check-09)
+    ('bang-lazy-check where-line equation not taken for missed', 'bang-lazy-check.py',
+     "            if m and m.group(1) == name and ind + m.start(1) == col:\n",
+     "            if False:\n", ST),
+    # bang-lazy-check: a missed equation stops every equation's entry, those
+    # above it too, so entC, whose missed equation is its second, is flagged
+    # (bang-lazy-check-09)
+    ('bang-lazy-check missed equation stops the equations above it', 'bang-lazy-check.py',
+     "        entries = [on_entry(eq) if hid is None or eq[0] < hid else set()\n",
+     "        entries = [on_entry(eq) if hid is None else set()\n", ST),
     # bench-baseline: "a baseline slope of 0 reports movement instead of dividing by it"
     ('bench-baseline zero baseline slope divided by', 'bench-baseline.py',
      "    if old == 0:\n", "    if old == 0 and False:\n", ST),

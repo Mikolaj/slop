@@ -19,9 +19,16 @@ guard-free equations whose body sits on the definition line: a body that
 is exactly the argument returns it purely, which forces (marker pret); a
 body headed by return/pure wraps without forcing (marker mret -- a
 definite leak, whatever the other equations do); and a body headed by
-error/undefined diverges, and a diverging path is strict (marker botm). A
-candidate all of whose non-bang paths force is dropped rather than
-printed. The rules are deliberately conservative: they fire only on
+error/undefined diverges, and a diverging path is strict (marker botm).
+Matching runs left to right, so an equation forces on entry its bangs left
+of its first refutable pattern, and that pattern's own bang, and a call
+reaching a later equation has forced them too (marker pre); in the first
+equation that is every call. Only the equations above the first one the
+parser missed count -- one on a `where` line, one with a backtick in its
+body, one whose arguments go on to the next line -- so that every path the
+parser did not see passes through them. A candidate all of whose non-bang
+paths force is dropped rather than printed. The rules are deliberately
+conservative: they fire only on
 single-line guard-free bodies, the bottom rule tolerates no bare infix
 operator other than $ and $!, the return rule none but $, and
 project-specific bottom helpers (a cannotHappen) are not recognized --
@@ -59,9 +66,11 @@ GHC HEAD 10.1.20261019 and 9.12.4, so its Core is read instead; and an
 exported one missing usually means INLINE dissolved the binding, so its
 strictness lives at the call sites. The unverified residue needs a reader
 or an extracted probe module. The reader's rules, each measured in the
-selftest: a literal or constructor pattern forces; a bang forces only
-the paths on which it is reached (earlier pattern failure in the same
-equation skips it); guards force their scrutinees on every guard path; a
+selftest: a literal or constructor pattern forces; a bang forces only the
+paths on which it is reached (earlier pattern failure in the same equation
+skips it, and one with no refutable pattern left of it is reached by every
+later equation's path too); guards force their scrutinees on every guard
+path; a
 plain return of the argument forces it, a monadic `return arg` does not;
 a diverging body is a strict path; and strictness can arrive with no bang
 at all, via a strict callee or the recursive fixpoint.
@@ -75,9 +84,11 @@ Non-vacuity: --self-test writes probe modules to a temp directory, compiles
 them with ghc -O, and asserts the exact verdict for every case above in
 both directions -- lazy cases must come back CONFIRMED (the monadic-return
 probe as STRONG), strict-without-enough-bangs cases CLEARED, the
-pure-return and bottom-body probes absent entirely, and the FastReshape-
+pure-return and bottom-body probes absent entirely, the FastReshape-
 shaped local loops flagged UNVERIFIED with their bottom-body catch-all
-dropped. That the selftest bites is tools/mutants.py's to show, each
+dropped, the positions forced on entry absent and strict per GHC, and the
+paths below an equation the parser missed still flagged. That the selftest
+bites is tools/mutants.py's to show, each
 break there watched failing it before it was written down.
 
 Exit codes: 0 for a run over a tree, whatever it printed --- the
@@ -215,8 +226,39 @@ def path_status(cls, argtok, rhs_toks, guard_toks, fname):
     return 'unknown', 'var'
 
 
+def irrefutable(tok):
+    """Whether matching TOK cannot fail: a variable, a wildcard or a
+    ~-pattern, alone or under a bang, parentheses or an as-pattern. Any
+    other pattern is taken to be refutable."""
+    while True:
+        m = re.match(r"^[a-z_][A-Za-z0-9_']*@(.+)$", tok)
+        if m:
+            tok = m.group(1)
+        elif tok.startswith('(') and tok.endswith(')') and len(tok) > 2:
+            tok = tok[1:-1].strip()
+        elif tok.startswith('!'):
+            tok = tok[1:].lstrip()
+        else:
+            return (tok == '_' or tok.startswith('~')
+                    or re.fullmatch(r"[a-z_][A-Za-z0-9_']*", tok) is not None)
+
+
+def on_entry(eq):
+    """The positions an equation forces whenever it is tried: matching runs
+    left to right, so its bangs left of its first refutable pattern, and
+    that pattern's own bang, come before anything can fail."""
+    out = set()
+    for i, tok in enumerate(eq[5]):
+        if eq[3][i] == 'bang':
+            out.add(i)
+        if not irrefutable(tok):
+            break
+    return out
+
+
 def parse_equations(path):
-    """Per equation: (line, col, name, classes, argc, arg tokens, rhs toks).
+    """(equations, unparsed count, the source's lines, comments blanked);
+    per equation: (line, col, name, classes, argc, arg tokens, rhs toks).
 
     rhs toks is None when the equation has guards or a body continuing on
     later lines -- the body-aware path rules then stay out of it.
@@ -275,7 +317,7 @@ def parse_equations(path):
                 continue
         eqs.append((idx + 1, m.start(3), name, [classify(t) for t in args],
                     len(args), args, rhs_toks, guard_toks))
-    return eqs, unparsed
+    return eqs, unparsed, lines
 
 
 def group_equations(eqs):
@@ -305,20 +347,61 @@ def group_equations(eqs):
     return groups
 
 
+def first_hidden(lines, grp):
+    """The line of the first equation of grp's definition, above its last
+    parsed one, that escaped the parser -- one on a `where` or `let` line,
+    one whose body holds a backtick, one whose arguments go on to the next
+    line -- or None. The scan goes up from the last parsed equation and
+    stops at the definition's type signature, at another definition above
+    it, or at the line opening the block."""
+    name, col = grp[0][2], grp[0][1]
+    members = {eq[0] for eq in grp}
+    top = None
+    for k in range(grp[-1][0] - 2, -1, -1):
+        s = lines[k].lstrip()
+        ind = len(lines[k]) - len(s)
+        if not s or s.startswith(('#', '{-#')) or k + 1 in members \
+                or ind > col:
+            continue
+        if ind < col:
+            m = re.match(r"(?:where|let)\s+([a-z_][\w']*)", s)
+            if m and m.group(1) == name and ind + m.start(1) == col:
+                top = k + 1
+            break
+        m = re.match(r"([a-z_][\w']*)\s*(\S*)", s)
+        if m and m.group(1) == name:
+            if m.group(2).startswith(('::', ',')):
+                break  # its type signature: the definition starts
+            top = k + 1
+        elif k + 1 < grp[0][0]:
+            break  # another definition, above this one
+    return top
+
+
 def find_candidates(path):
-    eqs, unparsed = parse_equations(path)
+    eqs, unparsed, lines = parse_equations(path)
     out = []
     for grp in group_equations(eqs):
         argc = grp[0][4]
+        # A call reaching an equation has tried every earlier one, forcing
+        # what each forces on entry. Only the equations above the first
+        # that escaped the parser count: what they force, the paths through
+        # every unseen equation force too (bang-lazy-check-09).
+        hid = first_hidden(lines, grp)
+        entries = [on_entry(eq) if hid is None or eq[0] < hid else set()
+                   for eq in grp]
         for i in range(argc):
             if not any(eq[3][i] == 'bang' for eq in grp):
                 continue
-            statuses, markers = [], []
-            for eq in grp:
+            statuses, markers, entered = [], [], False
+            for eq, entry in zip(grp, entries):
                 s, mk = path_status(eq[3][i], eq[5][i], eq[6], eq[7],
                                     grp[0][2])
+                if entered and s != 'force':
+                    s, mk = 'force', 'pre'
                 statuses.append(s)
                 markers.append(mk)
+                entered = entered or i in entry
             if all(s == 'force' for s in statuses):
                 continue  # every path forces: auto-cleared, not printed
             strength = ('STRONG' if any(s == 'nonforce' for s in statuses)
@@ -511,7 +594,8 @@ def run(roots, dump_pats, allow=None):
 SELFTEST_TOP = '''\
 {-# LANGUAGE BangPatterns #-}
 module SelfTest (loopW, loopW1, loopW2, loopT, loopE, loopG, cnt,
-                 benchGo, mret, gv, useHid) where
+                 benchGo, mret, gv, useHid, entW, entG, entT, entM, entC,
+                 entR, entL, entS, entH, entWhere, hidWhere) where
 
 -- Wildcard base case: lazy join; the bangs bind only their own equation.
 loopW :: Int -> Int -> Int
@@ -586,6 +670,78 @@ hid !k !acc = hid (k - 1) (acc + k)
 
 useHid :: Int -> Int
 useHid k = hid k 0
+
+-- Bangs left of the first equation's first refutable pattern: every call
+-- forces them, so no candidate, and the dump must find them strict.
+entW :: Int -> Int -> [Int] -> Int
+entW !_ !a [] = a
+entW i a (d : ds) = entW i (a + d) ds
+
+-- The same under a guard, which is tried once the patterns have matched.
+entG :: Int -> [Int] -> Int
+entG !n (x : xs) | x > 0 = entG (n + x) xs
+entG n _ = n + 1
+
+-- Three equations: the first one's bang reaches the wildcard's path.
+entT :: Int -> Maybe Int -> Int
+entT !n Nothing = n
+entT _ (Just 0) = 0
+entT n (Just k) = entT (n + k) Nothing
+
+-- The second equation's bang, left of its refutable pattern, reaches the
+-- third's path, and the first equation forces its own.
+entM :: Int -> Int -> [Int] -> Int
+entM 0 !_ _ = 0
+entM k !acc (x : xs) = entM (k - 1) (acc + x) xs
+entM k acc [] = acc + k
+
+-- The second equation's arguments go on to the next line, which the parser
+-- skips; the first equation, above it, still counts.
+entC :: Int -> Maybe Int -> Int
+entC !n Nothing = n
+entC n (Just 0)
+  = n
+entC n _ = n + 1
+
+-- A bang right of a refutable pattern: a call failing on [] never reaches it.
+entR :: [Int] -> Int -> Int
+entR [] !acc = acc
+entR (x : _) _ = x
+
+-- A bang in the second equation only, which a call matching the first never
+-- tries.
+entL :: Int -> [Int] -> Int
+entL _ (x : _) = x
+entL !n [] = n
+
+-- The second equation's bang reaches the third's path (marker pre), and the
+-- first equation's wildcard path is still lazy.
+entS :: Int -> [Int] -> Int
+entS _ [] = 0
+entS !n [x] = n + x
+entS n (_ : xs) = entS (n + 1) xs
+
+-- The same with a backtick in the first equation's body, which the parser
+-- skips: below it, the second's bang counts for nothing.
+entH :: Int -> [Int] -> Int
+entH _ [] = 0 `div` 1
+entH !n [x] = n + x
+entH _ (_ : xs) = entH 1 xs
+
+-- Where-bound, the bang left of the first equation's refutable pattern.
+entWhere :: [Int] -> Int
+entWhere = stepW 0
+  where
+    stepW !acc [] = acc
+    stepW acc (x : xs) = stepW (acc + x) xs
+
+-- Where-bound, the first equation on the where line, which the parser does
+-- not read.
+hidWhere :: [Int] -> Int
+hidWhere = goW 0
+  where goW _ [] = 0
+        goW !acc [x] = acc + x
+        goW _ (_ : xs) = goW 1 xs
 '''
 
 # Scanner-shape control mirroring FastReshape.hs: let-bound equations, one
@@ -617,16 +773,28 @@ EXPECT_TOP = {
     ('gv', 1): ('WEAK', 'CLEARED'),
     ('gv', 2): ('WEAK', 'CLEARED'),
     ('hid', 2): ('STRONG', 'UNVERIFIED'),
+    ('entR', 2): ('STRONG', 'CONFIRMED'),
+    ('entL', 1): ('STRONG', 'CONFIRMED'),
+    ('entS', 1): ('STRONG', 'CONFIRMED'),
+    ('entH', 1): ('STRONG', 'CONFIRMED'),
+    ('goW', 1): ('STRONG', 'UNVERIFIED'),
 }
 # loopE (bottom body), loopW1 (banged wildcard plus pure return), benchGo
-# (pure return), cnt and loopG must be absent.
+# (pure return), cnt, loopG, stepW and the on-entry positions below must be
+# absent.
 EXPECT_MARKERS = {
     ('loopW2', 2): 'bang,pret,rec',
     ('loopT', 2): 'bang,wild,pret,rec',
     ('mret', 2): 'mret,bang',
     ('gv', 1): 'gvar,bang',
     ('gv', 2): 'var,bang',
+    ('entS', 1): 'wild,bang,pre',
+    ('entH', 1): 'bang,wild',
+    ('goW', 1): 'bang,wild',
 }
+# Forced on entry, each with its arity: absent, and strict per GHC.
+EXPECT_ON_ENTRY = {('entW', 1): 3, ('entW', 2): 3, ('entG', 1): 2,
+                   ('entT', 1): 2, ('entM', 2): 3, ('entC', 1): 2}
 EXPECT_LOCAL = {('recLoop', 2), ('recLoop', 3), ('copyLoop', 1),
                 ('copyLoop', 3), ('copyLoop', 4)}
 # flatten's positions must be absent: its catch-all body is bottom.
@@ -669,6 +837,12 @@ def selftest():
             if gotm.get(key) != want:
                 bad.append('%s arg %d: expected markers [%s], got [%s]'
                            % (key + (want, gotm.get(key))))
+        for (name, arg), argc in EXPECT_ON_ENTRY.items():
+            v = verdict({'local': False, 'file': top, 'name': name,
+                         'argc': argc, 'arg': arg}, sigs, stems)
+            if not v.startswith('CLEARED'):
+                bad.append('%s arg %d, forced on entry, not strict per GHC:'
+                           ' %s' % (name, arg, v))
         hid = [verdict(c, sigs, stems) for c in cands
                if (c['name'], c['arg']) == ('hid', 2)]
         if hid and not hid[0].startswith('UNVERIFIED (not exported'):
@@ -739,9 +913,11 @@ def selftest():
             print('FAIL: %s' % b)
         return 1
     print('ok:   all %d dump-checked verdicts, %d marker lines, %d local'
-          ' flags, the four --allow verdicts, the stops, and the'
-          ' foreign-module and unexported verdicts as expected'
-          % (len(EXPECT_TOP), len(EXPECT_MARKERS), len(EXPECT_LOCAL)))
+          ' flags, %d on-entry positions absent and strict, the four'
+          ' --allow verdicts, the stops, and the foreign-module and'
+          ' unexported verdicts as expected'
+          % (len(EXPECT_TOP), len(EXPECT_MARKERS), len(EXPECT_LOCAL),
+             len(EXPECT_ON_ENTRY)))
     return 0
 
 
