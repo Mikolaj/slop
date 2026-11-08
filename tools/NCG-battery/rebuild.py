@@ -100,7 +100,8 @@ BATTERY = os.path.join(HERE, 'battery.py')
 MIN_FREE = 30  # GB
 MAX_FAILED = 3
 TIMEOUT = 7200  # s; each takes under half an hour
-# every module's passes timed, a dump a module under its build directory
+# every module's passes timed, a dump a module and GHC way tag under its build
+# directory, the RTS's four ways writing two (bstats.py)
 HADRIAN_SETTINGS = '*.*.ghc.hs.opts += -ddump-timings -ddump-to-file'
 # --build's gate and limit, common.md's
 MIN_MEM = 12  # GB

@@ -21,31 +21,39 @@ at -O2 and -O1 and A2T, their build directories and the wrapper's records,
 and writes OUT. rebuild.py writes OUT/ghcb-LABEL.tsv and OUT/pkgb-LABEL.tsv,
 OUT being WORK/battery.
 
-A row is `kind build key figure value`. kind module: key is the object's
-path below the build's root (a hadrian stage directory, or a cabal build
-directory with its `ghc-VERSION` component dropped, so that two compilers'
-builds share keys), figure ms, alloc (the passes' sums, as
-tools/ctime-diff.py sums them) or size (the object's bytes); a module's dump
-is joined to the object of its module name (the dump's `[M]`) in the
-nearest directory above the dump holding it, as GHC's -outputdir puts the
-dump under the source's own path; an object without a dump, a C file's or
-a .cmm's in another way, has its size alone. kind process: key is the
-unit (`-this-unit-id` without its hash) and `link` where the run links,
-figure instructions, alloc and peak_mb (the RTS's peak_megabytes_allocated);
-for GHC's build, key hadrian, figures instructions and wall_s.
+A row is `kind build key figure value`. kind module: key is the object's path
+below the build's root (a hadrian stage directory, or a cabal build directory
+with its `ghc-VERSION` component dropped, so that two compilers' builds share
+keys), figure ms, alloc (the passes' sums, as tools/ctime-diff.py sums them)
+or size (the object's bytes); a module's dump is joined to the object of its
+module name (the dump's `[M]`) and way in the nearest directory above the dump
+holding one, as GHC's -outputdir puts the dump under the source's own path, and
+a dump naming no module, a .cmm's or a .S's, is keyed by its own path; an object
+without a dump, a C file's or a .cmm's, has its size alone. GHC names a dump by
+the ways it was given, `X.dump-timings`, `X.debug.dump-timings`, and hadrian
+gives it no -threaded, so the RTS's four ways write two dumps a .cmm or .S, each
+holding whichever way wrote it last (2026-11-08): a dump not tied to one way of
+its source --- tied where the source has a dump a way, each tag an object's, or
+one dump and at most one object --- has figure shared_by, the objects' ways'
+count, in place of ms and alloc. kind process: key is the unit (`-this-unit-id`
+without its hash) and `link` where the run links, figure instructions, alloc
+and peak_mb (the RTS's peak_megabytes_allocated); for GHC's build, key hadrian,
+figures instructions and wall_s.
 
 `compare` prints, per build, the modules and processes in both, the summed
-figures' ratios B/A, and every row moving by its threshold either way:
-a module's allocation by 0.1% and its size by 0.2%, a process's
-instructions by 1% and its allocation by 0.1% (Mikolaj, 2026-11-07, for the
-compile instructions and object size; the battery's compile-allocation bar
-for the rest); time only summed. Builds of vector by one compiler, and by
-two compilers of the same sources in trees of one path length (2026-11-07),
-differed by at most 0.2% in a module's allocation, 0.003% in the sum, 0.83%
-in a process's instructions and 0.17% in its allocation, the objects equal:
-a lone row near its bar is noise until repeated. With a store's path of
-another length a module moved by 2.25%, so compare labels whose paths are
-equally long, as rebuild.py's are.
+figures' ratios B/A, and every row moving by its threshold either way: a
+module's allocation by 0.1% and its size by 0.2%, a process's instructions by 1%
+and its allocation by 0.1% (Mikolaj, 2026-11-07, for the compile instructions
+and object size; the battery's compile-allocation bar for the rest); time only
+summed. It counts each label's dumps several ways share and leaves their ms
+and alloc out, applying the same rule to a table written before 2026-11-08,
+which holds their last writers' figures. Builds of vector by one compiler, and
+by two compilers of the same sources in trees of one path length (2026-11-07),
+differed by at most 0.2% in a module's allocation, 0.003% in the sum, 0.83% in
+a process's instructions and 0.17% in its allocation, the objects equal: a lone
+row near its bar is noise until repeated. With a store's path of another length
+a module moved by 2.25%, so compare labels whose paths are equally long, as
+rebuild.py's are.
 Exits 0 when it compared, 2 when a label has neither table.
 """
 
@@ -68,6 +76,7 @@ HASH = re.compile(r'-[0-9a-f]{64}$')
 STAGES = ('stageBoot', 'stage0', 'stage1')
 BARS = {'alloc': 0.001, 'size': 0.002, 'instructions': 0.01}
 PLURAL = {'module': 'modules', 'process': 'processes'}
+SHARED = 'shared_by'
 
 
 def dump_figures(path):
@@ -89,32 +98,80 @@ def normal(rel):
     return '/'.join(p for p in rel.split('/') if not VERSION_DIR.match(p))
 
 
+def way_of(name):
+    """(base, way tag) of an object's name or a dump's key's last component:
+    Apply.thr_debug_o and Apply.thr_debug are (Apply, thr_debug), Apply.o and
+    Apply (Apply, '')."""
+    base, _, tag = name.partition('.')
+    return base, ('' if tag == 'o' else tag.removesuffix('_o'))
+
+
+def package(key):
+    """A key's path up to its first `build` component, the package's build
+    directory in hadrian's layout and cabal's; '' where it has none."""
+    p = key.split('/')[:-1]
+    return '/'.join(p[:p.index('build') + 1]) if 'build' in p else ''
+
+
+def mark_shared(figs):
+    """figs, each dump keyed by its path that several ways share left without
+    ms and alloc, figure SHARED (its ways' count) in their place: its ways are
+    those of the objects of its name in its package, and it is shared unless
+    its stem has a dump a way, their tags the objects', or one dump and at most
+    one way."""
+    ways, dumps = {}, {}
+    for k, f in figs.items():
+        base, tag = way_of(k.rpartition('/')[2])
+        if OBJ.search(k):
+            ways.setdefault((package(k), base), set()).add(tag)
+        elif {'ms', 'alloc', SHARED} & set(f):
+            dumps.setdefault((k.rpartition('/')[0], base), []).append((tag, k))
+    for (_, base), ds in dumps.items():
+        w = ways.get((package(ds[0][1]), base), set())
+        if not (len(ds) == 1 and len(w) <= 1 or {t for t, _ in ds} == w):
+            for _, k in ds:
+                figs[k] = {SHARED: len(w)}
+    return figs
+
+
 def modules(root):
     """key -> {figure: value} of the objects and dumps under root."""
-    out, dumps = {}, []
+    out, dumps, objs = {}, [], {}
     for dp, _, fs in os.walk(root):
         for f in fs:
             p = os.path.join(dp, f)
             if f.endswith('.dump-timings'):
                 dumps.append(p)
             elif OBJ.search(f) and os.path.isfile(p):
-                out.setdefault(normal(os.path.relpath(p, root)), {})['size'] = os.path.getsize(p)
+                key = normal(os.path.relpath(p, root))
+                out.setdefault(key, {})['size'] = os.path.getsize(p)
+                base, tag = way_of(f)
+                objs.setdefault(os.path.join(dp, base), {})[tag] = key
+    joined = {}
     for p in sorted(dumps):
         mod, ms, alloc = dump_figures(p)
-        key = None
+        key = normal(os.path.relpath(p, root))[:-len('.dump-timings')]
+        stem = None
         if mod:
             d = os.path.dirname(p)
-            while key is None and len(d) >= len(root):
-                o = os.path.join(d, *mod.split('.')) + '.o'
-                if os.path.isfile(o):
-                    key = normal(os.path.relpath(o, root))
+            while stem is None and len(d) >= len(root):
+                s = os.path.join(d, *mod.split('.'))
+                stem = s if s in objs else None
                 d = os.path.dirname(d)
-        if key is None:
-            key = normal(os.path.relpath(p, root))[:-len('.dump-timings')]
-        f = out.setdefault(key, {})
-        f['ms'] = f.get('ms', 0.0) + ms
-        f['alloc'] = f.get('alloc', 0) + alloc
-    return out
+        if stem is None:
+            out[key] = {'ms': ms, 'alloc': alloc}
+        else:
+            joined.setdefault(stem, []).append((way_of(os.path.basename(key))[1], key, ms, alloc))
+    for stem, ds in joined.items():
+        w = objs[stem]
+        one = len(ds) == 1 and len(w) == 1
+        if one or {t for t, *_ in ds} == set(w):
+            for t, _, ms, alloc in ds:
+                out[next(iter(w.values())) if one else w[t]].update(ms=ms, alloc=alloc)
+        else:
+            for _, key, _, _ in ds:
+                out[key] = {SHARED: len(w)}
+    return mark_shared(out)
 
 
 def perf_count(path):
@@ -219,7 +276,23 @@ def load(path):
     return out
 
 
+def unshared(t):
+    """t, mark_shared applied to each build's modules, as a table written
+    before 2026-11-08 holds a shared dump's figures."""
+    out, by = {}, {}
+    for k, v in t.items():
+        if k[0] == 'module':
+            by.setdefault(k[1], {}).setdefault(k[2], {})[k[3]] = v
+        else:
+            out[k] = v
+    for build, figs in by.items():
+        for key, f in mark_shared(figs).items():
+            out.update({('module', build, key, fig): v for fig, v in f.items()})
+    return out
+
+
 def compare(ta, tb, a, b):
+    ta, tb = unshared(ta), unshared(tb)
     out = [f'{b} against {a}']
     groups = sorted({(k[0], k[1]) for k in set(ta) | set(tb)})
     for kind, build in groups:
@@ -228,7 +301,7 @@ def compare(ta, tb, a, b):
         keys = {k[2] for k in ka & kb}
         only = (len({k[2] for k in ka} - {k[2] for k in kb}),
                 len({k[2] for k in kb} - {k[2] for k in ka}))
-        figs = sorted({k[3] for k in ka & kb})
+        figs = sorted({k[3] for k in ka & kb} - {SHARED})
         tot = []
         for fig in figs:
             both = [k for k in ka & kb if k[3] == fig and ta[k] and tb[k]]
@@ -237,6 +310,10 @@ def compare(ta, tb, a, b):
                 tot.append(f'{fig} {sb / sa:.5f}')
         out.append(f'{PLURAL[kind]} of {build}: {len(keys)} in both (only {a}: {only[0]},'
                    f' only {b}: {only[1]}); totals B/A: {", ".join(tot) or "none"}')
+        left = [sum(k[3] == SHARED for k in kx) for kx in (ka, kb)]
+        if any(left):
+            out.append(f'  ms and alloc left out of dumps several ways share:'
+                       f' {a} {left[0]}, {b} {left[1]}')
         for fig in figs:
             bar = BARS.get(fig)
             if bar is None:
@@ -293,7 +370,28 @@ def self_test():
         put(f'{t}/stage1/libraries/base/build/libraries/base/src/Data/List.dump-timings',
             tim('Data.List', 10))
         put(f'{t}/stage1/libraries/base/build/Data/List.o', 'x' * 8)
-        put(f'{t}/stage1/rts/build/cmm/Apply.thr_o', 'x' * 3)
+        # Data.List in a second way, its dump and object by way; Data.Map in three
+        # ways with two dumps, shared; ghc's Main given -threaded, one object.
+        put(f'{t}/stage1/libraries/base/build/libraries/base/src/Data/List.dyn.dump-timings',
+            tim('Data.List', 4))
+        put(f'{t}/stage1/libraries/base/build/Data/List.dyn_o', 'x' * 9)
+        for w in ('', '.p'):
+            put(f'{t}/stage1/libraries/base/build/libraries/base/src/Data/Map{w}.dump-timings',
+                tim('Data.Map', 5))
+        for w in ('o', 'p_o', 'dyn_o'):
+            put(f'{t}/stage1/libraries/base/build/Data/Map.{w}', 'x')
+        put(f'{t}/stage1/ghc/build/ghc/Main.thr.dump-timings', tim('Main', 6))
+        put(f'{t}/stage1/ghc/build/Main.o', 'x')
+        # The RTS's four ways and Apply.cmm's two dumps, shared, keyed by path
+        # and left without ms and alloc; a .cmm of one way keeps them.
+        for w in ('o', 'thr_o', 'debug_o', 'thr_debug_o'):
+            put(f'{t}/stage1/rts/build/cmm/Apply.{w}', 'x' * 3)
+        for w, x in (('', 30), ('.debug', 33)):
+            put(f'{t}/stage1/rts/build/rts/Apply{w}.dump-timings',
+                f'systool:cmm-cpp: alloc=99 time=1\nParseCmm [/tmp/g/ghc_tmp_1.cmm]: alloc={x} time=2\n')
+        put(f'{t}/stage1/libraries/i/build/libraries/i/cbits/S.dump-timings',
+            'ParseCmm [/tmp/g/ghc_tmp_1.cmm]: alloc=20 time=2\n')
+        put(f'{t}/stage1/libraries/i/build/cmm/cbits/S.o', 'x' * 2)
         put(f'{t}/stage1/rts/build/c/Weak.o', 'x' * 5)
         put(f'{t}/stageBoot/utils/u/build/utils/u/Main.dump-timings', tim('Main', 2))
         put(f'{t}/stageBoot/utils/u/build/Main.o', 'x')
@@ -304,11 +402,19 @@ def self_test():
                 ('ghc/stage0', 'compiler/build/GHC/Core.o', 'size'): 40,
                 ('ghc/stage1', 'libraries/base/build/Data/List.o', 'alloc'): 17,
                 ('ghc/stage1', 'libraries/base/build/Data/List.o', 'size'): 8,
+                ('ghc/stage1', 'libraries/base/build/Data/List.dyn_o', 'alloc'): 11,
+                ('ghc/stage1', 'libraries/base/build/libraries/base/src/Data/Map', 'shared_by'): 3,
+                ('ghc/stage1', 'libraries/base/build/libraries/base/src/Data/Map.p', 'shared_by'): 3,
+                ('ghc/stage1', 'libraries/base/build/Data/Map.p_o', 'size'): 1,
+                ('ghc/stage1', 'ghc/build/Main.o', 'alloc'): 13,
                 ('ghc/stage1', 'rts/build/cmm/Apply.thr_o', 'size'): 3,
+                ('ghc/stage1', 'rts/build/rts/Apply', 'shared_by'): 4,
+                ('ghc/stage1', 'rts/build/rts/Apply.debug', 'shared_by'): 4,
+                ('ghc/stage1', 'libraries/i/build/libraries/i/cbits/S', 'alloc'): 20,
                 ('ghc/stage1', 'rts/build/c/Weak.o', 'size'): 5,
                 ('ghc/stageBoot', 'utils/u/build/Main.o', 'alloc'): 9,
                 ('ghc', 'hadrian', 'instructions'): 12345, ('ghc', 'hadrian', 'wall_s'): 61}
-        if {k: got.get(k) for k in want} != want or len(got) != 13 \
+        if {k: got.get(k) for k in want} != want or len(got) != 32 \
                 or any('o-boot' in k[1] for k in got):
             bad.append(f'GHC build rows: {sorted(got.items())}')
         # Cabal's layout: a library and a benchmark, the version dropped.
@@ -359,6 +465,22 @@ def self_test():
                 '  instructions by 1.0%: 0 up, 1 down', '    -1.100%  p  1000 989']
         if got != want:
             bad.append('compare:\n  ' + '\n  '.join(got))
+        # A table written before 2026-11-08 holds Apply's shared dumps' alloc,
+        # left out as from a table written since.
+        ta = {('module', 'h', f'rts/build/cmm/Apply.{w}', 'size'): 8.0
+              for w in ('o', 'thr_o', 'debug_o', 'thr_debug_o')}
+        tb = dict(ta)
+        ta.update({('module', 'h', 'rts/build/rts/Apply', 'alloc'): 100.0,
+                   ('module', 'h', 'rts/build/rts/Apply.debug', 'alloc'): 111.0})
+        tb.update({('module', 'h', 'rts/build/rts/Apply', 'shared_by'): 4.0,
+                   ('module', 'h', 'rts/build/rts/Apply.debug', 'shared_by'): 4.0})
+        got = compare(ta, tb, 'A', 'B')
+        want = ['B against A',
+                'modules of h: 6 in both (only A: 0, only B: 0); totals B/A: size 1.00000',
+                '  ms and alloc left out of dumps several ways share: A 2, B 2',
+                '  size by 0.2%: 0 up, 0 down']
+        if got != want:
+            bad.append('compare of a table written before 2026-11-08:\n  ' + '\n  '.join(got))
         put(f'{d}/out/ghcb-A.tsv')
         if main(['compare', '--out', f'{d}/out', 'A', 'Z']) != 2:
             bad.append('a label with no table did not exit 2')

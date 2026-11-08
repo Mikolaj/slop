@@ -8634,6 +8634,104 @@
    "discovery": "selftest",
    "notes": "2026-11-07 11:44: check-all failed the self-test unsandboxed, /tmp a 32 GB tmpfs with 28 GB free; the same self-test had passed there at 11:29, with more free.",
    "no_audit": "other:depends-on-the-free-space-of-the-machine's-temporary-directory"
+  },
+  {
+   "id": "NCG-battery-09",
+   "program": "NCG-battery/bstats.py",
+   "name": "bstats.py keyed a .cmm's or .S's -ddump-timings file by its path, which GHC's build writes from two of the RTS's four ways each, so each ghcb record held whichever way wrote it last",
+   "family": "unverified-state",
+   "fix_rev": "self",
+   "trigger": "a hadrian tree whose RTS .cmm has objects in four ways (cmm/Apply.o, .thr_o, .debug_o, .thr_debug_o) and two dumps, rts/Apply.dump-timings and rts/Apply.debug.dump-timings",
+   "ok": "the two dumps' keys carry shared_by 4 and no ms or alloc, the objects keep their sizes, and a vanilla-only .cmm's dump keeps its alloc",
+   "bug": "each dump's ms and alloc recorded under rts/build/rts/Apply and rts/build/rts/Apply.debug, the figures of whichever way wrote the file last",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-08: fr53's rts/build/rts/Apply held 5503456 B, a debug way's, against fr00's 4953504 B, which compare reported as +11.1% (findings 870, 871); in ghc-olptip rts/Apply.dump-timings has cmm/Apply.thr_o's mtime to the nanosecond.",
+   "plant_cmd": "r=t/_build/stage1; mkdir -p $r/rts/build/rts $r/rts/build/cmm $r/libraries/ghc-internal/build/libraries/ghc-internal/cbits $r/libraries/ghc-internal/build/cmm/cbits && printf 'systool:cmm-cpp: alloc=426448 time=0.512\\nParseCmm [/tmp/a/ghc_tmp_1.cmm]: alloc=4953504 time=22.543\\n' > $r/rts/build/rts/Apply.dump-timings && printf 'ParseCmm [/tmp/b/ghc_tmp_1.cmm]: alloc=5503456 time=25.621\\n' > $r/rts/build/rts/Apply.debug.dump-timings && for w in o thr_o debug_o thr_debug_o; do printf xxxx > $r/rts/build/cmm/Apply.$w; done && printf 'ParseCmm [/tmp/c/ghc_tmp_1.cmm]: alloc=2773984 time=9.000\\n' > $r/libraries/ghc-internal/build/libraries/ghc-internal/cbits/Stack.dump-timings && printf xx > $r/libraries/ghc-internal/build/cmm/cbits/Stack.o",
+   "invoke": [
+    "ghc",
+    "{tmp}/t",
+    "{tmp}/out.tsv",
+    "{tmp}/none.csv",
+    "1"
+   ],
+   "probe_cmd": "cat out.tsv",
+   "expect_exit": 0,
+   "expect_text": [
+    "module\tghc/stage1\trts/build/rts/Apply\tshared_by\t4",
+    "module\tghc/stage1\trts/build/rts/Apply.debug\tshared_by\t4",
+    "module\tghc/stage1\trts/build/cmm/Apply.debug_o\tsize\t4",
+    "module\tghc/stage1\tlibraries/ghc-internal/build/libraries/ghc-internal/cbits/Stack\talloc\t2773984"
+   ],
+   "expect_absent": [
+    "rts/build/rts/Apply\talloc",
+    "rts/build/rts/Apply\tms",
+    "rts/build/rts/Apply.debug\talloc"
+   ],
+   "bug_exit": 0,
+   "bug_text": [
+    "module\tghc/stage1\trts/build/rts/Apply\talloc\t4953504",
+    "module\tghc/stage1\trts/build/rts/Apply.debug\talloc\t5503456"
+   ]
+  },
+  {
+   "id": "NCG-battery-10",
+   "program": "NCG-battery/bstats.py",
+   "name": "bstats.py compare compared ghcb tables already written, whose dumps several ways share hold an unknown way's figures, row by row, so fr53 against fr00 reported rts/build/rts/Apply's allocation +11.1%",
+   "family": "unverified-state",
+   "fix_rev": "self",
+   "trigger": "two ghcb tables in the form written before the fix: rts/build/rts/Apply's alloc 4953504 and 5503456, Apply.debug's 5503456 in both, and the four ways' objects' sizes",
+   "ok": "the shared dumps' ms and alloc are left out of the comparison and counted, 'ms and alloc left out of dumps several ways share: fr00 2, fr53 2'",
+   "bug": "'+11.102%  rts/build/rts/Apply  4953504 5503456' among the allocation rises",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-08: report-fr00-fr53.txt's builds section listed rts/build/rts/Apply +11.1%, Updates +15.3% and Jumps_V32 +7.1% among ghc/stage1's rises (finding 870).",
+   "plant_cmd": "mkdir -p out && f='module\\tghc/stage1\\trts/build/cmm/Apply.o\\tsize\\t4608\\nmodule\\tghc/stage1\\trts/build/cmm/Apply.thr_o\\tsize\\t4608\\nmodule\\tghc/stage1\\trts/build/cmm/Apply.debug_o\\tsize\\t6232\\nmodule\\tghc/stage1\\trts/build/cmm/Apply.thr_debug_o\\tsize\\t6232\\nmodule\\tghc/stage1\\trts/build/rts/Apply\\talloc\\t%s\\nmodule\\tghc/stage1\\trts/build/rts/Apply\\tms\\t16.584\\nmodule\\tghc/stage1\\trts/build/rts/Apply.debug\\talloc\\t5503456\\nmodule\\tghc/stage1\\trts/build/rts/Apply.debug\\tms\\t17.053\\n' && printf \"$f\" 4953504 > out/ghcb-fr00.tsv && printf \"$f\" 5503456 > out/ghcb-fr53.tsv",
+   "invoke": [
+    "compare",
+    "--out",
+    "{tmp}/out",
+    "fr00",
+    "fr53"
+   ],
+   "expect_exit": 0,
+   "expect_text": "ms and alloc left out of dumps several ways share: fr00 2, fr53 2",
+   "expect_absent": "%  rts/build/rts/Apply",
+   "bug_exit": 0,
+   "bug_text": "%  rts/build/rts/Apply  4953504 5503456"
+  },
+  {
+   "id": "NCG-battery-11",
+   "program": "NCG-battery/bstats.py",
+   "name": "bstats.py joined every dump naming module M to M.o, so a module compiled in two ways, its dumps M.dump-timings and M.dyn.dump-timings, had both ways' figures summed into M.o's record",
+   "family": "unverified-state",
+   "fix_rev": "self",
+   "trigger": "Data/List.dump-timings and Data/List.dyn.dump-timings beside the objects Data/List.o and Data/List.dyn_o",
+   "ok": "each way's figures under its own object, List.o alloc 100 and List.dyn_o alloc 40",
+   "bug": "List.o alloc 140, the two ways summed, and List.dyn_o with its size alone",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "generalisation",
+   "notes": "2026-11-08: no build here compiles a Haskell module in two ways: fr53's hadrian log names .cmm and .S sources alone among those compiled in several ways, and the battery's cabal builds under vpapi hold no dyn object and no way-infixed dump.",
+   "plant_cmd": "r=t/_build/stage1/libraries/base/build; mkdir -p $r/libraries/base/src/Data $r/Data && printf 'Parser [Data.List]: alloc=100 time=1.000\\n' > $r/libraries/base/src/Data/List.dump-timings && printf 'Parser [Data.List]: alloc=40 time=1.000\\n' > $r/libraries/base/src/Data/List.dyn.dump-timings && printf xxx > $r/Data/List.o && printf xxxxx > $r/Data/List.dyn_o",
+   "invoke": [
+    "ghc",
+    "{tmp}/t",
+    "{tmp}/out.tsv",
+    "{tmp}/none.csv",
+    "1"
+   ],
+   "probe_cmd": "cat out.tsv",
+   "expect_exit": 0,
+   "expect_text": [
+    "module\tghc/stage1\tlibraries/base/build/Data/List.o\talloc\t100",
+    "module\tghc/stage1\tlibraries/base/build/Data/List.dyn_o\talloc\t40"
+   ],
+   "expect_absent": "List.o\talloc\t140",
+   "bug_exit": 0,
+   "bug_text": "module\tghc/stage1\tlibraries/base/build/Data/List.o\talloc\t140"
   }
  ]
 }
