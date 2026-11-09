@@ -70,8 +70,8 @@ is never honoured. A name with INLINE in several modules is marked, and its
 copies, which may be any of theirs, are listed once, after the lines. A
 pragma inside an instance, a class or a `where` is passed over, its name
 being a method's or a local's. Its own token counts, unnormalised and
-of the Core alone, the specialisation rules GHC prints after it left out,
-are cached beside the tree as DUMPS.rawtokens.pickle.
+of the Core's code alone, the specialisation rules GHC prints after it
+and each binding's IdInfo left out, are cached beside the tree as DUMPS.rawtokens.pickle.
 
 Exit 0 when the verdicts were printed, 2 when they could not be: a dump
 tree without `.dump-simpl` files, a WORKTREE that git cannot diff, or a
@@ -176,7 +176,9 @@ def load(root, raw=False):
     cache = root.rstrip('/') + ('.rawtokens.pickle' if raw else
                                 '.tokens.pickle')
     sig = signature(root)
-    key = sig + ('code',) if raw else sig
+    # An IdInfo block counted as code (pragma-calls-22): a cache counted so
+    # is recounted.
+    key = sig + ('code without IdInfo',) if raw else sig
     try:
         with open(cache, 'rb') as fh:
             got = pickle.load(fh)
@@ -188,7 +190,7 @@ def load(root, raw=False):
     for p, _, _ in sig[-1]:
         txt = dumps.read_text(p)
         counts = collections.Counter(
-            TOK.findall(dumps.core(txt) if raw else txt))
+            TOK.findall(dumps.code(txt) if raw else txt))
         c = collections.Counter()
         for t, n in counts.items():
             c[t if raw else normalise(t)] += n
@@ -474,8 +476,9 @@ def inline_self_test(td):
     dump tree of it, with a copy qualified by a third module, a module
     copying a function of its own of the same name, a target's module
     copying an imported function of the same name, called elsewhere,
-    and calls under two aliases, one of the target's module and one
-    of a module binding the name itself."""
+    calls under two aliases, one of the target's module and one
+    of a module binding the name itself, and a target named in IdInfo
+    alone."""
     bad = []
     src = os.path.join(td, 'isrc')
     os.makedirs(os.path.join(src, 'dist-newstyle'))
@@ -512,9 +515,13 @@ def inline_self_test(td):
             ('build/src/User2.dump-simpl',
              'User2.g = \\ x -> x\nUser2.$sg1 = User2.g 1\n'),
             # M's g called under an alias, and User2's own g under another
-            # (pragma-calls-09).
+            # (pragma-calls-09); M.f named in a DFun unfolding's IdInfo
+            # alone, no call (pragma-calls-22).
             ('build/src/User3.dump-simpl',
-             'User3.y = \\ z -> Q.g z\nUser3.w = \\ z -> Q2.g z\n')):
+             'User3.y = \\ z -> Q.g z\nUser3.w = \\ z -> Q2.g z\n\n'
+             'User3.$fCT [InlPrag=CONLIKE] :: C T\n[GblId[DFunId],\n'
+             ' Unf=DFun: \\ -> C:C TYPE: T M.f]\n'
+             'User3.$fCT = C:C @T User3.$fCT_$cm\n')):
         p = os.path.join(tree, rel)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, 'w') as fh:

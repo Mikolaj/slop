@@ -8,7 +8,8 @@ Each DUMP is a `-ddump-simpl` dump made with `-dsuppress-uniques`, with or
 without `-dsuppress-all`, of a client calling a library's operations at
 concrete element types. In it, this finds every `case X of { B# y` --- B# any box,
 `D#`, `F#`, `I#`, `W#`, `C#` or a sized one, `I8#` to `W64#` --- inside
-a `joinrec` or `letrec` block, where X is not mentioned between the block's
+a `joinrec` or `letrec` block, the alternative on the case's line or opening
+the next, where X is not mentioned between the block's
 header and the case and so is bound outside the loop: a boxed value the
 loop captured and unboxes again on each iteration. Prints the top-level
 binding, the loop's first binder, X, the line number and the line.
@@ -29,6 +30,8 @@ import sys
 BOX = re.compile(r"case ([\w$']+) of \{ (?:[\w.'-]+:)?(?:[A-Z][\w']*\.)*"
                  r"(?:[IW](?:8|16|32|64)?|D|F|C)# ")
 HEADER = re.compile(r"\b(joinrec|letrec) \{\s*$")
+# A case GHC breaks after `of`, its alternative opening the next line.
+SPLIT = re.compile(r"\bcase [\w$']+ of\s*$")
 
 
 def indent(line):
@@ -37,6 +40,12 @@ def indent(line):
 
 def hits(text):
     lines = text.split('\n')
+    # Joined with its alternative, the next line left blank so that line
+    # numbers hold.
+    for i in range(len(lines) - 1):
+        if SPLIT.search(lines[i]) and lines[i + 1].lstrip().startswith('{ '):
+            lines[i] = lines[i].rstrip() + ' ' + lines[i + 1].lstrip()
+            lines[i + 1] = ''
     tops, top = [], None
     for line in lines:
         m = re.match(r"^[\w$'.]+", line)
@@ -71,7 +80,8 @@ def hits(text):
 
 def self_test():
     """A dump with a captured Double and a captured Int unboxed in loops,
-    the Double again with its qualifiers under a qualified binding, a loop
+    the Double again with its qualifiers under a qualified binding, an Int
+    whose alternative opens the line after its case, a loop
     unboxing its own parameter, and a case outside any loop."""
     import os
     import tempfile
@@ -103,7 +113,15 @@ def self_test():
             '        go3 i\n'
             '          = case x of { ghc-internal:GHC.Internal.Types.D# y ->\n'
             '            jump go3 i }; } in\n'
-            '      jump go3 0\n')
+            '      jump go3 0\n\n'
+            'Client.split\n'
+            '  = \\ x ->\n'
+            '      joinrec {\n'
+            '        go4 i\n'
+            '          = case x of\n'
+            '            { GHC.Internal.Types.I# y ->\n'
+            '            jump go4 i }; } in\n'
+            '      jump go4 0\n')
     bad = []
     with tempfile.TemporaryDirectory() as td:
         p, q = os.path.join(td, 'Client.dump-simpl'), os.path.join(td, 'none')
@@ -116,7 +134,9 @@ def self_test():
                 'countTo\tloop\tn\t18\t= case n of { I# m -> case k of '
                 '{ W8# kk -> loop k } }; } in',
                 'Client.qual\tgo3\tx\t34\t= case x of { '
-                'ghc-internal:GHC.Internal.Types.D# y ->']
+                'ghc-internal:GHC.Internal.Types.D# y ->',
+                'Client.split\tgo4\tx\t42\t= case x of { '
+                'GHC.Internal.Types.I# y ->']
         if got != want:
             bad.append('hits:\n  ' + '\n  '.join(got))
         if main([p]) != 1:

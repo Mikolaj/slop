@@ -414,12 +414,27 @@ def find_candidates(path):
     return out, unparsed
 
 
+def module_path(path):
+    """A source's or a dump's path as components, its extension dropped:
+    GHC writes a module's dump under the module's own path."""
+    return tuple(os.path.splitext(os.path.abspath(path))[0].split(os.sep))
+
+
+def shared_tail(a, b):
+    n = 0
+    while n < min(len(a), len(b)) and a[-1 - n] == b[-1 - n]:
+        n += 1
+    return n
+
+
 def load_dumps(patterns):
-    """(name -> {qualified: signature}, set of dumped module stems)."""
-    sigs, stems = defaultdict(dict), set()
+    """(name -> {(dump's module path, qualified): signature}, set of the
+    dumps' module paths)."""
+    sigs, dumped = defaultdict(dict), set()
     for pat in patterns:
         for path in glob.glob(pat, recursive=True):
-            stems.add(os.path.basename(path).split('.')[0])
+            mod = module_path(path)
+            dumped.add(mod)
             with open(path, encoding='utf-8', errors='replace') as fh:
                 for line in fh:
                     m = DUMP_RE.match(line)
@@ -428,8 +443,8 @@ def load_dumps(patterns):
                     qual, sig = m.groups()
                     base = qual.rsplit('.', 1)[-1]
                     if not base.startswith('$'):
-                        sigs[base][qual] = sig
-    return sigs, stems
+                        sigs[base][(mod, qual)] = sig
+    return sigs, dumped
 
 
 def returns_state(path, name):
@@ -464,17 +479,22 @@ def returns_state(path, name):
     return False
 
 
-def verdict(cand, sigs, dumped_stems):
+def verdict(cand, sigs, dumped):
     if cand['local']:
         return 'UNVERIFIED (local definition; not in dump)'
-    stem = os.path.splitext(os.path.basename(cand['file']))[0]
     # The candidate's own module only: a same-named binding in another
     # module's dump used to stand in for it, and the two branches below
-    # were unreachable whenever one existed (bang-lazy-check-02).
+    # were unreachable whenever one existed (bang-lazy-check-02). Its dump
+    # is the one whose path shares the longest tail with the source's,
+    # not one whose names qualify with the source's stem, which dumps
+    # made with -dsuppress-module-prefixes never do and two modules
+    # sharing a stem both do (bang-lazy-check-10).
+    src = module_path(cand['file'])
+    best = max((shared_tail(m, src) for m in dumped), default=0)
     entry = sigs.get(cand['name'], {})
-    quals = [q for q in entry if q.rsplit('.', 2)[-2:-1] == [stem]]
+    quals = [k for k in entry if best and shared_tail(k[0], src) == best]
     if not quals:
-        if stem in dumped_stems:
+        if best:
             # The dump lists exported bindings alone: one the export list
             # leaves out is missing even where the Core keeps it, which the
             # verdict put down to INLINE (bang-lazy-check-08).
@@ -544,8 +564,8 @@ def run(roots, dump_pats, allow=None):
         # gate (bang-lazy-check-03).
         print('BLOCKED: no such file or directory: %s' % ' '.join(missing))
         return 2
-    sigs, stems = load_dumps(dump_pats) if dump_pats else ({}, set())
-    if dump_pats and not stems:
+    sigs, dumped = load_dumps(dump_pats) if dump_pats else ({}, set())
+    if dump_pats and not dumped:
         print('BLOCKED: no file matches --dumps %s; every verdict would'
               ' read UNVERIFIED' % ' '.join(dump_pats))
         return 2
@@ -561,7 +581,7 @@ def run(roots, dump_pats, allow=None):
         unparsed_total += unparsed
         for c in cands:
             total += 1
-            v = (verdict(c, sigs, stems) if dump_pats
+            v = (verdict(c, sigs, dumped) if dump_pats
                  else 'unchecked (no --dumps)')
             key = (os.path.normpath(c['file']), c['name'], c['arg'])
             if key in entries:
@@ -819,10 +839,10 @@ def selftest():
             print('BLOCKED: probe compilation failed:\n%s'
                   % r.stderr.decode())
             return 2
-        sigs, stems = load_dumps([os.path.join(td, '*.dump-dmd-signatures')])
+        sigs, dumped = load_dumps([os.path.join(td, '*.dump-dmd-signatures')])
         cands, _ = find_candidates(top)
         got = {(c['name'], c['arg']):
-               (c['strength'], verdict(c, sigs, stems).split(':')[0].split()[0])
+               (c['strength'], verdict(c, sigs, dumped).split(':')[0].split()[0])
                for c in cands}
         for key, want in EXPECT_TOP.items():
             if key not in got:
@@ -839,11 +859,11 @@ def selftest():
                            % (key + (want, gotm.get(key))))
         for (name, arg), argc in EXPECT_ON_ENTRY.items():
             v = verdict({'local': False, 'file': top, 'name': name,
-                         'argc': argc, 'arg': arg}, sigs, stems)
+                         'argc': argc, 'arg': arg}, sigs, dumped)
             if not v.startswith('CLEARED'):
                 bad.append('%s arg %d, forced on entry, not strict per GHC:'
                            ' %s' % (name, arg, v))
-        hid = [verdict(c, sigs, stems) for c in cands
+        hid = [verdict(c, sigs, dumped) for c in cands
                if (c['name'], c['arg']) == ('hid', 2)]
         if hid and not hid[0].startswith('UNVERIFIED (not exported'):
             bad.append('hid, which SelfTest does not export, not named'
@@ -869,10 +889,25 @@ def selftest():
             bad.append('an unrecognised flag did not print the usage at 2')
         foreign = verdict({'local': False, 'file': 'src/Mod/B.hs',
                            'name': 'foo', 'argc': 2, 'arg': 1},
-                          {'foo': {'Mod.A.foo': '<L><L>'}}, {'A', 'B'})
+                          {'foo': {(module_path('d/Mod/A.dump'), 'Mod.A.foo'):
+                                   '<L><L>'}},
+                          {module_path('d/Mod/A.dump'),
+                           module_path('d/Mod/B.dump')})
         if not foreign.startswith('UNVERIFIED (module dumped but name'):
             bad.append("a same-named binding in another module's dump gave"
                        ' a verdict: %s' % foreign)
+        # Two modules sharing a stem, dumped without module prefixes: the
+        # candidate's own module's dump, found by path (bang-lazy-check-10).
+        own = module_path('d/CmmToAsm/Monad.dump-dmd-signatures')
+        other = module_path('d/StgToCmm/Monad.dump-dmd-signatures')
+        twin = verdict({'local': False, 'file': 'src/CmmToAsm/Monad.hs',
+                        'name': 'right', 'argc': 2, 'arg': 2},
+                       {'right': {(own, 'right'): '<1L><1L>',
+                                  (other, 'right'): '<L><L>'}},
+                       {own, other})
+        if not twin.startswith('CLEARED'):
+            bad.append("a dump without module prefixes, beside a same-stem"
+                       " module's, not read as its module's: %s" % twin)
         # --allow, four verdicts over the local probe's candidates: all
         # listed passes and prints each as read; one listed fails on the
         # rest; a stale entry fails on its own; a malformed line blocks.

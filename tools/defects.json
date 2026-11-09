@@ -9048,6 +9048,84 @@
    ],
    "bug_exit": 1,
    "bug_text": "1000000 FAIL t-O1 panic[Can't find weight for edge that should have one]; t-O2 panic[Can't find weight for edge that should have one] (2 runs, "
+  },
+  {
+   "id": "captured-unbox-01",
+   "program": "captured-unbox.py",
+   "name": "a case whose alternative GHC prints on the next line, `case eta6 of` over `{ GHC.Internal.Types.I# n1 ->`, was not read, BOX wanting `case X of { B# ` on one line, so a loop unboxing a captured value at every iteration went unreported wherever a long qualified constructor breaks the line",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "a joinrec loop go35 inside GHC.CmmToAsm.go34 unboxing go34's argument eta6, the case printed as `case eta6 of` with `{ GHC.Internal.Types.I# n1 ->` on the next line",
+   "ok": "go34, go35, eta6 and line 12 reported, exit 1",
+   "bug": "nothing reported, exit 0",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on agent sa2's stage-2 dumps of GHC's NCG series at 17fa7c837e and of master (2026-11-09; finding 1039 of the investigation): over the dumps keeping module prefixes 14 rows at the tip and 9 at master against 15 and 15 over -dsuppress-module-prefixes dumps of the same code, the prefixed constructor pushing the alternative onto its own line (master's CmmToAsm, `case eta6 of` / `{ GHC.Internal.Types.I# n1 ->`); with such lines joined, 21 rows at the tip and 15 at master in both forms. The fixture is a shortened loop of that shape.",
+   "plant_cmd": "mkdir -p A && cat > A/CmmToAsm.dump-simpl <<'EOF'\n==================== Tidy Core ====================\nResult size of Tidy Core\n  = {terms: 1, types: 1}\n\nGHC.CmmToAsm.go34\n  = \\ (eta6 :: GHC.Internal.Types.Int) (xs :: [GHC.Internal.Types.Int]) ->\n      joinrec {\n        go35 (ys :: [GHC.Internal.Types.Int]) (acc :: GHC.Prim.Int#)\n          = case ys of {\n              [] -> acc;\n              : y ys1 ->\n                case eta6 of\n                { GHC.Internal.Types.I# n1 ->\n                jump go35 ys1 (GHC.Prim.+# acc n1)\n                }\n            }; } in\n      jump go35 xs 0#\nEOF",
+   "invoke": [
+    "{tmp}/A/CmmToAsm.dump-simpl"
+   ],
+   "expect_exit": 1,
+   "expect_text": "GHC.CmmToAsm.go34\tgo35\teta6\t12\tcase eta6 of { GHC.Internal.Types.I# n1 ->",
+   "bug_exit": 0,
+   "bug_absent": "eta6"
+  },
+  {
+   "id": "bang-lazy-check-10",
+   "program": "bang-lazy-check.py",
+   "name": "verdict() found a candidate's signature by matching the module component of the dumped name's qualifier against the source file's stem, so over dumps made with -dsuppress-module-prefixes, whose names carry no qualifier, every top-level candidate read UNVERIFIED as if its name were absent from its module's dump, and two modules sharing a stem, GHC's CmmToAsm.Monad and StgToCmm.Monad, both matched it",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "a candidate right in S/CmmToAsm/Monad.hs (right [] !acc = acc; right (x : _) _ = x), its module's dump D/CmmToAsm/Monad.dump-dmd-signatures listing right: <1L><1L>, and D/StgToCmm/Monad.dump-dmd-signatures listing another module's right: <L><L>, both without module prefixes",
+   "ok": "right arg 2/2 CLEARED from its own module's dump, <1L>, StgToCmm's lazy signature not read",
+   "bug": "UNVERIFIED (module dumped but name absent -- inlined away? ...)",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on agent sa2's stage-2 dumps of GHC's NCG series at 17fa7c837e (2026-11-09; finding 1039 of the investigation): over the -dsuppress-module-prefixes dumps a probe's top-level candidates, regAlloc and cmmTopLiveness arg 1, read UNVERIFIED where the dumps keeping prefixes gave CONFIRMED and CLEARED; getPlatform of CmmToAsm.Monad and of StgToCmm.Monad both matched the stem Monad, the first found taken. No real candidate was top-level there, so no verdict printed was wrong.",
+   "plant_cmd": "mkdir -p S/CmmToAsm D/CmmToAsm D/StgToCmm && printf '{-# LANGUAGE BangPatterns #-}\\nmodule CmmToAsm.Monad where\\n\\nright :: [Int] -> Int -> Int\\nright [] !acc = acc\\nright (x : _) _ = x\\n' > S/CmmToAsm/Monad.hs && printf '\\n==================== Demand signatures ====================\\nright: <1L><1L>\\n\\n\\n' > D/CmmToAsm/Monad.dump-dmd-signatures && printf '\\n==================== Demand signatures ====================\\nright: <L><L>\\n\\n\\n' > D/StgToCmm/Monad.dump-dmd-signatures",
+   "invoke": [
+    "{tmp}/S",
+    "--dumps",
+    "{tmp}/D/**/*.dump-dmd-signatures"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "Monad.hs:5 right arg 2/2",
+    "CLEARED: strict per GHC, arg demand <1L>"
+   ],
+   "expect_absent": [
+    "UNVERIFIED",
+    "<L><L>"
+   ],
+   "bug_exit": 0,
+   "bug_text": "UNVERIFIED (module dumped but name absent"
+  },
+  {
+   "id": "pragma-calls-22",
+   "program": "pragma-calls.py",
+   "name": "--inline counted the IdInfo GHC prints between a binding's signature and its definition as code, so a target named only in a DFun unfolding, `Unf=DFun: \\ -> B.C:C TYPE: Int A.f`, read CALLED in a module whose code calls it nowhere",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "f with INLINE in A.hs; B's dump naming A.f only inside $fCInt's `[GblId[DFunId], Unf=DFun: ...]` block, its code calling B.$fCInt_$cm",
+   "ok": "f `inlined`, exit 0",
+   "bug": "A.hs f CALLED B 1, exit 1",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on agent sa2's stage-2 dumps of GHC's NCG series at 17fa7c837e (2026-11-09; finding 1039 of the investigation), made without -dsuppress-idinfo: takeRegRegMoveInstr read CALLED X86 2, one of the two inside $fInstructionInstr's DFun unfolding, the other the dictionary's method slot, a reference rather than a call, which the verdict counts by design. The docstring asks for -dsuppress-idinfo dumps of the A and B builds and said nothing of --inline's; spec-audit-14 is the same misreading in spec-audit.py.",
+   "plant_cmd": "mkdir -p S D && printf 'module A where\\n\\n{-# INLINE f #-}\\nf :: Int -> Int\\nf x = x + 1\\n' > S/A.hs && printf 'module B where\\n\\nimport A\\n\\nclass C a where\\n  m :: a -> a\\n\\ninstance C Int where\\n  m = f\\n' > S/B.hs && printf 'A.f = \\\\ (x :: Int) -> x\\n' > D/A.dump-simpl && printf '\\n==================== Tidy Core ====================\\nResult size of Tidy Core\\n  = {terms: 4, types: 2}\\n\\n-- RHS size: {terms: 1, types: 0}\\nB.$fCInt [InlPrag=CONLIKE] :: C Int\\n[GblId[DFunId],\\n Unf=DFun: \\\\ -> B.C:C TYPE: Int A.f]\\nB.$fCInt = B.C:C @Int B.$fCInt_$cm\\n\\nB.$fCInt_$cm = \\\\ (x :: Int) -> x\\n' > D/B.dump-simpl",
+   "invoke": [
+    "--inline",
+    "{tmp}/D",
+    "{tmp}/S"
+   ],
+   "expect_exit": 0,
+   "expect_text": "A.hs\tf\tinlined",
+   "expect_absent": "CALLED",
+   "bug_exit": 1,
+   "bug_text": "A.hs\tf\tCALLED B 1"
   }
  ]
 }

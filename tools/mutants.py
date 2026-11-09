@@ -146,6 +146,14 @@ Disassembly of section .text:
 
 MUTANTS = [
     # bang-lazy-check: "inverting the strictness-letter test in verdict()" (2026-08-09)
+    # bang-lazy-check-10: a dump found by the source's stem or by its names'
+    # qualifier, not by the module's path.
+    ('bang-lazy-check same-stem modules told apart by the stem alone', 'bang-lazy-check.py',
+     '    best = max((shared_tail(m, src) for m in dumped), default=0)\n',
+     '    best = max((min(1, shared_tail(m, src)) for m in dumped), default=0)\n', ST),
+    ("bang-lazy-check a signature found by its qualifier's module", 'bang-lazy-check.py',
+     '    quals = [k for k in entry if best and shared_tail(k[0], src) == best]\n',
+     "    quals = [k for k in entry if k[1].rsplit('.', 2)[-2:-1] == [src[-1]]]\n", ST),
     ('bang-lazy-check strictness-letter test in verdict() inverted', 'bang-lazy-check.py',
      "    if b and b[0] in '1SB':\n", "    if not (b and b[0] in '1SB'):\n", ST),
     # bang-lazy-check: "removing 'wild' from the flag condition" -- no 'wild' literal
@@ -168,7 +176,7 @@ MUTANTS = [
      "        return 'unknown', 'rec'\n", "        return 'unknown', 'var'\n", ST),
     # bang-lazy-check: "--dumps glob matching no file ... went red with it reverted"
     ('bang-lazy-check --dumps glob matching nothing accepted silently', 'bang-lazy-check.py',
-     "    if dump_pats and not stems:\n", "    if dump_pats and not stems and False:\n", ST),
+     "    if dump_pats and not dumped:\n", "    if dump_pats and not dumped and False:\n", ST),
     # bang-lazy-check: --allow no longer fails on an unlisted or stale candidate,
     # so the one-listed and stale verdicts of the selftest read 0 (2026-09-13)
     ('bang-lazy-check --allow gate disarmed', 'bang-lazy-check.py',
@@ -412,8 +420,8 @@ MUTANTS = [
     # bang-lazy-check: a same-named binding in another module's dump stands in
     # for the candidate's own (bang-lazy-check-02)
     ('bang-lazy-check verdict from a foreign module of the same name', 'bang-lazy-check.py',
-     "    quals = [q for q in entry if q.rsplit('.', 2)[-2:-1] == [stem]]\n    if not quals:\n",
-     "    quals = [q for q in entry if q.rsplit('.', 2)[-2:-1] == [stem]] or list(entry)\n    if not entry:\n", ST),
+     "    quals = [k for k in entry if best and shared_tail(k[0], src) == best]\n    if not quals:\n",
+     "    quals = [k for k in entry if best and shared_tail(k[0], src) == best] or list(entry)\n    if not entry:\n", ST),
     # bang-lazy-check: a ROOT that is not there is opened as a file, a traceback
     # at 1 (bang-lazy-check-03)
     ('bang-lazy-check missing ROOT no longer blocks', 'bang-lazy-check.py',
@@ -715,6 +723,13 @@ MUTANTS = [
     ('dumps stats file read as a dump', 'dumps.py',
      "            if f.endswith(suffix) or f.endswith(suffix + '.gz'):\n",
      '            if suffix in f:\n', 'cd {dir} && python3 pragma-calls.py --self-test'),
+    # pragma-calls-22: IdInfo counted as code by --inline.
+    ("dumps IdInfo kept in a dump's code", 'dumps.py',
+     "            info = line.startswith('[')\n", '            info = False\n',
+     'cd {dir} && python3 pragma-calls.py --self-test'),
+    ("pragma-calls --inline counting the whole Core", 'pragma-calls.py',
+     '            TOK.findall(dumps.code(txt) if raw else txt))\n',
+     '            TOK.findall(dumps.core(txt) if raw else txt))\n', ST),
     ('pragma-calls cache keying left out of its signature', 'pragma-calls.py',
      '    return TOK.pattern, KEYS, NORMALISED, files\n',
      '    return TOK.pattern, NORMALISED, files\n', ST),
@@ -990,10 +1005,10 @@ MUTANTS = [
     # pragma-calls-05 and -06 and core-diff-04, each watched failing its
     # self-test before it was written down here.
     ('pragma-calls rules section counted as code', 'pragma-calls.py',
-     '            TOK.findall(dumps.core(txt) if raw else txt))\n',
+     '            TOK.findall(dumps.code(txt) if raw else txt))\n',
      '            TOK.findall(txt))\n', ST),
     ('pragma-calls cache of the whole dumps reused for the code alone', 'pragma-calls.py',
-     "    key = sig + ('code',) if raw else sig\n",
+     "    key = sig + ('code without IdInfo',) if raw else sig\n",
      '    key = sig\n', ST),
     ('pragma-calls corrupt cache stops the run', 'pragma-calls.py',
      '    except (OSError, pickle.UnpicklingError, EOFError):\n',
@@ -1181,6 +1196,10 @@ MUTANTS = [
     ('captured-unbox a loop parameter read as captured', 'captured-unbox.py',
      "            if re.search(r\"(?<![\\w$'])\" + re.escape(x) + r\"(?![\\w$'])\", region):\n",
      '            if False:\n', ST),
+    # captured-unbox-01: a case broken after `of` unread.
+    ('captured-unbox a split case unread', 'captured-unbox.py',
+     "        if SPLIT.search(lines[i]) and lines[i + 1].lstrip().startswith('{ '):\n",
+     '        if False:\n', ST),
     # box-audit and loop-reloads, born with the boxing audit (B1, B2): each
     # watched failing its self-test before it was written down here.
     ('box-audit a wrapper not passed over', 'box-audit.py',

@@ -83,6 +83,20 @@ def core(txt):
     return txt.split('\n' + RULES, 1)[0]
 
 
+def code(txt):
+    """A dump's Core without each binding's IdInfo, the `[GblId, ...]` block
+    at column 0 below its signature, its unfolding included, which a dump
+    made without -dsuppress-idinfo prints and which is no code the module
+    runs."""
+    out, info = [], False
+    for line in core(txt).split('\n'):
+        if line and not line[0].isspace():
+            info = line.startswith('[')
+        if not info:
+            out.append(line)
+    return '\n'.join(out)
+
+
 def core_digests(text):
     """(exact, literal-blind) fingerprints of a Core dump's text."""
     exact = TIMESTAMP.sub('', text)
