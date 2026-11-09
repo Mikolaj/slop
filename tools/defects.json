@@ -8835,6 +8835,66 @@
    ],
    "bug_exit": 2,
    "bug_text": "a tree or label is letters, digits, _ and .: '--build'"
+  },
+  {
+   "id": "pragma-census-27",
+   "program": "pragma-census.py",
+   "name": "reasoned() took a reason citing a development version, as on GHC 10.1.20261108, for undated, DATE matching only an ISO date beside the version, though such a version carries the date of its tree",
+   "family": "two-spellings",
+   "fix_rev": "self",
+   "trigger": "an INLINE binding with a class constraint under a comment opening INLINE: and citing GHC 10.1.20261108 with no other date",
+   "ok": "nothing listed, exit 0",
+   "bug": "s1 listed as INLINE -> INLINABLE [class constraint], exit 1",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on GHC's NCG series (2026-11-09, agent al5): every comment there writes its measurement as on GHC 10.1.20261108, so --rule over r13-tip's Liveness.hs listed bindings whose reasons were in the form. DEV, a version whose last component is an eight-digit date, now counts as dated.",
+   "plant_cmd": "mkdir -p S && cat > S/M.hs <<'EOF'\nmodule M where\n\n-- INLINE: measured faster than INLINABLE, on GHC 10.1.20261108.\n{-# INLINE s1 #-}\ns1 :: Num a => T a -> a\ns1 = sumT . id\nEOF",
+   "invoke": [
+    "--rule",
+    "{tmp}/S"
+   ],
+   "expect_exit": 0,
+   "expect_absent": "s1",
+   "bug_exit": 1,
+   "bug_text": "  M.hs:5 s1: INLINE -> INLINABLE [class constraint]"
+  },
+  {
+   "id": "pragma-census-28",
+   "program": "pragma-census.py",
+   "name": "plain_lines() stopped at a blank line between a binding and its haddock, so a reason above a haddock parted from its signature by a blank line was not read, though Haddock attaches the comment across it",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "a No pragma: comment, a haddock, a blank line, then a multi-line signature with a class constraint, as livenessBack's in GHC.CmmToAsm.Reg.Liveness",
+   "ok": "nothing listed, exit 0",
+   "bug": "s2 listed as none -> INLINABLE [class constraint], exit 1",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on GHC's NCG series (2026-11-09, agent al5) at livenessBack. plain_lines now walks up across blank lines where the comment block above them holds a haddock; a plain comment parted by a blank line still belongs to nothing (pragma-census-28-control).",
+   "plant_cmd": "mkdir -p S && cat > S/M.hs <<'EOF'\nmodule M where\n\n-- No pragma: with INLINE, measured no faster, on GHC 9.14.1 (2026-10-11).\n-- | Sums,\n--   going backwards.\n\ns2\n  :: Num a => T a -> a\ns2 = sumT . id\nEOF",
+   "invoke": [
+    "--rule",
+    "{tmp}/S"
+   ],
+   "expect_exit": 0,
+   "expect_absent": "s2",
+   "bug_exit": 1,
+   "bug_text": "  M.hs:7 s2: none -> INLINABLE [class constraint]"
+  },
+  {
+   "id": "pragma-census-28-control",
+   "program": "pragma-census.py",
+   "name": "a plain comment parted from a binding by a blank line, no haddock between, is not the binding's: the reason above it is not read",
+   "kind": "control",
+   "notes": "Added 2026-11-09 with pragma-census-28: the walk across blank lines is for a haddock's block alone.",
+   "plant_cmd": "mkdir -p S && cat > S/M.hs <<'EOF'\nmodule M where\n\n-- No pragma: with INLINE, measured no faster, on GHC 9.14.1 (2026-10-11).\n\ns3\n  :: Num a => T a -> a\ns3 = sumT . id\nEOF",
+   "invoke": [
+    "--rule",
+    "{tmp}/S"
+   ],
+   "expect_exit": 1,
+   "expect_text": "  M.hs:5 s3: none -> INLINABLE [class constraint]"
   }
  ]
 }

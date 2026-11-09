@@ -573,13 +573,29 @@ def want(ty, overloaded_too):
 def plain_lines(lines, i):
     """The plain comment lines directly above line i, above the pragmas and
     the haddock directly above it, those at line i's own indentation:
-    a deeper one ends the body above."""
+    a deeper one ends the body above. Blank lines are walked across where
+    the comment block above them holds a haddock, which Haddock attaches
+    across them, and nowhere else."""
+    def aside(x):
+        return indent(x) == indent(lines[i]) and (
+            x.lstrip().startswith('{-#') or x.lstrip().startswith('--'))
     k = i - 1
-    while k >= 0 and indent(lines[k]) == indent(lines[i]) and (
-            lines[k].lstrip().startswith('{-#')
-            or lines[k].lstrip().startswith('--')):
-        k -= 1
-    block = [x.lstrip() for x in lines[k + 1:i]]
+    while k >= 0:
+        if aside(lines[k]):
+            k -= 1
+            continue
+        if not lines[k].strip():
+            j = k
+            while j >= 0 and not lines[j].strip():
+                j -= 1
+            m = j
+            while m >= 0 and aside(lines[m]):
+                m -= 1
+            if any(x.lstrip().startswith('-- |') for x in lines[m + 1:j + 1]):
+                k = j
+                continue
+        break
+    block = [x.lstrip() for x in lines[k + 1:i] if x.strip()]
     plain, inside = [], False
     for x in block:
         if x.startswith(('-- |', '-- ^')):
@@ -603,6 +619,9 @@ LEAD = re.compile(r'--\s*(INLINE(?: \[~?\d+\])?|INLINABLE|INLINEABLE|NOINLINE'
 CITE = re.compile(r'\b(?:I[123]|F1|A3|S2|W[34])\b|\bsee\b')
 VERSION = re.compile(r'\bGHC (?:\d+\.\d+[\d.]*|HEAD)\b')
 DATE = re.compile(r'\b\d{4}-\d{2}-\d{2}\b')
+# A development version, as 10.1.20261108, carries the date of its tree.
+DEV = re.compile(r'\bGHC (?:HEAD )?\d+\.\d+\.(?:\d+\.)*'
+                 r'(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\b')
 # A pragma's, a lead's or a declaration's spelling as the rule compares it.
 CANON = {'INLINEABLE': 'INLINABLE', 'SPECIALISE': 'INLINABLE',
          'SPECIALIZE': 'INLINABLE', 'No pragma': 'none', 'no pragma': 'none'}
@@ -612,7 +631,8 @@ def reasoned(lines, i, has):
     """Whether the plain comment above line i gives the reason P asks of a
     binding carrying has: its first line opens with that pragma, or with
     No pragma for none, and a colon, and it cites one of the checks, a GHC
-    version with a date, or, saying see, another comment."""
+    version with a date, a development version's own counting, or, saying
+    see, another comment."""
     plain = plain_lines(lines, i)
     m = LEAD.match(plain[0]) if plain else None
     if not m:
@@ -620,7 +640,8 @@ def reasoned(lines, i, has):
     lead = re.sub(r' \[.*', '', m.group(1))
     lead = CANON.get(lead, lead)
     text = ' '.join(plain)
-    cited = CITE.search(text) or (VERSION.search(text) and DATE.search(text))
+    cited = (CITE.search(text) or DEV.search(text)
+             or (VERSION.search(text) and DATE.search(text)))
     return lead == has and bool(cited)
 
 
@@ -1881,6 +1902,18 @@ def self_test_rule():
            '-- No pragma: I3, measured no faster with one.\n'
            's7 :: Num a => T a -> a\n'
            's7 = sumT\n'
+           # A development version's date (pragma-census-27), and a haddock
+           # parted from its signature by a blank line (pragma-census-28).
+           '-- INLINE: measured faster than INLINABLE, on GHC 10.1.20261108.\n'
+           '{-# INLINE s8 #-}\n'
+           's8 :: Num a => T a -> a\n'
+           's8 = sumT . id\n'
+           '-- No pragma: measured no faster with one, on GHC 9.14.1 (2026-10-11).\n'
+           '-- | Doc, parted from its signature by a blank line.\n'
+           '\n'
+           's9\n'
+           '  :: Num a => T a -> a\n'
+           's9 = sumT . id\n'
            'sf\n'
            '  :: (a -> b) -> T a -> T b\n'
            'sf = mapT\n'

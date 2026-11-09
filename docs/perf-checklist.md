@@ -349,17 +349,18 @@ not for orthotope's fill, which had no pragma at all (S1's variant C).
   carries, or `No pragma`, and a colon, as in `-- INLINE:`, and which cites
   the measurement or reading behind it: the check that took it, one of I1, I2,
   I3, F1, A3, S2, W3 and W4, a GHC version, HEAD included, with the date
-  it was taken, or `see` and the comment that does; a commit message does
-  not count. A declaration does it in bulk: a comment saying
-  `INLINE throughout`, `INLINABLE throughout` or `No pragma throughout`,
-  with its reason, covers each binding carrying that pragma, or none,
-  in the module whose header holds it or among the methods of the instance
-  or class it stands directly above, where it overrides the module's. After
-  a `but` it names every binding there that carries another pragma,
-  `INLINE throughout but rotate and window:`, and their reasons go in it too:
-  a binding it names is held to this rule, and to the declaration's citation
-  or its own comment. `INLINE throughout` suits a layer whose callers
-  are `INLINABLE`, as I3 allows. I4 checks a tree against this.
+  it was taken, a development version's own date counting (`GHC 10.1.20261108`),
+  or `see` and the comment that does; a commit message does not count.
+  A declaration does it in bulk: a comment saying `INLINE throughout`,
+  `INLINABLE throughout` or `No pragma throughout`, with its reason, covers each
+  binding carrying that pragma, or none, in the module whose header holds
+  it or among the methods of the instance or class it stands directly above,
+  where it overrides the module's. After a `but` it names every binding there
+  that carries another pragma, `INLINE throughout but rotate and window:`,
+  and their reasons go in it too: a binding it names is held to this rule,
+  and to the declaration's citation or its own comment. `INLINE throughout`
+  suits a layer whose callers are `INLINABLE`, as I3 allows. I4 checks a tree
+  against this.
 - **Where their speed is tradable,** a pragma is a trade like any other and pays
   for itself or goes, as in the half above. Opting a module out
   of `-fexpose-overloaded-unfoldings` is itself such a trade: compile time saved
