@@ -87,7 +87,7 @@ STEPS = [
     ('ticky-diff self-test', ['python3', '{root}/ticky-diff.py', '--self-test']),
     ('workaround-cites self-test', ['python3', '{root}/workaround-cites.py', '--self-test']),
     ('pyflakes', ['bash', '-c',
-                  'cd "{root}" && { python3 -m pyflakes --version >/dev/null 2>&1 || { echo "python3 -m pyflakes --version failed, so tools/*.py, tools/NCG-scale/*.py and tools/NCG-battery/*.py went unlinted"; exit 1; }; } && python3 -m pyflakes *.py NCG-scale/*.py NCG-battery/*.py']),
+                  'cd "{root}" && { python3 -m pyflakes --version >/dev/null 2>&1 || { echo "python3 -m pyflakes --version failed, so tools/*.py, tools/NCG-scale/*.py, tools/NCG-battery/*.py and tools/NCG-fuzz/*.py went unlinted"; exit 1; }; } && python3 -m pyflakes *.py NCG-scale/*.py NCG-battery/*.py NCG-fuzz/*.py']),
     ('shellcheck', ['bash', '-c',
                     'cd "{root}/.." && { command -v shellcheck >/dev/null || { echo "shellcheck is not on PATH (command -v shellcheck finds nothing), so the shell scripts went unlinted"; exit 1; }; } && files=$(git ls-files "*.sh") && if [ -z "$files" ]; then echo "no tracked shell script; nothing linted"; else shellcheck -S warning -f gcc $files; fi']),
     ('doc citations',          ['bash', '-c', DOCS % 'check-plan-citations.py']),

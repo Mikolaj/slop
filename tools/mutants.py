@@ -88,6 +88,20 @@ def offsets_listing(name, text, want):
                          name + '\n' + text, want]
 
 
+# checks.py's pyflakes step as check-all runs it, over the copy's tools: the
+# judge of a module the step must reach, handed one in a directory of tools.
+PYFLAKES_STEP = r'''
+import runpy, subprocess, sys
+root = sys.argv[1]
+argv = {s[0]: s[1] for s in runpy.run_path(root + '/checks.py')['STEPS']}['pyflakes']
+sys.exit(subprocess.run([a.replace('{root}', root) for a in argv]).returncode)
+'''
+
+
+def pyflakes_step(path):
+    return ['python3', '-c', PYFLAKES_STEP, os.path.dirname(os.path.dirname(path))]
+
+
 # The ninth saved site, `run33-gheadexit` from 0x4a52b6 to 0x4a52ff: a `jmp
 # stg_gc_noregs`, the `nopl` pad after it and the table word `78 f4`, a `js
 # -12` back to the jmp itself, which the flow test alone refuses.
@@ -2864,6 +2878,42 @@ MUTANTS = [
     ('NCG-battery runreport falls left out', 'NCG-battery/runreport.py',
      'reverse=True) + sorted(r for r in m if r[0] < 0)\n',
      'reverse=True)\n', ST),
+    # The utf8 and fuzz parts' results required of a measured step and
+    # reported (2026-11-09, NCG-battery-13 and NCG-battery-14): each watched
+    # failing its self-test on the expectation it breaks.
+    ('NCG-battery rebuild utf8 table not required', 'NCG-battery/rebuild.py',
+     "                                   f'utf8-{label}.tsv', f'fuzz-{label}.txt')\n",
+     "                                   f'fuzz-{label}.txt')\n", ST),
+    ('NCG-battery rebuild fuzz report not required', 'NCG-battery/rebuild.py',
+     "                                   f'utf8-{label}.tsv', f'fuzz-{label}.txt')\n",
+     "                                   f'utf8-{label}.tsv')\n", ST),
+    ('NCG-battery runreport utf8 left out', 'NCG-battery/runreport.py',
+     "                lambda: tix(outdir, a, b), lambda: tix(outdir, a, b, 'utf8 Text scan', 'utf8'),\n",
+     "                lambda: tix(outdir, a, b),\n", ST),
+    ("NCG-battery runreport utf8 read from the tickets' tables", 'NCG-battery/runreport.py',
+     "lambda: tix(outdir, a, b, 'utf8 Text scan', 'utf8')",
+     "lambda: tix(outdir, a, b, 'utf8 Text scan', 'tix')", ST),
+    ('NCG-battery runreport fuzz left out', 'NCG-battery/runreport.py',
+     '                lambda: fuzz(outdir, a, b), lambda: builds(outdir, a, b)):',
+     '                lambda: builds(outdir, a, b)):', ST),
+    ('NCG-battery runreport fuzz one lane read', 'NCG-battery/runreport.py',
+     "'result-*.txt')))", "'result-0.txt')))", ST),
+    ('NCG-battery runreport fuzz missing results unnamed', 'NCG-battery/runreport.py',
+     "        if not files:\n            out.append(f'  {lab}: FAIL, no results in {d}')\n"
+     "            continue\n", '', ST),
+    ('NCG-battery runreport fuzz failing seed read as ok', 'NCG-battery/runreport.py',
+     "                        if f[1] != 'ok':\n", '                        if False:\n', ST),
+    ('NCG-battery runreport fuzz seeds not run unread', 'NCG-battery/runreport.py',
+     '        short = want - ran\n', '        short = set()\n', ST),
+    ('NCG-battery runreport fuzz short part passed', 'NCG-battery/runreport.py',
+     '{"FAIL" if failing or short else "pass"}', '{"FAIL" if failing else "pass"}', ST),
+    ('NCG-battery runreport fuzz failing part passed', 'NCG-battery/runreport.py',
+     '{"FAIL" if failing or short else "pass"}', '{"FAIL" if short else "pass"}', ST),
+    ('NCG-battery runreport fuzz failing seeds unnamed', 'NCG-battery/runreport.py',
+     "        line += f': {spans(failing)}' if failing else ''\n", '', ST),
+    ("NCG-battery runreport fuzz run.py's count left out", 'NCG-battery/runreport.py',
+     "            out += ['    ' + x for x in text.rstrip('\\n').split('\\n')[1:]]\n",
+     '            pass\n', ST),
     ('NCG-battery a2tcmp allocation read as instructions', 'NCG-battery/a2tcmp.py',
      "                v = f[column] if column < len(f) else '-'\n",
      '                v = f[1]\n', ST),
@@ -2934,6 +2984,11 @@ MUTANTS = [
     ('NCG-fuzz --skip ignored', 'NCG-fuzz/run.py',
      '        if seed in skip:\n',
      '        if False:\n', ST),
+    # checks.py's pyflakes step reaching NCG-fuzz (2026-11-09): watched
+    # surviving the step before NCG-fuzz/*.py joined it, and caught by it after.
+    ('NCG-fuzz unused import unlinted', 'NCG-fuzz/run.py',
+     'import collections\nimport os\n', 'import collections\nimport glob\nimport os\n',
+     pyflakes_step),
     # ctx-size (2026-11-07): each watched failing its self-test before it was
     # written down here.
     ('ctx-size cache read left out of the context', 'ctx-size.py',

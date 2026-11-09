@@ -40,8 +40,9 @@ no one commit explains. A build and a battery are each killed after TIMEOUT
 seconds, which fails the step. Run again, it takes up from the steps not
 measured, each begun again from nothing: a step counts as measured when its
 LABEL.done stands and every record of 2026-11-07 exists (ghcb, pkgb and tix,
-and A2T's table with its bytes allocated), so steps measured before then are
-measured again; and a label whose commit is not the one steps.txt names is
+and A2T's table with its bytes allocated) and of 2026-11-09 (the utf8 part's
+table and the fuzz part's report), so steps measured before then are measured
+again; and a label whose commit is not the one steps.txt names is
 measured again, its old results deleted. It refuses a base other than
 steps.txt's, or a run while another holds the lock; a first run refuses if any
 step's results exist. --pair builds and measures the base and the tip alone,
@@ -240,10 +241,12 @@ def prune(work, label):
 
 def unrecorded(work, label):
     """The records a measured step of this label lacks: those added on
-    2026-11-07, which steps measured before then lack."""
+    2026-11-07, and the utf8 and fuzz parts' of 2026-11-09, which steps
+    measured before then lack."""
     out = f'{work}/battery'
-    miss = [f'{out}/{s}-{label}.tsv' for s in ('ghcb', 'pkgb', 'tix')
-            if not os.path.exists(f'{out}/{s}-{label}.tsv')]
+    miss = [f'{out}/{s}' for s in (f'ghcb-{label}.tsv', f'pkgb-{label}.tsv', f'tix-{label}.tsv',
+                                   f'utf8-{label}.tsv', f'fuzz-{label}.txt')
+            if not os.path.exists(f'{out}/{s}')]
     a2t = f'{out}/a2t-{label}.tsv'
     with open(a2t) if os.path.exists(a2t) else open(os.devnull) as fh:
         first = fh.readline()
@@ -552,6 +555,7 @@ put(f'{v}/ctr/cabal.project.{c}'); put(f'{v}/cb-{c}.log')
 put(f'{v}/adist-{c}/x'); put(f'{v}/a2t/cabal.project.{c}'); put(f'{v}/ab-{c}.log')
 put(f'{b}/perf-{label}.tsv'); put(f'{b}/p{label}/a.s'); put(f'{b}/comp2-{label}.runs')
 put(f'{b}/tix-{label}.tsv'); open(f'{b}/a2t-{label}.tsv', 'w').write('c\t1.0\t0\t2.0\n')
+put(f'{b}/utf8-{label}.tsv'); put(f'{b}/fuzz-{label}/result-0.txt'); put(f'{b}/fuzz-{label}.txt')
 os.makedirs(f'{v}/wstats-cdist-{c}', exist_ok=True)
 open(f'{v}/wstats-cdist-{c}/1.args', 'w').write('/x\n--make\n-this-unit-id\nu-0\n-no-link\n')
 open(f'{v}/wstats-cdist-{c}/1.csv', 'w').write('77,,instructions:u,9,100.00,,\n')
@@ -736,13 +740,15 @@ def self_test():
             if p.returncode != 2 or lines or 'lock' not in p.stdout:
                 bad.append(f'the lock: {p.returncode} {p.stdout[-200:]}')
 
-        # A measured step lacking a record of 2026-11-07 is measured again,
-        # and so is one whose commit is another now.
+        # A measured step lacking a record of 2026-11-07 or 2026-11-09 is
+        # measured again, and so is one whose commit is another now.
+        os.unlink(f'{w}/battery/utf8-fr01.tsv')
         os.unlink(f'{w}/battery/tix-fr02.tsv')
         with open(f'{w}/battery/a2t-fr03.tsv', 'w') as fh:
             fh.write('c\t1.0\t0\n')
+        os.unlink(f'{w}/battery/fuzz-fr04.txt')
         p, lines = go()
-        if p.returncode != 0 or measured(lines) != ['fr02', 'fr03'] or 'measured without' not in p.stdout:
+        if p.returncode != 0 or measured(lines) != all_labels[1:] or 'measured without' not in p.stdout:
             bad.append(f'steps lacking records: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
         with open(f'{logs}/steps.txt') as fh:
             st = fh.read()

@@ -8837,6 +8837,56 @@
    "bug_text": "a tree or label is letters, digits, _ and .: '--build'"
   },
   {
+   "id": "NCG-battery-13",
+   "program": "NCG-battery/runreport.py",
+   "name": "runreport.py compared no utf8 tables and read no fuzz results, so the report rebuild.py ends with omitted both parts, a failing or short random test among them",
+   "family": "other:measured-less-than-it-said",
+   "fix_rev": "self",
+   "trigger": "two labels' battery/utf8-LABEL.tsv and battery/fuzz-LABEL/result-*.txt, B's W2 -O2 1% above A's and B's one seed failing",
+   "ok": "a utf8 section listing W2 -O2 +1.00%, and a fuzz section with each label FAIL, B's naming seed 1000000 failing, both naming the seeds not run",
+   "bug": "neither section: the tickets' section followed by the builds'",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "2026-11-09: 7b00076 added the parts to battery.py and left the report as it was; rebuild.py's last report, fr53 against fr00, dates from 2026-11-08, before the parts.",
+   "plant_cmd": "mkdir -p battery/fuzz-A battery/fuzz-B && printf 'W2 -O2\\tper-element\\t84.000\\n' > battery/utf8-A.tsv && printf 'W2 -O2\\tper-element\\t84.840\\n' > battery/utf8-B.tsv && printf '1000000 ok (20 runs, 3s)\\n' > battery/fuzz-A/result-0.txt && printf '1000000 FAIL t-O2 run-a 7 (20 runs, 3s)\\n' > battery/fuzz-B/result-0.txt",
+   "invoke": [
+    "--work",
+    "{tmp}",
+    "A",
+    "B",
+    "{tmp}/r.txt"
+   ],
+   "probe_cmd": "cat r.txt",
+   "expect_exit": 0,
+   "expect_text": [
+    "utf8 Text scan\n  B against A: 1 rows in both\n  rows that differ: 1\n    W2 -O2: per-element 84.000 -> 84.840 +1.00%",
+    "  A: FAIL, 1 seeds run, 1 ok, 0 failing; not run: 1000001-",
+    "  B: FAIL, 1 seeds run, 0 ok, 1 failing: 1000000; not run: 1000001-",
+    "      1 run"
+   ],
+   "bug_exit": 0,
+   "bug_absent": [
+    "utf8 Text scan",
+    "failing: 1000000"
+   ]
+  },
+  {
+   "id": "NCG-battery-14",
+   "program": "NCG-battery/rebuild.py",
+   "name": "rebuild.py counted a step as measured without the utf8 and fuzz parts' results, so a run taking up the chain kept the base fr00, measured on 2026-11-08 before the parts existed, and the tip's report against it could compare no utf8 table",
+   "family": "unverified-state",
+   "fix_rev": "self",
+   "trigger": "a label whose LABEL.done stands and whose battery/utf8-LABEL.tsv or battery/fuzz-LABEL.txt is absent",
+   "ok": "'LABEL measured without N records, the first .../utf8-LABEL.tsv: measured again', the step begun again from nothing",
+   "bug": "the step counted as measured and passed over: the self-test's planted chain measured fr02, fr03 and fr04 again and not fr01, which lacked its utf8 table",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "2026-11-09: of steps.txt's labels only fr00 keeps its commit in for-review-master's chain at f27008626e, so the base is the one label a full rebuild would have kept, lacking both parts' results. Measuring the parts alone was weighed and not built: prune() deletes ghc-LABEL, whose _build/stage1/bin holds both parts' compiler, so the parts alone would still need the step's build.",
+   "no_audit": "other:the-planted-chain-lives-in-the-tools-own-self-test"
+  },
+  {
    "id": "pragma-census-27",
    "program": "pragma-census.py",
    "name": "reasoned() took a reason citing a development version, as on GHC 10.1.20261108, for undated, DATE matching only an ISO date beside the version, though such a version carries the date of its tree",
