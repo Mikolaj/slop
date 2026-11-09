@@ -1101,6 +1101,19 @@ MUTANTS = [
     ('spec-audit nested parentheses in a binder type unread', 'spec-audit.py',
      "                depth += 1 if p.group() == '(' else -1\n",
      "                depth = 1 if p.group() == '(' else 0\n", ST),
+    # spec-audit-13 and -14: a pragma before a dictionary's type stops the
+    # signature's reading; IdInfo read as code, its calls and its binders.
+    ("spec-audit IdInfo pragma before a signature's type unread", 'spec-audit.py',
+     '                 r"(?:\\s+\\[(?:[^][]|\\[[^][]*\\])*\\])?'
+     '(?:\\s+::\\s+(.*))?$")\n',
+     '                 r"(?:\\s+::\\s+(.*))?$")\n', ST),
+    ('spec-audit IdInfo read as code', 'spec-audit.py',
+     "            info = line.startswith('[')\n",
+     '            info = False\n', ST),
+    ("spec-audit IdInfo's calls counted", 'spec-audit.py',
+     '        if info:\n            continue\n', '', ST),
+    ("spec-audit unfolding template's binders listed", 'spec-audit.py',
+     '        if in_info[i]:\n            continue\n', '', ST),
     # pragma-calls --inline (2026-10-07): each watched failing its self-test
     # before it was written down here.
     ('pragma-calls --inline reads indented pragmas', 'pragma-calls.py',

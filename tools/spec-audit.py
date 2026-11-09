@@ -9,7 +9,10 @@ DUMPS is a dump tree, a build directory or a `-dumpdir` tree, whose modules
 were compiled with `--ghc-options="-ddump-simpl -ddump-to-file
 -dsuppress-uniques"` (tools/core-diff.py says how to keep two builds apart).
 Without `-dsuppress-all` a callee keeps its module, which is what tells a
-library's function from the client's own. Two lists are printed:
+library's function from the client's own. The IdInfo these flags print is
+read past: a binding's pragma, `$fFRFreeRegs3 [InlPrag=CONLIKE]`, to its
+type, and the block below its signature, an unfolding being no code the
+module runs. Two lists are printed:
 
 - calls that hand a function an instance dictionary of a class whose methods
   do the work --- `Vector`, `Unbox`, `Storable`, `Prim`, `Num` and the other
@@ -93,8 +96,10 @@ OTHER_DICT = re.compile(QUAL + r"\$[fd](?:(?!\$c)[\w$])*"
                         r"(?![\w$'!#%&*+./<=>?\\^|~:-])")
 LAMBDA_DICT = re.compile(r"\$d(?!IP)[A-Za-z0-9_]+|irred[0-9]*")
 # A top-level `$f` binding's name at column 0, and its type where the
-# signature shares the line.
-SIG = re.compile(r"(" + QUAL + r"\$f[\w$']*)(?:\s+::\s+(.*))?$")
+# signature shares the line; between them, its IdInfo pragma,
+# `[InlPrag=CONLIKE]` or `[InlPrag=NOINLINE[0]]` (spec-audit-13).
+SIG = re.compile(r"(" + QUAL + r"\$f[\w$']*)"
+                 r"(?:\s+\[(?:[^][]|\[[^][]*\])*\])?(?:\s+::\s+(.*))?$")
 FORALL = dumps.FORALL
 HEAD = re.compile(r"[(\s]*" + QUAL + r"([\w']+#*)")
 # A lambda's binder: its parentheses, or a bare name.
@@ -210,12 +215,19 @@ def audit(txt, ignore, resolve=lambda module: None):
     first_call, first_lam = {}, {}
     lines = txt.split('\n')
     sigs = signatures(lines)
-    owner, cur = [], None
+    owner, cur, info, in_info = [], None, False, []
     for i, line in enumerate(lines):
-        if (line and not line[0].isspace() and not line.startswith(
-                ('Rec {', 'end Rec', '--', '====', 'Result size'))):
-            cur = line.split()[0]
+        # A binding's IdInfo, `[GblId, ...]` at column 0 below its
+        # signature, its unfolding included, is no code (spec-audit-14).
+        if line and not line[0].isspace():
+            info = line.startswith('[')
+            if not info and not line.startswith(
+                    ('Rec {', 'end Rec', '--', '====', 'Result size')):
+                cur = line.split()[0]
         owner.append(cur)
+        in_info.append(info)
+        if info:
+            continue
         for m in ANY_DICT.finditer(line):
             listed = DICT.fullmatch(m.group(0))
             qual = re.search(QUAL + '$', line[:m.start()]).group()
@@ -253,6 +265,8 @@ def audit(txt, ignore, resolve=lambda module: None):
         starts.append(starts[-1] + len(line) + 1)
     for m in re.finditer(r'\\ ', txt):
         i = bisect.bisect_right(starts, m.start()) - 1
+        if in_info[i]:
+            continue
         for a, ty in binders(txt, m.end()):
             if not LAMBDA_DICT.fullmatch(a):
                 continue
@@ -320,7 +334,10 @@ def self_test():
     dictionary of a class extending a listed one's, a specialised dictionary,
     and a dictionary of an unlisted class the dump types, on its own line after
     a type application, beside a binding floated out of it and a library's
-    `Show` dictionary; a library dump with its own original; a component whose
+    `Show` dictionary; then IdInfo: two dictionaries of that class typed behind
+    their pragmas, on the signature's line and below it, a DFun unfolding
+    storing a superclass dictionary and a binding's unfolding taking one;
+    a library dump with its own original; a component whose
     floated binding shares its name with another component's dictionary; and a
     client dump with nothing to find."""
     import tempfile
@@ -388,7 +405,21 @@ def self_test():
         '              x)\n'
         '      of\n      { __DEFAULT -> x }\n\n'
         'flo = \\ (x :: Int) -> Lib.g Client.$fFRT1 x\n\n'
-        'shw = \\ (x :: Int) -> Lib.g GHC.Show.$fShowInt x\n')
+        'shw = \\ (x :: Int) -> Lib.g GHC.Show.$fShowInt x\n'
+        '\nClient.$fFRU [InlPrag=CONLIKE]\n  :: FR U\n'
+        '[GblId[DFunId],\n Unf=DFun: \\ ->\n'
+        '       Client.C:FR TYPE: U\n'
+        '                   GHC.Classes.$fEqU]\n'
+        'Client.$fFRU = Client.C:FR @U GHC.Classes.$fEqU\n\n'
+        'Client.$fFRV [InlPrag=CONLIKE] :: FR V\n[GblId[DFunId]]\n'
+        'Client.$fFRV = Client.C:FR @V\n\n'
+        'fre = \\ (u :: U) -> Lib.free @U Client.$fFRU '
+        '(Lib.free @V Client.$fFRV u)\n\n'
+        'inl [InlPrag=NOINLINE[0]]\n  :: forall a. Eq a => a -> a\n'
+        '[GblId,\n Arity=2,\n Unf=Unf{Src=StableSystem,\n'
+        '         Tmpl= \\ (@a) ($dEq [Occ=Once1] :: Eq a) (y :: a) ->\n'
+        '                 Lib.k @a $dEq y}]\n'
+        'inl = \\ (@a) ($dEq :: Eq a) (y :: a) -> Lib.k @a $dEq y\n')
     lib = head + ('Lib.h = \\ (@v) ($dUnbox :: Unbox v) -> '
                   'Lib.g @v $dUnbox\n\n'
                   'Lib.$fNumT3\n  :: Int\nLib.$fNumT3 = GHC.Types.I# 3#\n\n'
@@ -427,6 +458,8 @@ def self_test():
                 '  src/Client  Lib.$windex  $fStorableDouble: 1, line 37',
                 '  src/Client  Lib.$wscalar  $fUnboxDouble: 1, line 6',
                 '  src/Client  Lib.alloc  $fFRT: 1, line 95',
+                '  src/Client  Lib.free  $fFRU: 1, line 116',
+                '  src/Client  Lib.free  $fFRV: 1, line 116',
                 '  src/Client  Lib.go  $fNumScalarDouble: 1, line 81',
                 '  src/Client  Lib.k  $fOrdDouble: 1, line 14',
                 '  src/Client  Lib.peek  $fStorableE: 1, line 49',
@@ -434,9 +467,10 @@ def self_test():
                 '== bindings taking a dictionary '
                 '(module, binding, argument: count, first line)',
                 '  src/Client  fam  irred :: VecElem v Double: 1, line 24',
+                '  src/Client  inl  $dEq :: Eq a: 1, line 125',
                 '  src/Client  multi  $dEq :: Eq a: 1, line 70',
                 '  src/Client  poly  $dNum :: Num a: 1, line 22']
-        if got != want or found != 14 or read != 1:
+        if got != want or found != 17 or read != 1:
             bad.append(f'client report ({found} found, {read} read):\n  '
                        + '\n  '.join(got))
         got, found, _ = report(os.path.join(td, 'C'), 'Comp', [])

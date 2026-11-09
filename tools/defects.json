@@ -8795,6 +8795,65 @@
    "bug_absent": "$fFRFreeRegs3"
   },
   {
+   "id": "spec-audit-13",
+   "program": "spec-audit.py",
+   "name": "a `$f` binding's signature printed with its IdInfo, `$fFRFreeRegs3 [InlPrag=CONLIKE]` over `:: FR X86_64.FreeRegs`, was not read, the bracketed pragma standing between the name and the `::`, so a dictionary of a class outside the listed ones went untyped and every call handing it over was passed over",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "FreeRegs' dump printing GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3 [InlPrag=CONLIKE] over :: FR X86_64.FreeRegs, and X86's GHC.CmmToAsm.X86.$fInstructionInstr [InlPrag=CONLIKE] over :: Instruction X86.Instr; Linear handing both to joinToTargets2, and $fFRFreeRegs3 to $wallFreeRegs, each dictionary on its own line after type applications",
+   "ok": "joinToTargets2 $fFRFreeRegs3, joinToTargets2 $fInstructionInstr and $wallFreeRegs $fFRFreeRegs3 reported, exit 1",
+   "bug": "nothing reported, exit 0",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on agent s2p's stage-2 dumps of GHC's NCG series at 17fa7c837e (2026-11-09), made without -dsuppress-idinfo as the docstring's recipe makes them: no FR or Instruction dictionary call was listed in Linear. Every DFunId prints so, and other bindings carry [InlPrag=[2]], [InlPrag=NOINLINE[0]] or [Occ=LoopBreaker] there. Case spec-audit-12's fixture came from -dsuppress-idinfo dumps, which print no pragma. The fixture is cut from that tree's Linear, FreeRegs and X86 dumps, the DFun unfoldings and the surrounding code shortened.",
+   "plant_cmd": "mkdir -p A/compiler/GHC/CmmToAsm/Reg/Linear && cat > A/compiler/GHC/CmmToAsm/Reg/Linear/FreeRegs.dump-simpl <<'EOF'\n-- RHS size: {terms: 7, types: 1, coercions: 16, joins: 0/0}\nGHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3 [InlPrag=CONLIKE]\n  :: FR X86_64.FreeRegs\n[GblId[DFunId],\n Unf=DFun: \\ ->\n       GHC.CmmToAsm.Reg.Linear.FreeRegs.C:FR TYPE: X86_64.FreeRegs\n                                             GHC.CmmToAsm.Reg.Linear.X86_64.$fShowFreeRegs\n                                             X86_64.getFreeRegs\n                                             X86_64.initFreeRegs\n                                             GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3_$cfrClobberRegs]\nGHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3\n  = GHC.CmmToAsm.Reg.Linear.FreeRegs.C:FR\n      @X86_64.FreeRegs\n      GHC.CmmToAsm.Reg.Linear.X86_64.$fShowFreeRegs\n      X86_64.getFreeRegs\n      X86_64.initFreeRegs\n      GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3_$cfrClobberRegs\nEOF\ncat > A/compiler/GHC/CmmToAsm/X86.dump-simpl <<'EOF'\n-- RHS size: {terms: 19, types: 1, coercions: 8, joins: 0/0}\nGHC.CmmToAsm.X86.$fInstructionInstr [InlPrag=CONLIKE]\n  :: Instruction X86.Instr\n[GblId[DFunId],\n Unf=DFun: \\ ->\n       GHC.CmmToAsm.Instr.C:Instruction TYPE: X86.Instr\n                                        X86.regUsageOfInstr\n                                        GHC.CmmToAsm.X86.$fInstructionInstr_$cmkComment]\nGHC.CmmToAsm.X86.$fInstructionInstr\n  = GHC.CmmToAsm.Instr.C:Instruction\n      @X86.Instr\n      X86.regUsageOfInstr\n      GHC.CmmToAsm.X86.$fInstructionInstr_$cmkComment\nEOF\ncat > A/compiler/GHC/CmmToAsm/Reg/Linear.dump-simpl <<'EOF'\nlvl152\n  = \\ (vr :: VirtualReg)\n      (f :: RealReg -> (RealReg, RegClass))\n      (arch :: Arch) ->\n      $wlvl2\n        vr\n        (\\ (x :: X86_64.FreeRegs) ->\n           case map\n                  @RealReg\n                  @(RealReg, RegClass)\n                  f\n                  (GHC.CmmToAsm.Reg.Linear.FreeRegs.$wallFreeRegs\n                     @X86_64.FreeRegs\n                     GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3\n                     arch\n                     x)\n           of\n           { __DEFAULT -> x })\n\ngo6\n  = \\ (eta2 :: BlockMap RA_State) (k1 :: Word64) ->\n      join {\n        $j7\n          :: GHC.CmmToAsm.Reg.Linear.State.RA_Result\n               X86_64.FreeRegs\n               ([X86.Instr],\n                [NatBasicBlock\n                   X86.Instr])\n        [LclId[JoinId(0)(Nothing)]]\n        $j7\n          = case GHC.CmmToAsm.Reg.Linear.JoinToTargets.joinToTargets2\n                   @X86_64.FreeRegs\n                   @X86.Instr\n                   GHC.CmmToAsm.Reg.Linear.FreeRegs.$fFRFreeRegs3\n                   GHC.CmmToAsm.X86.$fInstructionInstr\n                   eta2\n                   (GHC.Internal.Types.[]\n                      @(NatBasicBlock\n                          X86.Instr))\n                   (k1\n                    `cast` (Sym GHC.Cmm.Dataflow.Label.N:Label\n                            :: Word64\n                               ~R# Label))\n            of\n            { __DEFAULT -> k1 } } in\n      jump $j7\nEOF",
+   "invoke": [
+    "{tmp}/A"
+   ],
+   "expect_exit": 1,
+   "expect_text": [
+    "compiler/GHC/CmmToAsm/Reg/Linear  GHC.CmmToAsm.Reg.Linear.JoinToTargets.joinToTargets2  $fFRFreeRegs3: 1",
+    "compiler/GHC/CmmToAsm/Reg/Linear  GHC.CmmToAsm.Reg.Linear.JoinToTargets.joinToTargets2  $fInstructionInstr: 1",
+    "compiler/GHC/CmmToAsm/Reg/Linear  GHC.CmmToAsm.Reg.Linear.FreeRegs.$wallFreeRegs  $fFRFreeRegs3: 1"
+   ],
+   "bug_exit": 0,
+   "bug_absent": [
+    "$fFRFreeRegs3",
+    "$fInstructionInstr"
+   ]
+  },
+  {
+   "id": "spec-audit-14",
+   "program": "spec-audit.py",
+   "name": "the IdInfo GHC prints between a binding's signature and its definition was read as code: its opening `[GblId,` was taken for a binding's name, an unfolding template's dictionary binder listed under it, and a DFun unfolding's superclass dictionary, `C:Ord TYPE: VLoc` over `$fEqVLoc`, counted as a call whose callee is the type",
+   "family": "scan-for-parse",
+   "fix_rev": "self",
+   "trigger": "regAlloc2 [InlPrag=NOINLINE[0]], its [GblId, ... Tmpl= \\ (@instr) (@statics) ($dInstruction [Occ=Once1] :: Instruction instr) ...] block at column 0 before its definition; $fOrdVLoc [InlPrag=CONLIKE], its Unf=DFun: \\ -> C:Ord TYPE: VLoc with $fEqVLoc on the next line",
+   "ok": "regAlloc2 $dInstruction listed once, from its definition; no binding named [GblId, and no call reported",
+   "bug": "[GblId,  $dInstruction :: Instruction instr: 1 beside regAlloc2's own, and VLoc  $fEqVLoc: 1",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on agent s2p's stage-2 dumps of GHC's NCG series at 17fa7c837e (2026-11-09), made without -dsuppress-idinfo as the docstring's recipe makes them: over tip-q's Reg/Linear modules, three bindings named [GblId, and three calls handing Base's own Eq dictionaries to the types Loc, VLoc and ReadingOrWriting. An unfolding is no code the module runs, as the rules section is not (spec-audit-11). The fixture is cut from that tree's Linear and Base dumps, regAlloc2's arguments and strictness signature shortened.",
+   "plant_cmd": "mkdir -p A/compiler/GHC/CmmToAsm/Reg/Linear && cat > A/compiler/GHC/CmmToAsm/Reg/Linear/Base.dump-simpl <<'EOF'\n-- RHS size: {terms: 9, types: 1, coercions: 0, joins: 0/0}\nGHC.CmmToAsm.Reg.Linear.Base.$fOrdVLoc [InlPrag=CONLIKE]\n  :: Ord VLoc\n[GblId[DFunId],\n Unf=DFun: \\ ->\n       GHC.Internal.Classes.C:Ord TYPE: VLoc\n                                  GHC.CmmToAsm.Reg.Linear.Base.$fEqVLoc\n                                  GHC.CmmToAsm.Reg.Linear.Base.$fOrdVLoc_$ccompare\n                                  GHC.CmmToAsm.Reg.Linear.Base.$fOrdVLoc_$cmin]\nGHC.CmmToAsm.Reg.Linear.Base.$fOrdVLoc\n  = GHC.Internal.Classes.C:Ord\n      @VLoc\n      GHC.CmmToAsm.Reg.Linear.Base.$fEqVLoc\n      GHC.CmmToAsm.Reg.Linear.Base.$fOrdVLoc_$ccompare\n      GHC.CmmToAsm.Reg.Linear.Base.$fOrdVLoc_$cmin\nEOF\ncat > A/compiler/GHC/CmmToAsm/Reg/Linear.dump-simpl <<'EOF'\n-- RHS size: {terms: 23, types: 57, coercions: 0, joins: 0/0}\nGHC.CmmToAsm.Reg.Linear.regAlloc2 [InlPrag=NOINLINE[0]]\n  :: forall instr statics.\n     Instruction instr =>\n     NCGConfig\n     -> LabelSet\n     -> DUniqSupply\n     -> DUniqResult (NatCmmDecl statics instr, Maybe Int, Maybe RegAllocStats)\n[GblId,\n Arity=4,\n Str=<L><L><L><L>,\n Cpr=1(1,),\n Unf=Unf{Src=StableSystem, TopLvl=True,\n         Value=True, ConLike=True, WorkFree=True, Expandable=True,\n         Guidance=ALWAYS_IF(arity=4,unsat_ok=True,boring_ok=False)\n         Tmpl= \\ (@instr)\n                 (@statics)\n                 ($dInstruction [Occ=Once1] :: Instruction instr)\n                 (ds [Occ=Once1] :: NCGConfig)\n                 (ds1 [Occ=Once1] :: LabelSet)\n                 (eta [Occ=Once1, OS=OneShot] :: DUniqSupply) ->\n                 case GHC.CmmToAsm.Reg.Linear.$wregAlloc\n                        @instr @statics $dInstruction ds ds1 eta\n                 of\n                 { (# ww [Occ=Once1], ww1 [Occ=Once1], ww2 [Occ=Once1],\n                      ww3 [Occ=Once1] #) ->\n                 (# (ww, ww1, ww2), ww3 #)\n                 }}]\nGHC.CmmToAsm.Reg.Linear.regAlloc2\n  = \\ (@instr)\n      (@statics)\n      ($dInstruction :: Instruction instr)\n      (ds [OS=OneShot] :: NCGConfig)\n      (ds1 [OS=OneShot] :: LabelSet)\n      (eta [OS=OneShot] :: DUniqSupply) ->\n      case GHC.CmmToAsm.Reg.Linear.$wregAlloc\n             @instr @statics $dInstruction ds ds1 eta\n      of\n      { (# ww, ww1, ww2, ww3 #) ->\n      (# (ww, ww1, ww2), ww3 #)\n      }\nEOF",
+   "invoke": [
+    "{tmp}/A"
+   ],
+   "expect_exit": 1,
+   "expect_text": "compiler/GHC/CmmToAsm/Reg/Linear  GHC.CmmToAsm.Reg.Linear.regAlloc2  $dInstruction :: Instruction instr: 1, line 30",
+   "expect_absent": [
+    "[GblId",
+    "$fEqVLoc",
+    "Instruction instr: 2"
+   ],
+   "bug_exit": 1,
+   "bug_text": [
+    "compiler/GHC/CmmToAsm/Reg/Linear  [GblId,  $dInstruction :: Instruction instr: 1",
+    "VLoc  $fEqVLoc: 1"
+   ]
+  },
+  {
    "id": "NCG-battery-12",
    "program": "NCG-battery/battery.py",
    "name": "battery.py measured only ghc-TREE's _build, --compilers GHC0 writing the label's compilers into its bin directories, so stage-1 copies over another build directory, ghc-fold's _build-r12, could not be measured without writing into a build another agent owned",
