@@ -205,7 +205,8 @@ def label_paths(work, label):
               f'comp2-{label}.runs', f'perf-{label}.tsv', f'perf-{label}.log',
               f'perf-{label}-summary.txt', f'perf-{label}-size.log',
               f'perf-{label}-size-summary.txt', f'scale-{label}.txt', f'meas-{label}.log',
-              f'p{label}', f'p{label}-2'):
+              f'p{label}', f'p{label}-2', f'utf8-{label}.tsv', f'fuzz-{label}',
+              f'fuzz-{label}.txt'):
         ps.append(f'{out}/{s}')
     return ps
 
@@ -915,6 +916,17 @@ def self_test():
             rc, out, err, lines = build(args[0], *args[1:], **kw)
             if rc != 2 or lines or word not in err:
                 bad.append(f'--build refusing {args} {kw}: {rc} {lines[:2]} {err[-200:]}')
+    # Every result the whole battery refuses to overwrite is a path of the label's,
+    # so that a step measured again finds none of them.
+    from battery import plant as plant_battery, script
+    with tempfile.TemporaryDirectory(prefix='ncg-rebuild-') as d:
+        w3 = plant_battery(d)[0]
+        text = script(w3, 'fr09', 'fr09', '1-3', f'{w3}/battery')
+        m = re.search(r'^for p in (.*); do$', text, re.M)
+        stops = shlex.split(m.group(1)) if m else []
+        missing = [x for x in stops if x not in label_paths(w3, 'fr09')]
+        if not stops or missing:
+            bad.append(f'results the battery stops over and label_paths lacks: {missing or stops}')
     for x in bad:
         print('FAIL', x)
     print('ok   rebuild.py self-test' if not bad else f'{len(bad)} failed')

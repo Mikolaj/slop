@@ -1236,28 +1236,30 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   and -O0, the tasty-papi benchmarks of containers, vector and megaparsec at -O2
   and -O1, a thin sample of orthotope's A2T counted by `perf-per-call.py`,
   the fifteen compilations by the tree's stage-1 and stage-2 compilers through
-  `compile-cost.py`, GHC's perf and size tests, the scaling probes
-  and the tickets' reproducers through `tickets.py`. Its docstring states each
-  setting once with its reason, nofib's compiler under `+RTS -A3G -V0`
-  and the benchmarks with the RTS clock running among them, and `--dry` prints
-  the script it would run. A package's part or A2T's may name its steps,
-  `containers-O2:build` or `a2t:deps,build`, so that a build and its runs go
-  in separate calls; `--compilers` puts the label's compilers in place,
-  the tree's own or a stage-1 compiler built elsewhere; `--a2t-lock FILE` holds
-  a lock over A2T's dependencies and build, which wait for memory while
-  it is held; and `--min-free GIB` refuses to start under that much free
-  on the work directory's disk. `rebuild.py` runs it over a series' base
-  and every commit, each built from nothing, one after another, going on past
-  a step that fails, records each build's compile time, allocation and object
-  size by module through `bstats.py`, and ends with `runreport.py`'s report
-  of the last commit against the base; `--pair` measures the base and the tip
-  alone, and `--build` builds one tree behind the machine's memory and disk
-  gates and measures nothing. `nbcmp.py` compares two labels' nofib runs,
-  the collections and copied bytes beside the instructions, `pkgcmp.py` their
-  package benchmarks, `a2tcmp.py` their A2T samples, `perfcmp.py` their perf
-  and size tests and which leave the window GHC's CI holds them to,
-  `tickets.py compare` their tickets' figures, `bstats.py compare` their builds,
-  and `alone.py` reruns one containers benchmark alone.
+  `compile-cost.py`, GHC's perf and size tests, the scaling probes, the tickets'
+  reproducers through `tickets.py`, a Text scan over UTF-8 digits of width 1
+  to 4 through `utf8.py` and `NCG-fuzz/run.py`'s random test over a fixed range
+  of seeds. Its docstring states each setting once with its reason, nofib's
+  compiler under `+RTS -A3G -V0` and the benchmarks with the RTS clock running
+  among them, and `--dry` prints the script it would run. A package's part
+  or A2T's may name its steps, `containers-O2:build` or `a2t:deps,build`,
+  so that a build and its runs go in separate calls; `--compilers` puts
+  the label's compilers in place, the tree's own or a stage-1 compiler built
+  elsewhere; `--a2t-lock FILE` holds a lock over A2T's dependencies and build,
+  which wait for memory while it is held; and `--min-free GIB` refuses to start
+  under that much free on the work directory's disk. `rebuild.py` runs it
+  over a series' base and every commit, each built from nothing, one after
+  another, going on past a step that fails, records each build's compile time,
+  allocation and object size by module through `bstats.py`, and ends
+  with `runreport.py`'s report of the last commit against the base; `--pair`
+  measures the base and the tip alone, and `--build` builds one tree behind
+  the machine's memory and disk gates and measures nothing. `nbcmp.py` compares
+  two labels' nofib runs, the collections and copied bytes beside
+  the instructions, `pkgcmp.py` their package benchmarks, `a2tcmp.py` their A2T
+  samples, `perfcmp.py` their perf and size tests and which leave the window
+  GHC's CI holds them to, `tickets.py compare` their tickets' figures or their
+  Text scans', `bstats.py compare` their builds, and `alone.py` reruns one
+  containers benchmark alone.
 - `tools/memguard.sh` stops a process group, a chain started by `setsid`, while
   MemAvailable is under one bar and continues it once it is over another,
   so that a chain beside a build taking most of the memory waits rather
@@ -1265,6 +1267,7 @@ and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
   the group ends or a done file appears, 2 on a usage error.
 - `tools/NCG-fuzz/run.py` compiles and runs `gen.py`'s random programs
   under many flag sets, by a GHC tree's stage-2 compiler and a base tree's,
+  or by compilers named by path, for a time or over a fixed range of seeds,
   and reports each disagreement, panic and crash: a test of the NCG's
   correctness, which measures nothing. `--report` counts its result files.
 - `tools/one-shot.py` recompiles one module of a finished build alone, flags

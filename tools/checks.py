@@ -66,6 +66,7 @@ STEPS = [
     ('NCG-battery bstats self-test', ['python3', '{root}/NCG-battery/bstats.py', '--self-test']),
     ('NCG-battery runreport self-test', ['python3', '{root}/NCG-battery/runreport.py', '--self-test']),
     ('NCG-battery tickets self-test', ['python3', '{root}/NCG-battery/tickets.py', '--self-test']),
+    ('NCG-battery utf8 self-test', ['python3', '{root}/NCG-battery/utf8.py', '--self-test']),
     ('NCG-fuzz gen self-test', ['python3', '{root}/NCG-fuzz/gen.py', '--self-test']),
     ('NCG-fuzz run self-test', ['python3', '{root}/NCG-fuzz/run.py', '--self-test']),
     ('NCG-scale gen self-test', ['python3', '{root}/NCG-scale/gen.py', '--self-test']),

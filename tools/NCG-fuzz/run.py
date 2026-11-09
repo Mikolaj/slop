@@ -6,13 +6,18 @@ under +RTS -A16k, which collects often, so that heap checks fail. Every compile
 and run must succeed and all outputs be equal.
 
 Usage: python3 tools/NCG-fuzz/run.py [--work DIR] [--out DIR] [--first N]
-           [--tag T] [--quick] [--stage1] LANE CPU SECONDS TREE BASE
+           [--count N] [--skip S,S...] [--tag T] [--quick] [--stage1]
+           LANE CPU SECONDS TREE BASE
        python3 tools/NCG-fuzz/run.py --report RESULT...
        python3 tools/NCG-fuzz/run.py --self-test
 
 TREE and BASE name the work directory's ghc-TREE and ghc-BASE (--work, dist-ghcho
-by default), whose _build/stage1/bin/ghc is the stage-2 compiler. Seeds count up
-from --first, by default (LANE + 1) * 100000, on CPU, until SECONDS have passed.
+by default), whose _build/stage1/bin/ghc is the stage-2 compiler, or, holding
+a /, are compilers' paths. Seeds count up from --first, by default (LANE + 1)
+* 100000, on CPU, until SECONDS have passed, or, with --count, until N seeds
+have run: a lane that SECONDS stop short of them fails, naming the seeds left.
+--skip passes over the seeds listed, which run nothing, write no line and count
+among the N.
 Each seed's line goes to OUT/result-TAG.txt (--out, WORK/fuzz by default; --tag,
 LANE by default): `SEED ok (R runs, S s)`, S counted from the lane's start, or
 `SEED FAIL` and each of `NAME panic[MESSAGE]`, `NAME compile EXIT`, `NAME run-d
@@ -21,8 +26,9 @@ the groups of runs agreeing, largest first. A failing seed's program, logs and
 outputs stay under OUT/fail/TAG-sSEED; a seed also names its program, through
 gen.py. --quick takes the flag sets t-O1, t-O2 and b-O0 alone. Every compile and
 run is under ulimit -v 8000000, and timed out at 600 s and 60 s. t-O1-llvm wants
-opt-18 and llc-18 on PATH. Exits 0 when no seed failed, 1 when one did, 2 on
-wrong arguments or a compiler missing. Run it unsandboxed.
+opt-18 and llc-18 on PATH. Exits 0 when no seed failed, 1 when one did or --count's
+seeds were not all reached, 2 on wrong arguments or a compiler missing. Run it
+unsandboxed.
 
 --report counts result files: seeds by what failed, each panic's seeds by level
 (both compilers, TREE's only, BASE's only) and the flag sets outside
@@ -89,9 +95,14 @@ def sh(argv, cpu, cwd, out, timeout):
 
 
 def compilers(work, tree, base, stage1):
-    """{TIP: the compiler of TREE, BASE: the compiler of BASE}."""
-    return {TIP: f'{work}/ghc-{tree}/_build/stage{0 if stage1 else 1}/bin/ghc',
-            BASE: f'{work}/ghc-{base}/_build/stage1/bin/ghc'}
+    """{TIP: the compiler of TREE, BASE: the compiler of BASE}, a name
+    holding a / taken as the compiler's path."""
+    out = {TIP: f'{work}/ghc-{tree}/_build/stage{0 if stage1 else 1}/bin/ghc',
+           BASE: f'{work}/ghc-{base}/_build/stage1/bin/ghc'}
+    for k, name in ((TIP, tree), (BASE, base)):
+        if '/' in name:
+            out[k] = os.path.abspath(name)
+    return out
 
 
 def one(seed, sets, ghcs, cpu, keep, run_timeout=RUN_TIMEOUT):
@@ -189,13 +200,14 @@ def main(argv):
         print('\n'.join(report(lines)))
         return 0
     work, out, first, tag, quick, stage1 = WORK, None, None, None, False, False
+    count, skip = None, set()
     while argv[:1] and argv[0].startswith('--'):
         a = argv.pop(0)
         if a == '--quick':
             quick = True
         elif a == '--stage1':
             stage1 = True
-        elif a in ('--work', '--out', '--first', '--tag') and argv:
+        elif a in ('--work', '--out', '--first', '--count', '--skip', '--tag') and argv:
             v = argv.pop(0)
             if a == '--work':
                 work = v
@@ -203,8 +215,12 @@ def main(argv):
                 out = v
             elif a == '--tag':
                 tag = v
-            elif v.isdigit():
+            elif a == '--skip' and all(x.isdigit() for x in v.split(',')):
+                skip = {int(x) for x in v.split(',')}
+            elif v.isdigit() and a == '--first':
                 first = int(v)
+            elif v.isdigit() and int(v) > 0:
+                count = int(v)
             else:
                 argv = []
         else:
@@ -226,7 +242,11 @@ def main(argv):
     os.environ.pop('GHC_PACKAGE_PATH', None)
     os.makedirs(f'{out}/fail', exist_ok=True)
     t0, n, failing = time.time(), 0, 0
-    while time.time() - t0 < int(secs):
+    last = None if count is None else seed + count
+    while (last is None or seed < last) and time.time() - t0 < int(secs):
+        if seed in skip:
+            seed += 1
+            continue
         bad, runs = one(seed, sets, ghcs, cpu, f'{out}/fail/{tag}-s{seed}')
         n += 1
         failing += bool(bad)
@@ -234,8 +254,10 @@ def main(argv):
             verdict = 'FAIL ' + '; '.join(bad) if bad else 'ok'
             fh.write(f'{seed} {verdict} ({runs} runs, {time.time() - t0:.0f}s)\n')
         seed += 1
-    print(f'lane {tag}: {n} seeds, {failing} failing, {time.time() - t0:.0f}s')
-    return 1 if failing else 0
+    short = last is not None and seed < last
+    print(f'lane {tag}: {n} seeds, {failing} failing, {time.time() - t0:.0f}s'
+          + (f'; seeds {seed} to {last - 1} not reached in {secs} s' if short else ''))
+    return 1 if failing or short else 0
 
 
 # --- self-test: compilers, taskset and programs faked, the fake compiler's
@@ -292,6 +314,8 @@ def self_test():
           {TIP: '/w/ghc-x/_build/stage1/bin/ghc', BASE: '/w/ghc-y/_build/stage1/bin/ghc'})
     check('--stage1 compilers', compilers('/w', 'x', 'y', True),
           {TIP: '/w/ghc-x/_build/stage0/bin/ghc', BASE: '/w/ghc-y/_build/stage1/bin/ghc'})
+    check('compilers by path', compilers('/w', '/x/ghc', 'y/ghc', True),
+          {TIP: '/x/ghc', BASE: os.path.abspath('y/ghc')})
     saved = dict(os.environ)
     with tempfile.TemporaryDirectory(prefix='ncg-fuzz-test-') as d:
         fb, w, log = f'{d}/bin', f'{d}/w', f'{d}/fake.log'
@@ -392,9 +416,25 @@ def self_test():
         p = cli('--report', f'{o}/result-x.txt')
         if p.returncode or not p.stdout.endswith(' failing\n'):
             bad.append(f'--report: {p.returncode} {p.stdout!r}')
+        # --count: N seeds and no more, the tree a path; a lane short of them fails.
+        g0 = f'{w}/ghc-t/_build/stage0/bin/ghc'
+        open(log, 'w').close()
+        p = cli('--work', w, '--out', o, '--first', '40', '--count', '3', '--skip', '41,99',
+                '--tag', 'c', '0', '5', '30', g0, 'b')
+        have = open(f'{o}/result-c.txt').read().split('\n')[:-1] if p.returncode == 0 else []
+        if (p.returncode or [x.split()[:2] for x in have] != [['40', 'ok'], ['42', 'ok']]
+                or f'ghc {g0} -O1 ' not in open(log).read()):
+            bad.append(f'--count 3 --skip 41 over a path: {p.returncode} {have!r} {p.stderr[-200:]}')
+        p = cli('--work', w, '--out', o, '--first', '50', '--count', '100000', '--tag', 'd',
+                '0', '5', '1', 't', 'b')
+        if p.returncode != 1 or 'seeds 5' not in p.stdout or ' to 100049 not reached' not in p.stdout:
+            bad.append(f'a lane short of its count: {p.returncode} {p.stdout!r}')
         for args in (['0', '5', '1', 't'], ['x', '5', '1', 't', 'b'], ['--first', 'x', '0', '5', '1',
                                                                       't', 'b'],
-                     ['--work', w, '0', '5', '1', 'none', 'b'], ['--nosuch', '0', '5', '1', 't', 'b']):
+                     ['--work', w, '0', '5', '1', 'none', 'b'], ['--nosuch', '0', '5', '1', 't', 'b'],
+                     ['--count', '0', '0', '5', '1', 't', 'b'], ['--count', 'x', '0', '5', '1', 't', 'b'],
+                     ['--skip', '4,x', '0', '5', '1', 't', 'b'],
+                     ['--work', w, '0', '5', '1', 't', f'{d}/nosuch/ghc']):
             p = cli(*args)
             if p.returncode != 2:
                 bad.append(f'{args} exited {p.returncode}, not 2')

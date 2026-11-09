@@ -3,8 +3,9 @@
 label: nofib at -O2, -O1 and -O0, the tasty-papi benchmarks of containers,
 vector and megaparsec at -O2 and -O1, a thin sample of orthotope's A2T, the
 fifteen compilations by the tree's stage-1 and stage-2 compilers, GHC's perf and
-size tests, the scaling probes and the tickets' reproducers; or some of these
-parts alone.
+size tests, the scaling probes, the tickets' reproducers, a Text scan over
+UTF-8 digits and a differential random test of code generation; or some
+of these parts alone.
 
 Usage: python3 tools/NCG-battery/battery.py [--dry] [--work DIR] [--out DIR]
            [--compilers GHC0|full] [--build DIR] [--bin DIR]
@@ -18,14 +19,16 @@ it stops if any of the label's results exist, copies both compilers to ghc-LABEL
 beside themselves, writes the wrapper ghcw-LABEL (setting 12), and on CPUS
 builds A2T's dependencies, then the packages one after another and A2T
 beside them, with only the probes and then the tickets' reproducers beside
-the builds, on its first CPU; then, all built, runs six lanes at once:
+the builds, on its first CPU, and beside those the Text scan, on the same CPU,
+and then the random test, on its last three; then, all built and tested, runs
+six lanes at once:
 containers' rounds at -O2; containers' at -O1; vector's at -O2, then at -O1; megaparsec's at -O2,
 then at -O1; A2T's sample; and nofib; those ended, the compilations, the stage-1
 compiler's on CPUS' second CPU beside the stage-2 compiler's on its third;
 and then the perf and size tests. Its lines go to OUT/meas-LABEL.log. A PART --
 nofib-O2, nofib-O1, nofib-O0, containers-O2, containers-O1, vector-O2,
-vector-O1, megaparsec-O2, megaparsec-O1, a2t, comp1, comp2, perf, scale or
-tickets --
+vector-O1, megaparsec-O2, megaparsec-O1, a2t, comp1, comp2, perf, scale,
+tickets, utf8 or fuzz --
 runs alone, in the order given, on CPUS, with ghc-LABEL already in place
 unless --compilers puts it there. A package's part may name its steps, build
 or run, and a2t its steps, deps, build or run, as NAME:STEP,STEP
@@ -52,8 +55,9 @@ The battery is a bash script; --dry prints it, every file it generates written
 out in it, and runs nothing. Run it unsandboxed. It exits 0 when every part ran
 and 2 when it stopped over the tree's flavour, the label's results or the disk's
 free space or a part failed: a compiler missing, or a build, nofib-run, a benchmark run, an A2T
-count, compile-cost.py, a perf or size test or a probe failing or tickets.py
-measuring nothing, the part's log saying which, or hadrian rebuilding the
+count, compile-cost.py, a perf or size test, a probe or utf8.py failing,
+tickets.py measuring nothing or a seed of the random test failing, the part's
+log saying which, or hadrian rebuilding the
 compiler the perf tests were to run;
 compile-cost.py's warnings fail nothing, nor does a case of tickets.py's
 failing, its row saying so, nor nofib-run's exit 1 over real/eff alone, some
@@ -87,6 +91,11 @@ and pkgcmp.py:
   scale       OUT/scale-LABEL.txt, tools/NCG-scale/run.sh's lines, for
               tools/NCG-scale/report.py with the base's file first
   tickets     OUT/tix-LABEL.tsv, tickets.py's table, for tickets.py compare
+  utf8        OUT/utf8-LABEL.tsv, utf8.py's table, for tickets.py compare
+  fuzz        OUT/fuzz-LABEL/result-0.txt to result-2.txt, tools/NCG-fuzz/run.py's
+              lines of a lane's seeds, each failing seed's program and logs
+              under OUT/fuzz-LABEL/fail, and OUT/fuzz-LABEL.txt, run.py
+              --report's count of them
   builds      each build's module dumps in its build directory and the
               wrapper's records in vpapi/wstats-BUILDDIR-cTREE-LABEL
               (BUILDDIR cdist, dist, mdist or adist), for bstats.py
@@ -190,6 +199,21 @@ The settings, each stated here and nowhere else:
     bytes), checked after the flavour and, in the whole battery, the label's
     results. The scripts this replaces each refused under some free space,
     MIN_FREE the commonest of their values.
+15. The utf8 part counts by utf8.py's own settings, its calls, digits
+    and levels, on CPUS' first CPU (Mikolaj's ruling 202, 2026-11-09).
+16. The fuzz part runs tools/NCG-fuzz/run.py's every flag set by the label's
+    stage-2 compiler and by ghc-FUZZ_BASE's, the series' base (master
+    37ad471050), over FUZZ_LANES * FUZZ_PER_LANE seeds from FUZZ_FIRST,
+    a lane a run of FUZZ_PER_LANE of them on each of CPUS' last FUZZ_LANES
+    CPUs, so that it fails on any seed whose outputs differ, whose compile
+    panics or fails, the assembler's errors among them, or whose program
+    crashes (Mikolaj's ruling 202, 2026-11-09). FUZZ_SKIP are the range's seeds
+    at which the base compiler or round 17's (ghc-fold's _build-r17t) panicked,
+    each by https://gitlab.haskell.org/ghc/ghc/-/work_items/27915 or
+    https://gitlab.haskell.org/ghc/ghc/-/work_items/27638, open upstream,
+    passed over (run.py's --skip), so that the part fails on a failure those
+    two did not have; on three otherwise idle CPUs it takes about ten minutes.
+    FUZZ_SECONDS bounds a lane, which fails if stopped short of its seeds.
 """
 
 import collections
@@ -214,6 +238,8 @@ COMPILE_COST = os.path.join(os.path.dirname(HERE), 'compile-cost.py')
 SCALE_RUN = os.path.join(os.path.dirname(HERE), 'NCG-scale', 'run.sh')
 PER_CALL = os.path.join(os.path.dirname(HERE), 'perf-per-call.py')
 TICKETS = os.path.join(HERE, 'tickets.py')
+UTF8 = os.path.join(HERE, 'utf8.py')
+FUZZ_RUN = os.path.join(os.path.dirname(HERE), 'NCG-fuzz', 'run.py')
 
 # The settings of the docstring, by number.
 ROUNDS = {'containers': 5, 'vector': 5, 'megaparsec': 10}  # 3
@@ -227,6 +253,16 @@ FLAVOUR = 'perf+no_profiled_libs+no_dynamic_libs'  # 10
 A2T_MEM, A2T_POLL = 30, 30  # 13: GiB, seconds
 MEMINFO = '/proc/meminfo'
 MIN_FREE = 20  # 14: GiB
+FUZZ_BASE = 'rb'  # 16
+FUZZ_FIRST, FUZZ_PER_LANE, FUZZ_LANES = 1000000, 50, 3  # 16
+# 16: each panicked, by https://gitlab.haskell.org/ghc/ghc/-/work_items/27915
+# at the base and round 17 (1000061, 1000074, 1000076, 1000077), at round 17
+# alone (1000048, 1000078) or at the base alone (1000116), or by
+# https://gitlab.haskell.org/ghc/ghc/-/work_items/27638 at the base alone
+# (1000055, 1000079)
+FUZZ_SKIP = (1000048, 1000055, 1000061, 1000074, 1000076, 1000077, 1000078, 1000079,
+             1000116)
+FUZZ_SECONDS = 3600  # 16
 
 # Under the work directory.
 NOFIB_RUN = ('nofib-r/nofib/dist-newstyle/build/x86_64-linux/ghc-9.12.4/'
@@ -284,7 +320,7 @@ A2T_TARGET = 'orthotope:bench:specialisation'
 A2T_LIB = 'orthotope:lib:orthotope'
 PARTS = ('nofib-O2', 'nofib-O1', 'nofib-O0', 'containers-O2', 'vector-O2',
          'megaparsec-O2', 'containers-O1', 'vector-O1', 'megaparsec-O1',
-         'a2t', 'comp1', 'comp2', 'perf', 'scale', 'tickets')
+         'a2t', 'comp1', 'comp2', 'perf', 'scale', 'tickets', 'utf8', 'fuzz')
 PKG_PARTS = PARTS[3:9]
 A2T_STEPS = ('deps', 'build', 'run')
 # the steps a PART may name, in the order they run
@@ -619,6 +655,40 @@ def tickets_part(work, t, label, cpu, outdir, tk=TICKETS):
         '[ $e != 2 ] || exit 2'])
 
 
+def utf8_part(work, t, label, cpu, outdir, u8=UTF8):
+    ghc = f'{t.bin1}/ghc-{label}'
+    tsv = f'{outdir}/utf8-{label}.tsv'
+    return '\n'.join([
+        '# the Text scan over UTF-8 digits by the stage-2 compiler',
+        f'[ -x {q(ghc)} ] || {{ echo "utf8 {label}: no {ghc}"; exit 2; }}',
+        f'[ -e {q(tsv)} ] && {{ echo "utf8 {label}: {tsv} exists"; exit 2; }}',
+        f'mkdir -p {q(outdir)}',
+        f'python3 {q(u8)} run {q(ghc)} {q(tsv)} {cpu}; e=$?',
+        f'echo "utf8 {label} exit $e $(date +%T)"',
+        '# 1 is a row failed, 2 nothing measured: either fails the part',
+        '[ $e = 0 ] || exit 2'])
+
+
+def fuzz_part(work, t, label, cpus, outdir, fz=FUZZ_RUN):
+    ghc = f'{t.bin1}/ghc-{label}'
+    d, txt = f'{outdir}/fuzz-{label}', f'{outdir}/fuzz-{label}.txt'
+    skip = ['--skip', ','.join(str(x) for x in FUZZ_SKIP)] if FUZZ_SKIP else []
+    out = ['# the random test by the stage-2 compiler against the base (setting 16)',
+           f'[ -x {q(ghc)} ] || {{ echo "fuzz {label}: no {ghc}"; exit 2; }}',
+           f'[ -e {q(d)} ] && {{ echo "fuzz {label}: {d} exists"; exit 2; }}',
+           f'mkdir -p {q(d)}']
+    for i, cpu in enumerate(cpus):
+        argv = (['python3', fz, '--work', work, '--out', d,
+                 '--first', str(FUZZ_FIRST + i * FUZZ_PER_LANE), '--count', str(FUZZ_PER_LANE)]
+                + skip + ['--tag', str(i), str(i), cpu, str(FUZZ_SECONDS), ghc, FUZZ_BASE])
+        out.append(f'{shlex.join(argv)} > {q(f"{d}/lane{i}.log")} 2>&1 & z{i}=$!')
+    return '\n'.join(out + [
+        'e=0', *[f'wait $z{i} || e=2' for i in range(len(cpus))],
+        f'python3 {q(fz)} --report {q(d)}/result-*.txt > {q(txt)} 2>&1',
+        f'echo "fuzz {label} exit $e $(date +%T): $(head -1 {q(txt)})"',
+        '[ $e = 0 ] || exit 2'])
+
+
 def cpu_list(spec):
     out = []
     for item in spec.split(','):
@@ -631,12 +701,14 @@ def cpu_list(spec):
     return out
 
 
-def part(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS):
-    body = part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk)
+def part(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS, u8=UTF8,
+         fz=FUZZ_RUN):
+    body = part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk, u8, fz)
     return f'(\n{body}\n) || f=2'
 
 
-def part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS):
+def part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS, u8=UTF8,
+              fz=FUZZ_RUN):
     fam, _, lev = name.partition('-O')
     if fam == 'nofib':
         body = nofib_part(work, t, label, int(lev))
@@ -650,6 +722,10 @@ def part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TIC
         body = scale_part(work, t, label, cpus[0], outdir, sc)
     elif name == 'tickets':
         body = tickets_part(work, t, label, cpus[0], outdir, tk)
+    elif name == 'utf8':
+        body = utf8_part(work, t, label, cpus[0], outdir, u8)
+    elif name == 'fuzz':
+        body = fuzz_part(work, t, label, cpus[-FUZZ_LANES:], outdir, fz)
     else:
         stage = int(name[-1])
         body = comp_part(work, t, label, stage, cpus[stage], outdir, cc)
@@ -719,7 +795,8 @@ def parse_parts(parts):
 
 def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
            sc=SCALE_RUN, pc=PER_CALL, tk=TICKETS, ghc0=None, a2t_lock=None,
-           meminfo=MEMINFO, poll=A2T_POLL, min_free=MIN_FREE, build=None, bindir=None):
+           meminfo=MEMINFO, poll=A2T_POLL, min_free=MIN_FREE, build=None, bindir=None,
+           u8=UTF8, fz=FUZZ_RUN):
     """The bash script of the battery, or of the parts named; ghc0 is
     --compilers', a2t_lock --a2t-lock's, min_free --min-free's, build
     --build's and bindir --bin's."""
@@ -755,7 +832,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
 
     def p(name, steps=None):
         if name != 'a2t' or a2t_lock is None:
-            return part(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk)
+            return part(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk, u8, fz)
         steps = steps or A2T_STEPS
         held = tuple(x for x in A2T_STEPS[:2] if x in steps)
         pieces = []
@@ -790,7 +867,8 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
             f'{outdir}/comp1-{label}.txt', f'{outdir}/comp1-{label}.runs',
             f'{outdir}/comp2-{label}.runs', f'{outdir}/perf-{label}.tsv',
             f'{outdir}/scale-{label}.txt', f'{outdir}/a2t-{label}.tsv',
-            f'{outdir}/tix-{label}.tsv']
+            f'{outdir}/tix-{label}.tsv', f'{outdir}/utf8-{label}.tsv',
+            f'{outdir}/fuzz-{label}']
     logs = ' '.join([q(f'{v}/{PKGS[k]["log"]}-c{tree}{o}-{label}.log')
                      for k in PKGS for o in ('', '-o1')] + [q(f'{v}/ab-c{tree}-{label}.log')])
     build, run = ('build',), ('run',)
@@ -808,12 +886,14 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
         ' || { echo "meas STOP, copies failed"; exit 2; }',
         *wrap,
         's=0',
+        *lane('fz', 'utf8 and fuzz', p('utf8'), p('fuzz')),
         *lane('probes', 'probes', p('scale'), p('tickets')),
         *lane('a2td', "A2T's dependencies built", p('a2t', ('deps',))),
         'wait $a2td || s=2',
         *lane('built', 'packages built', *[p(x, build) for x in PKG_PARTS]),
         *lane('a2tb', 'A2T built', p('a2t', build)),
         'wait $probes || s=2; wait $built || s=2; wait $a2tb || s=2',
+        'wait $fz || s=2',
         *lane('c2', 'containers -O2', p('containers-O2', run)),
         *lane('c1', 'containers -O1', p('containers-O1', run)),
         *lane('vec', 'vector', p('vector-O2', run), p('vector-O1', run)),
@@ -968,6 +1048,19 @@ FAKE_TK = ('import os, sys\nopen(os.environ["FAKELOG"], "a").write('
            '"tickets|" + " ".join(sys.argv[1:]) + "\\n")\n'
            'open(sys.argv[3], "w").write("27799 -O2\\tinner\\tsplit\\n")\n'
            'sys.exit(int(os.environ.get("FAKETK", "0")))\n')
+FAKE_U8 = ('import os, sys\nopen(os.environ["FAKELOG"], "a").write('
+           '"utf8|" + " ".join(sys.argv[1:]) + "\\n")\n'
+           'open(sys.argv[3], "w").write("W2 -O2\\tper-element\\t84.000\\n")\n'
+           'sys.exit(int(os.environ.get("FAKEU8", "0")))\n')
+# a lane outlasting the fake builds, so that the six lanes are seen to wait for it
+FAKE_FZ = ('import os, sys, time\na = sys.argv[1:]\nlog = open(os.environ["FAKELOG"], "a")\n'
+           'log.write("fuzz|" + " ".join(a) + "\\n")\nlog.flush()\n'
+           'if a[0] == "--report":\n    print("3 seeds, 3 ok, 0 failing")\n    sys.exit(0)\n'
+           'time.sleep(20 * float(os.environ.get("FAKESLEEP", "0")))\n'
+           'open(a[a.index("--out") + 1] + "/result-" + a[a.index("--tag") + 1] + ".txt", "a")'
+           '.write("1 ok (1 runs, 0s)\\n")\n'
+           'log.write("fuzz-end|\\n")\n'
+           'sys.exit(int(os.environ.get("FAKEFZ", "0")))\n')
 A2T_SAMPLE = ('Dynamic/size/small/dense/boxed', 'Ranked/<*>/small/runs/Unboxed')
 MAKEFILE = 'TOP = ..\nSUBDIRS = ansi \\\n  minimax \\\n  fish\n\ninclude x\n'
 CABAL = 'name: c\nbenchmark map-benchmarks\n  x\nbenchmark set-benchmarks\n'
@@ -1002,6 +1095,10 @@ def plant(d):
         fh.write(FAKE_PC)
     with open(f'{d}/tk.py', 'w') as fh:
         fh.write(FAKE_TK)
+    with open(f'{d}/u8.py', 'w') as fh:
+        fh.write(FAKE_U8)
+    with open(f'{d}/fz.py', 'w') as fh:
+        fh.write(FAKE_FZ)
     with open(f'{d}/scale.sh', 'w') as fh:
         fh.write(FAKE_SCALE)
     with open(f'{w}/ghc-t/_build/flavour', 'w') as fh:
@@ -1016,8 +1113,9 @@ def self_test():
         o, log = f'{d}/out', f'{d}/fake.log'
         env = dict(os.environ, PATH=fb + os.pathsep + os.environ['PATH'],
                    FAKELOG=log, FAKEBIN=fb)
-        pc, tk = f'{d}/pc.py', f'{d}/tk.py'
-        text = script(w, 't', 'x', '4-6', o, cc=f'{d}/cc.py', sc=f'{d}/scale.sh', pc=pc, tk=tk)
+        pc, tk, u8, fz = f'{d}/pc.py', f'{d}/tk.py', f'{d}/u8.py', f'{d}/fz.py'
+        text = script(w, 't', 'x', '4-6', o, cc=f'{d}/cc.py', sc=f'{d}/scale.sh', pc=pc, tk=tk,
+                      u8=u8, fz=fz)
         open(log, 'w').close()
 
         def run():
@@ -1096,7 +1194,7 @@ def self_test():
                 for s, c, k in ((1, 5, ''), (2, 6, '-2'))]
         if sorted(of('compile-cost')) != want:
             bad.append(f'compile-cost ran {of("compile-cost")}')
-        if of('taskset') != ['-cp 4-6'] * 12:
+        if of('taskset') != ['-cp 4-6'] * 13:
             bad.append(f'taskset ran {of("taskset")}')
         if of('df') != [f'-k --output=avail {w}'] or got[:1] != [f'df|-k --output=avail {w}']:
             bad.append(f'the free space checked first by {of("df")}')
@@ -1119,6 +1217,15 @@ def self_test():
         g1 = f'{w}/ghc-t/_build/stage1/bin'
         if of('tickets') != [f'run {g1}/ghc-x {o}/tix-x.tsv 4']:
             bad.append(f'the tickets ran {of("tickets")}')
+        if of('utf8') != [f'run {g1}/ghc-x {o}/utf8-x.tsv 4']:
+            bad.append(f'the Text scan ran {of("utf8")}')
+        skip = f' --skip {",".join(str(x) for x in FUZZ_SKIP)}' if FUZZ_SKIP else ''
+        want = [f'--work {w} --out {o}/fuzz-x --first {FUZZ_FIRST + i * FUZZ_PER_LANE}'
+                f' --count {FUZZ_PER_LANE}{skip} --tag {i} {i} {c} {FUZZ_SECONDS} {g1}/ghc-x'
+                f' {FUZZ_BASE}' for i, c in enumerate(('4', '5', '6'))]
+        rep = f'--report {o}/fuzz-x/result-0.txt {o}/fuzz-x/result-1.txt {o}/fuzz-x/result-2.txt'
+        if sorted(of('fuzz')[:3]) != want or of('fuzz')[3:] != [rep]:
+            bad.append(f'the random test ran {of("fuzz")}')
         # Every build counted by the wrapper into a directory of its own.
         want = sorted({f'{w}/vpapi/wstats-{bd}-{lab}|dir' for bd in ('cdist', 'dist', 'mdist')
                        for lab in ('ct-x', 'ct-o1-x')} | {f'{w}/vpapi/wstats-adist-ct-x|dir'})
@@ -1210,7 +1317,11 @@ def self_test():
             bad.append(f'A2T over its results exited {p.returncode}, not 2')
         # A perf test failing, a size test failing, a compiler rebuilt, a probe
         # failing and earlier results each fail their part.
-        for name, extra, word in (('perf', {'FAKEPERF': '1'}, 'perf x exit 1'),
+        for name, extra, word in (('utf8', {'FAKEU8': '1'}, 'utf8 x exit 1'),
+                                  ('utf8', {}, 'utf8-x.tsv exists'),
+                                  ('fuzz', {'FAKEFZ': '1'}, 'fuzz x exit 2'),
+                                  ('fuzz', {}, 'fuzz-x exists'),
+                                  ('perf', {'FAKEPERF': '1'}, 'perf x exit 1'),
                                   ('perf', {'FAKESIZE': '1'}, 'perf x size exit 1'),
                                   ('perf', {'FAKEREBUILD': '1'}, 'hadrian rebuilt'),
                                   ('perf', {}, 'perf-x.tsv exists'),
@@ -1218,11 +1329,13 @@ def self_test():
                                   ('scale', {}, 'scale-x.txt exists')):
             o2 = f'{d}/out-{name}-{"-".join(extra) or "again"}'
             os.makedirs(o2)
-            for f in ('perf-x.tsv', 'scale-x.txt'):
+            for f in ('perf-x.tsv', 'scale-x.txt', 'utf8-x.tsv'):
                 if not extra:
                     shutil.copy(f'{o}/{f}', f'{o2}/{f}')
+            if not extra:
+                shutil.copytree(f'{o}/fuzz-x', f'{o2}/fuzz-x')
             p = subprocess.run(['bash', '-c', script(w, 't', 'x', '4-6', o2, (name,),
-                                                     sc=f'{d}/scale.sh'), 'test'],
+                                                     sc=f'{d}/scale.sh', u8=u8, fz=fz), 'test'],
                                env=dict(env, **extra), capture_output=True, text=True)
             if p.returncode != 2 or word not in p.stdout:
                 bad.append(f'{name} under {extra}: exited {p.returncode}:'
@@ -1303,6 +1416,11 @@ def self_test():
             bad.append('a lane started before the packages were built')
         if not max(scale) < max(built):
             bad.append('the probes did not run beside the builds')
+        fzl, u8l = at('fuzz|', '--count'), at('utf8|')
+        if not (fzl and u8l and max(u8l) < min(fzl) < max(built)
+                and max(at('fuzz-end|')) < min(rounds + nofib)):
+            bad.append('the Text scan and the random test did not run beside the builds,'
+                       ' the lanes after them')
         ad = at('cabal-end|', '--only-dependencies')
         ab = [i for i in built if '--semaphore' in lines[i]]
         pk = [i for i in built if '--semaphore' not in lines[i]
@@ -1328,10 +1446,12 @@ def self_test():
                                  ('c', 'FAKEBENCH', 'res-ct-o1-c-'),
                                  ('e', 'FAKEBENCH', 'mres/ct-o1-e/'),
                                  ('g', 'FAKEPCFAIL', '1'), ('h', 'FAKEA2TBUILD', '1'),
-                                 ('i', 'FAKEA2TDEPS', '1'), ('j', 'FAKETK', '2')):
+                                 ('i', 'FAKEA2TDEPS', '1'), ('j', 'FAKETK', '2'),
+                                 ('fzw', 'FAKEFZ', '1'), ('u8w', 'FAKEU8', '1')):
             o3 = f'{d}/out-whole-{lab}'
             p = subprocess.run(['bash', '-c', script(w, 't', lab, '4-6', o3, cc=f'{d}/cc.py',
-                                                     sc=f'{d}/scale.sh', pc=pc, tk=tk), 'test'],
+                                                     sc=f'{d}/scale.sh', pc=pc, tk=tk, u8=u8,
+                                                     fz=fz), 'test'],
                                env=dict(env, **{what: value}), capture_output=True, text=True)
             if p.returncode != 2 or 'a part failed' not in open(f'{o3}/meas-{lab}.log').read():
                 bad.append(f'{what}={value} in the whole battery: {p.returncode}')
