@@ -59,3 +59,8 @@ src/M.hs
 src/A/B.hs
 d/src/
 d/../src/
+
+# The reproducer file of docs/ghc-issue-x86-getamode-displacement.md, written
+# into the reader's own scratch directory from the issue's text, never a file of
+# ~/slop.
+Amode.hs
