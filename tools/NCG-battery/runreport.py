@@ -25,8 +25,9 @@ where report.py flags it; the tickets' and the Text scan's rows tickets.py
 compare lists, instructions an element 0.2%; a module's allocation 0.1% and
 size 0.2%, a compiler process's instructions 1%. A label's random test is
 reported `pass` only where every seed battery.py's setting 16 runs has a line
-and every line is ok, and `FAIL` otherwise, naming the failing seeds and those
-not run.
+and every line is ok or known, run.py's word for a seed whose only failures
+are panics of the upstream issues it knows, these listed by issue beside it,
+and `FAIL` otherwise, naming the failing seeds and those not run.
 A section whose tables are missing says so and the others go on. The work
 directory is battery.py's, dist-ghcho by default. Exits 0 when the report
 was written.
@@ -49,7 +50,7 @@ import nbcmp  # noqa: E402
 import pkgcmp  # noqa: E402
 import tickets  # noqa: E402
 from battery import (COMPILE_COST, FUZZ_FIRST, FUZZ_LANES, FUZZ_PER_LANE,  # noqa: E402
-                     FUZZ_RUN, FUZZ_SKIP, WORK)
+                     FUZZ_RUN, WORK)
 
 NOFIB = {'instr': 0.002, 'alloc': 0.002, 'calloc': 0.002, 'size': 0.002, 'cinstr': 0.01}
 PKG = {'containers': 0.001, 'megaparsec': 0.001, 'vector': 0.0005}
@@ -224,33 +225,36 @@ def spans(xs):
 
 def fuzz(outdir, a, b):
     """Each label's random test: a pass only where every seed battery.py's
-    setting 16 runs has a line and every line is ok; the failing seeds named,
-    with run.py --report's count of what failed."""
+    setting 16 runs has a line and every line is ok or known; the failing seeds
+    named, with run.py --report's count of what failed and of each known issue's
+    seeds."""
     top = FUZZ_FIRST + FUZZ_LANES * FUZZ_PER_LANE
-    want = set(range(FUZZ_FIRST, top)) - set(FUZZ_SKIP)
-    out = [f'fuzz, the {len(want)} seeds from {FUZZ_FIRST} to {top - 1} not skipped']
+    want = set(range(FUZZ_FIRST, top))
+    out = [f'fuzz, the {len(want)} seeds from {FUZZ_FIRST} to {top - 1}']
     for lab in (a, b):
         d = os.path.join(outdir, f'fuzz-{lab}')
         files = sorted(glob.glob(os.path.join(glob.escape(d), 'result-*.txt')))
         if not files:
             out.append(f'  {lab}: FAIL, no results in {d}')
             continue
-        ran, failing = set(), set()
+        ran, known, failing = set(), set(), set()
         for path in files:
             with open(path) as fh:
                 for line in fh:
                     f = line.split(maxsplit=2)
                     if len(f) >= 2 and f[0].isdigit():
                         ran.add(int(f[0]))
-                        if f[1] != 'ok':
+                        if f[1] == 'known':
+                            known.add(int(f[0]))
+                        elif f[1] != 'ok':
                             failing.add(int(f[0]))
         short = want - ran
         line = (f'  {lab}: {"FAIL" if failing or short else "pass"}, {len(ran)} seeds run,'
-                f' {len(ran - failing)} ok, {len(failing)} failing')
+                f' {len(ran - known - failing)} ok, {len(known)} known, {len(failing)} failing')
         line += f': {spans(failing)}' if failing else ''
         line += f'; not run: {spans(short)}' if short else ''
         out.append(line)
-        if failing:
+        if failing or known:
             rc, text = run_tool([sys.executable, FUZZ_RUN, '--report', *files])
             out += ['    ' + x for x in text.rstrip('\n').split('\n')[1:]]
     return out
@@ -309,23 +313,24 @@ def self_test():
             with open(f'{o}/utf8-{lab}.tsv', 'w') as fh:
                 fh.write(f'W1 -O2\tper-element\t63.000\nW2 -O2\tper-element\t{84 * k:.3f}\n'
                          f'W3 -O2\tper-element\t{100 * (1 + (k - 1) / 10):.3f}\n')
-        # The random test: A whole, B a seed failing and its last ten seeds
-        # not run, S its last seed not run, F its first seed failing.
+        # The random test: A whole, a seed known, B a seed failing and its last
+        # ten seeds not run, S its last seed not run, F its first seed failing.
         top = FUZZ_FIRST + FUZZ_LANES * FUZZ_PER_LANE
-        want = sorted(set(range(FUZZ_FIRST, top)) - set(FUZZ_SKIP))
-        first, failed, tail = want[0], want[-11], want[-10:]
-        if tail != list(range(tail[0], tail[0] + 10)):
-            bad.append(f'the planted seeds not run are not one run: {tail}')
+        want = list(range(FUZZ_FIRST, top))
+        first, kseed, failed, tail = want[0], want[5], want[-11], want[-10:]
+        w27915 = "panic[Can't find weight for edge that should have one]"
 
-        def plant_fuzz(lab, fail=(), drop=()):
+        def plant_fuzz(lab, fail=(), drop=(), known=()):
             os.makedirs(f'{o}/fuzz-{lab}')
             for i in range(FUZZ_LANES):
                 with open(f'{o}/fuzz-{lab}/result-{i}.txt', 'w') as fh:
                     for s in range(FUZZ_FIRST + i * FUZZ_PER_LANE, FUZZ_FIRST + (i + 1) * FUZZ_PER_LANE):
-                        if s not in FUZZ_SKIP and s not in drop:
-                            fh.write(f'{s} FAIL outputs differ: t-O1/d,b-O0/d | t-O2/d (20 runs, 5s)\n'
-                                     if s in fail else f'{s} ok (20 runs, 5s)\n')
-        plant_fuzz('A')
+                        if s in drop:
+                            continue
+                        fh.write(f'{s} FAIL outputs differ: t-O1/d,b-O0/d | t-O2/d (20 runs, 5s)\n'
+                                 if s in fail else f'{s} known t-O1 {w27915} (18 runs, 5s)\n'
+                                 if s in known else f'{s} ok (20 runs, 5s)\n')
+        plant_fuzz('A', known=(kseed,))
         plant_fuzz('B', (failed,), tail)
         plant_fuzz('S', (), tail[-1:])
         plant_fuzz('F', (first,))
@@ -349,12 +354,16 @@ def self_test():
                       'comp1\n  not compared:',
                       'utf8 Text scan\n  B against A: 3 rows in both\n  rows that differ: 1\n'
                       '    W2 -O2: per-element 84.000 -> 84.840 +1.00%\n\n',
-                      f'  A: pass, {n9} seeds run, {n9} ok, 0 failing\n',
-                      f'  B: FAIL, {n9 - 10} seeds run, {n9 - 11} ok, 1 failing: {failed};'
+                      f'  A: pass, {n9} seeds run, {n9 - 1} ok, 1 known, 0 failing\n'
+                      f'    {w27915}: O0 both 0, tree only 0, base only 0; O1 both 0, tree only 1,'
+                      ' base only 0; O2 both 0, tree only 0, base only 0\n'
+                      f'    known GHC #27915, 1 seeds: tree only {kseed}\n',
+                      f'  B: FAIL, {n9 - 10} seeds run, {n9 - 11} ok, 0 known, 1 failing: {failed};'
                       f' not run: {tail[0]}-{tail[-1]}\n      1 outputs differ\n'
                       '    outside the largest group: t-O2 1\n',
-                      f'  S: FAIL, {n9 - 1} seeds run, {n9 - 1} ok, 0 failing; not run: {tail[-1]}\n',
-                      f'  F: FAIL, {n9} seeds run, {n9 - 1} ok, 1 failing: {first}\n',
+                      f'  S: FAIL, {n9 - 1} seeds run, {n9 - 1} ok, 0 known, 0 failing;'
+                      f' not run: {tail[-1]}\n',
+                      f'  F: FAIL, {n9} seeds run, {n9 - 1} ok, 0 known, 1 failing: {first}\n',
                       f'  C: FAIL, no results in {o}/fuzz-C'):
             if piece not in text:
                 bad.append(f'the report lacks {piece!r}')

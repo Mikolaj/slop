@@ -22,17 +22,21 @@ Each seed's line goes to OUT/result-TAG.txt (--out, WORK/fuzz by default; --tag,
 LANE by default): `SEED ok (R runs, S s)`, S counted from the lane's start, or
 `SEED FAIL` and each of `NAME panic[MESSAGE]`, `NAME compile EXIT`, `NAME run-d
 EXIT` (default options), `NAME run-a EXIT` (-A16k) and `outputs differ:` with
-the groups of runs agreeing, largest first. A failing seed's program, logs and
-outputs stay under OUT/fail/TAG-sSEED; a seed also names its program, through
+the groups of runs agreeing, largest first, or `SEED known` and the same where
+every one is a panic of an open upstream issue KNOWN names by its MESSAGE,
+which fails no seed: such a panic falls at seeds that move from compiler
+to compiler. A seed's program, logs and outputs stay under OUT/fail/TAG-sSEED
+unless it is ok; a seed also names its program, through
 gen.py. --quick takes the flag sets t-O1, t-O2 and b-O0 alone. Every compile and
 run is under ulimit -v 8000000, and timed out at 600 s and 60 s. t-O1-llvm wants
 opt-18 and llc-18 on PATH. Exits 0 when no seed failed, 1 when one did or --count's
 seeds were not all reached, 2 on wrong arguments or a compiler missing. Run it
 unsandboxed.
 
---report counts result files: seeds by what failed, each panic's seeds by level
-(both compilers, TREE's only, BASE's only) and the flag sets outside
-a disagreement's largest group.
+--report counts result files: seeds by verdict, the failing ones by what failed,
+each panic's seeds by level (both compilers, TREE's only, BASE's only), the flag
+sets outside a disagreement's largest group and each known issue's seeds
+by compiler.
 
 -fregs-graph and -fregs-iterative are left out (Mikolaj, 2026-11-03): on programs
 with vector code their output differs from the default allocator's, at GHC's
@@ -81,6 +85,25 @@ SETS = [  # name, compiler, flags, every k-th seed
 ]
 QUICK = ('t-O1', 't-O2', 'b-O0')
 RUNS = (('d', []), ('a', ['+RTS', '-A16k', '-RTS']))
+# The panics of open upstream issues, by MESSAGE, matched whole: CFG.hs's two
+# (https://gitlab.haskell.org/ghc/ghc/-/work_items/27915,
+# https://gitlab.haskell.org/ghc/ghc/-/work_items/27694) and JoinToTargets.hs's
+# (https://gitlab.haskell.org/ghc/ghc/-/work_items/27638). The series' fix
+# of the second keeps a panic, for a move with no free register, whose message
+# differs and is not known.
+KNOWN = {"Can't find weight for edge that should have one": 'GHC #27915',
+         'getSuccessorEdges: Block does not exist': 'GHC #27694',
+         "makeMove: we don't handle mem->mem moves": 'GHC #27638'}
+PANIC = re.compile(r'(\S+) panic\[(.*)\]')
+
+
+def verdict(bad):
+    """A seed's word for what failed: ok where nothing did, known where each
+    failure is a panic KNOWN names, else FAIL."""
+    if not bad:
+        return 'ok'
+    msgs = [PANIC.fullmatch(x) for x in bad]
+    return 'known' if all(m and m.group(2) in KNOWN for m in msgs) else 'FAIL'
 
 
 def sh(argv, cpu, cwd, out, timeout):
@@ -147,9 +170,10 @@ def one(seed, sets, ghcs, cpu, keep, run_timeout=RUN_TIMEOUT):
 
 def report(lines):
     """The --report lines of result lines."""
-    seeds = ok = 0
+    seeds = ok = known = 0
     kinds, disagree = collections.Counter(), collections.Counter()
     panics = collections.defaultdict(set)
+    issues = collections.defaultdict(lambda: collections.defaultdict(set))
     for line in lines:
         f = line.split(maxsplit=2)
         if len(f) < 2 or not f[0].isdigit():
@@ -158,12 +182,15 @@ def report(lines):
         if f[1] == 'ok':
             ok += 1
             continue
+        known += f[1] == 'known'
         found = set()
         for part in f[2].rsplit(' (', 1)[0].split('; '):
-            m = re.fullmatch(r'(\S+) panic\[(.*)\]', part)
+            m = PANIC.fullmatch(part)
             if m:
                 panics[m.group(2)].add((f[0], m.group(1)))
                 found.add(f'panic[{m.group(2)}]')
+                if m.group(2) in KNOWN:
+                    issues[KNOWN[m.group(2)]][int(f[0])].add(m.group(1).split('-')[0])
             elif part.startswith('outputs differ: '):
                 found.add('outputs differ')
                 groups = part[len('outputs differ: '):].split(' | ')
@@ -171,8 +198,9 @@ def report(lines):
                     disagree.update({x.split('/')[0] for x in g.split(',')})
             else:
                 found.add(part.split()[1].split('-')[0])
-        kinds.update(found)
-    out = [f'{seeds} seeds, {ok} ok, {seeds - ok} failing']
+        if f[1] != 'known':
+            kinds.update(found)
+    out = [f'{seeds} seeds, {ok} ok, {known} known, {seeds - ok - known} failing']
     out += [f'  {n} {k}' for k, n in sorted(kinds.items(), key=lambda x: (-x[1], x[0]))]
     for msg, where in sorted(panics.items()):
         cells = []
@@ -186,6 +214,11 @@ def report(lines):
         out.append('outside the largest group: '
                    + ', '.join(f'{k} {n}' for k, n in
                                sorted(disagree.items(), key=lambda x: (-x[1], x[0]))))
+    for issue, where in sorted(issues.items()):
+        sides = [(k, [s for s in sorted(where) if where[s] == v]) for k, v in
+                 (('both', {TIP, BASE}), ('tree only', {TIP}), ('base only', {BASE}))]
+        out.append(f'known {issue}, {len(where)} seeds: '
+                   + '; '.join(f'{k} ' + ' '.join(map(str, s)) for k, s in sides if s))
     return out
 
 
@@ -241,21 +274,23 @@ def main(argv):
     sets = [x for x in SETS if x[0] in QUICK] if quick else SETS
     os.environ.pop('GHC_PACKAGE_PATH', None)
     os.makedirs(f'{out}/fail', exist_ok=True)
-    t0, n, failing = time.time(), 0, 0
+    t0, n, failing, known = time.time(), 0, 0, 0
     last = None if count is None else seed + count
     while (last is None or seed < last) and time.time() - t0 < int(secs):
         if seed in skip:
             seed += 1
             continue
         bad, runs = one(seed, sets, ghcs, cpu, f'{out}/fail/{tag}-s{seed}')
+        word = verdict(bad)
         n += 1
-        failing += bool(bad)
+        failing += word == 'FAIL'
+        known += word == 'known'
         with open(f'{out}/result-{tag}.txt', 'a') as fh:
-            verdict = 'FAIL ' + '; '.join(bad) if bad else 'ok'
-            fh.write(f'{seed} {verdict} ({runs} runs, {time.time() - t0:.0f}s)\n')
+            text = f'{word} ' + '; '.join(bad) if bad else word
+            fh.write(f'{seed} {text} ({runs} runs, {time.time() - t0:.0f}s)\n')
         seed += 1
     short = last is not None and seed < last
-    print(f'lane {tag}: {n} seeds, {failing} failing, {time.time() - t0:.0f}s'
+    print(f'lane {tag}: {n} seeds, {failing} failing, {known} known, {time.time() - t0:.0f}s'
           + (f'; seeds {seed} to {last - 1} not reached in {secs} s' if short else ''))
     return 1 if failing or short else 0
 
@@ -269,7 +304,7 @@ args=" $* "; out=; prev=
 for a in "$@"; do [ "$prev" = -o ] && out=$a; prev=$a; done
 case "$args" in
   *" ${FAKEPANIC:-NONE} "*) printf "x: error:\n    panic! (the 'impossible' happened)\n"
-    printf "  GHC version 1:\n\tBlock gone\n  more\n"; exit 1;;
+    printf "  GHC version 1:\n\t%s\n  more\n" "${FAKEPANICMSG:-Block gone}"; exit 1;;
   *" ${FAKEFAIL:-NONE} "*) echo "x.hs:1:1: error"; exit 3;;
 esac
 word=same; code=0; pause=0
@@ -293,8 +328,17 @@ RESULTS = """\
 102 FAIL t-O2 panic[Block gone]; outputs differ: a/d,a/a,c/d | t-O1-pic/d,t-O1-pic/a (20 runs, 5s)
 103 FAIL b-O0 panic[Other one]; t-O1 run-a timeout (20 runs, 6s)
 104 FAIL t-O1 compile 3 (20 runs, 7s)
+105 known t-O1 panic[Can't find weight for edge that should have one]; b-O1 panic[Can't find weight for edge that should have one] (16 runs, 8s)
+106 known t-O2 panic[Can't find weight for edge that should have one]; b-O0 panic[makeMove: we don't handle mem->mem moves] (16 runs, 9s)
+107 FAIL b-O2 panic[Can't find weight for edge that should have one]; t-O1 run-d 7 (17 runs, 9s)
 not a seed line
 """
+# The upstream panics' messages as GHC's master prints them, and the series'
+# own panic beside #27638's fix, which must fail.
+W27915 = "Can't find weight for edge that should have one"
+M27638 = "makeMove: we don't handle mem->mem moves"
+G27694 = 'getSuccessorEdges: Block does not exist'
+MSERIES = 'makeMove: no free register for a mem->mem move'
 
 
 def self_test():
@@ -316,6 +360,25 @@ def self_test():
           {TIP: '/w/ghc-x/_build/stage0/bin/ghc', BASE: '/w/ghc-y/_build/stage1/bin/ghc'})
     check('compilers by path', compilers('/w', '/x/ghc', 'y/ghc', True),
           {TIP: '/x/ghc', BASE: os.path.abspath('y/ghc')})
+    # A seed is known only where each failure is a panic of a known MESSAGE,
+    # whole: the series' own panic, and any other failure beside one, fail it.
+    kw, km = f't-O1 panic[{W27915}]', f'b-O2 panic[{M27638}]'
+    for what, b, want in (('nothing failed', [], 'ok'),
+                          ('two known panics', [kw, km], 'known'),
+                          ("#27694's panic", [f'b-O0 panic[{G27694}]'], 'known'),
+                          ("the series' own panic", [f't-O1 panic[{MSERIES}]'], 'FAIL'),
+                          ('a known message cut short', [f't-O1 panic[{W27915[:26]}]'], 'FAIL'),
+                          ('beside a disagreement', [kw, 'outputs differ: t-O0/d | b-O0/d'],
+                           'FAIL'),
+                          ('beside an unknown panic', [kw, 't-O0 panic[Block gone]'], 'FAIL'),
+                          ('beside a failed compile', [km, 't-O1-lint compile 3'], 'FAIL'),
+                          ('beside a crash', [kw, 't-O1-g run-d 7'], 'FAIL'),
+                          ('beside a timeout', [kw, 't-O2 run-a timeout'], 'FAIL')):
+        check(f'verdict, {what}', verdict(b), want)
+    check('known messages past the 60 characters one() keeps', [k for k in KNOWN if len(k) > 60],
+          [])
+    fakes = ('FAKEPANIC', 'FAKEPANICMSG', 'FAKEFAIL', 'FAKEODD', 'FAKECRASH', 'FAKEHANG',
+             'FAKEBASE', 'FAKEBASEODD')
     saved = dict(os.environ)
     with tempfile.TemporaryDirectory(prefix='ncg-fuzz-test-') as d:
         fb, w, log = f'{d}/bin', f'{d}/w', f'{d}/fake.log'
@@ -333,8 +396,7 @@ def self_test():
         os.environ.update(PATH=fb + os.pathsep + os.environ['PATH'], FAKELOG=log)
 
         def run(seed, sets=SETS, timeout=RUN_TIMEOUT, **env):
-            for k in ('FAKEPANIC', 'FAKEFAIL', 'FAKEODD', 'FAKECRASH', 'FAKEHANG',
-                      'FAKEBASE', 'FAKEBASEODD'):
+            for k in fakes:
                 os.environ.pop(k, None)
             os.environ.update(env)
             open(log, 'w').close()
@@ -371,6 +433,8 @@ def self_test():
             bad.append('a kept seed holds its binary')
         (b, n), _, _ = run(31, FAKEPANIC='-fPIC')
         check('a panic', (b, n), (['t-O1-pic panic[Block gone]'], 18))
+        (b, n), _, _ = run(31, FAKEPANIC='-fPIC', FAKEPANICMSG=W27915)
+        check('a known panic', (b, verdict(b)), ([f't-O1-pic panic[{W27915}]'], 'known'))
         (b, n), _, _ = run(31, FAKEFAIL='-dlint')
         check('a failed compile', (b, n), (['t-O1-lint compile 3'], 18))
         (b, n), _, _ = run(31, FAKECRASH='-g')
@@ -383,19 +447,25 @@ def self_test():
         (b, n), _, _ = run(31, quick, FAKEBASE=ghcs[BASE], FAKEBASEODD='1')
         check('the base off', b, ['outputs differ: t-O1/d,t-O1/a,t-O2/d,t-O2/a | b-O0/d,b-O0/a'])
         check('report', report(RESULTS.split('\n')), [
-            '5 seeds, 1 ok, 4 failing',
+            '8 seeds, 1 ok, 2 known, 5 failing',
             '  2 panic[Block gone]',
             '  2 panic[Other one]',
+            '  2 run',
             '  1 compile',
             '  1 outputs differ',
-            '  1 run',
+            f'  1 panic[{W27915}]',
             'panic[Block gone]: O0 both 0, tree only 0, base only 0;'
             ' O1 both 1, tree only 0, base only 0; O2 both 0, tree only 1, base only 0',
+            f'panic[{W27915}]: O0 both 0, tree only 0, base only 0;'
+            ' O1 both 1, tree only 0, base only 0; O2 both 0, tree only 1, base only 1',
             'panic[Other one]: O0 both 0, tree only 1, base only 1;'
             ' O1 both 0, tree only 0, base only 0; O2 both 0, tree only 0, base only 0',
-            'outside the largest group: t-O1-pic 1'])
-        for k in ('FAKEPANIC', 'FAKEFAIL', 'FAKEODD', 'FAKECRASH', 'FAKEHANG', 'FAKEBASE',
-                  'FAKEBASEODD'):
+            f'panic[{M27638}]: O0 both 0, tree only 0, base only 1;'
+            ' O1 both 0, tree only 0, base only 0; O2 both 0, tree only 0, base only 0',
+            'outside the largest group: t-O1-pic 1',
+            'known GHC #27638, 1 seeds: base only 106',
+            'known GHC #27915, 3 seeds: both 105; tree only 106; base only 107'])
+        for k in fakes:
             os.environ.pop(k, None)
         o = f'{d}/out'
 
@@ -413,6 +483,23 @@ def self_test():
             bad.append(f'a lane with a failure: {p.returncode} {have!r}')
         if not os.path.isfile(f'{o}/fail/y-s131/Main.hs'):
             bad.append('a lane kept no failure')
+        # A lane whose one failure is a known panic passes and counts it; beside
+        # a disagreement, or as the series' own panic, it fails.
+        for tag, env, code, head in (
+                ('k', {'FAKEPANICMSG': W27915}, 0, f'31 known t-O1-pic panic[{W27915}] ('),
+                ('m', {'FAKEPANICMSG': W27915, 'FAKEODD': '-g'}, 1,
+                 f'31 FAIL t-O1-pic panic[{W27915}]; outputs differ: '),
+                ('s', {'FAKEPANICMSG': MSERIES}, 1, f'31 FAIL t-O1-pic panic[{MSERIES}] (')):
+            p = cli('--work', w, '--out', o, '--first', '31', '--count', '1', '--tag', tag,
+                    '0', '5', '30', 't', 'b', FAKEPANIC='-fPIC', **env)
+            have = open(f'{o}/result-{tag}.txt').read()
+            if (p.returncode != code or not have.startswith(head)
+                    or f': 1 seeds, {code} failing, {1 - code} known, ' not in p.stdout):
+                bad.append(f'lane {tag}: {p.returncode} {have!r} {p.stdout!r}')
+        p = cli('--report', f'{o}/result-k.txt')
+        check('--report of a known seed', (p.returncode, p.stdout.split('\n')[0],
+                                            p.stdout.split('\n')[-2]),
+              (0, '1 seeds, 0 ok, 1 known, 0 failing', 'known GHC #27915, 1 seeds: tree only 31'))
         p = cli('--report', f'{o}/result-x.txt')
         if p.returncode or not p.stdout.endswith(' failing\n'):
             bad.append(f'--report: {p.returncode} {p.stdout!r}')

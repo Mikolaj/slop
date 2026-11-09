@@ -93,8 +93,8 @@ and pkgcmp.py:
   tickets     OUT/tix-LABEL.tsv, tickets.py's table, for tickets.py compare
   utf8        OUT/utf8-LABEL.tsv, utf8.py's table, for tickets.py compare
   fuzz        OUT/fuzz-LABEL/result-0.txt to result-2.txt, tools/NCG-fuzz/run.py's
-              lines of a lane's seeds, each failing seed's program and logs
-              under OUT/fuzz-LABEL/fail, and OUT/fuzz-LABEL.txt, run.py
+              lines of a lane's seeds, the program and logs of each seed
+              not ok under OUT/fuzz-LABEL/fail, and OUT/fuzz-LABEL.txt, run.py
               --report's count of them
   builds      each build's module dumps in its build directory and the
               wrapper's records in vpapi/wstats-BUILDDIR-cTREE-LABEL
@@ -207,12 +207,12 @@ The settings, each stated here and nowhere else:
     a lane a run of FUZZ_PER_LANE of them on each of CPUS' last FUZZ_LANES
     CPUs, so that it fails on any seed whose outputs differ, whose compile
     panics or fails, the assembler's errors among them, or whose program
-    crashes (Mikolaj's ruling 202, 2026-11-09). FUZZ_SKIP are the range's seeds
-    at which the base compiler or round 17's (ghc-fold's _build-r17t) panicked,
-    each by https://gitlab.haskell.org/ghc/ghc/-/work_items/27915 or
+    crashes (Mikolaj's ruling 202, 2026-11-09), but for a panic
+    of https://gitlab.haskell.org/ghc/ghc/-/work_items/27915 or
     https://gitlab.haskell.org/ghc/ghc/-/work_items/27638, open upstream,
-    passed over (run.py's --skip), so that the part fails on a failure those
-    two did not have; on three otherwise idle CPUs it takes about ten minutes.
+    which run.py knows by its text and counts: these fall at seeds that move
+    from compiler to compiler, so that no list of seeds passed over serves
+    every commit's. On three otherwise idle CPUs it takes about ten minutes.
     FUZZ_SECONDS bounds a lane, which fails if stopped short of its seeds.
 """
 
@@ -255,13 +255,6 @@ MEMINFO = '/proc/meminfo'
 MIN_FREE = 20  # 14: GiB
 FUZZ_BASE = 'rb'  # 16
 FUZZ_FIRST, FUZZ_PER_LANE, FUZZ_LANES = 1000000, 50, 3  # 16
-# 16: each panicked, by https://gitlab.haskell.org/ghc/ghc/-/work_items/27915
-# at the base and round 17 (1000061, 1000074, 1000076, 1000077), at round 17
-# alone (1000048, 1000078) or at the base alone (1000116), or by
-# https://gitlab.haskell.org/ghc/ghc/-/work_items/27638 at the base alone
-# (1000055, 1000079)
-FUZZ_SKIP = (1000048, 1000055, 1000061, 1000074, 1000076, 1000077, 1000078, 1000079,
-             1000116)
 FUZZ_SECONDS = 3600  # 16
 
 # Under the work directory.
@@ -672,15 +665,14 @@ def utf8_part(work, t, label, cpu, outdir, u8=UTF8):
 def fuzz_part(work, t, label, cpus, outdir, fz=FUZZ_RUN):
     ghc = f'{t.bin1}/ghc-{label}'
     d, txt = f'{outdir}/fuzz-{label}', f'{outdir}/fuzz-{label}.txt'
-    skip = ['--skip', ','.join(str(x) for x in FUZZ_SKIP)] if FUZZ_SKIP else []
     out = ['# the random test by the stage-2 compiler against the base (setting 16)',
            f'[ -x {q(ghc)} ] || {{ echo "fuzz {label}: no {ghc}"; exit 2; }}',
            f'[ -e {q(d)} ] && {{ echo "fuzz {label}: {d} exists"; exit 2; }}',
            f'mkdir -p {q(d)}']
     for i, cpu in enumerate(cpus):
         argv = (['python3', fz, '--work', work, '--out', d,
-                 '--first', str(FUZZ_FIRST + i * FUZZ_PER_LANE), '--count', str(FUZZ_PER_LANE)]
-                + skip + ['--tag', str(i), str(i), cpu, str(FUZZ_SECONDS), ghc, FUZZ_BASE])
+                 '--first', str(FUZZ_FIRST + i * FUZZ_PER_LANE), '--count', str(FUZZ_PER_LANE),
+                 '--tag', str(i), str(i), cpu, str(FUZZ_SECONDS), ghc, FUZZ_BASE])
         out.append(f'{shlex.join(argv)} > {q(f"{d}/lane{i}.log")} 2>&1 & z{i}=$!')
     return '\n'.join(out + [
         'e=0', *[f'wait $z{i} || e=2' for i in range(len(cpus))],
@@ -1055,7 +1047,7 @@ FAKE_U8 = ('import os, sys\nopen(os.environ["FAKELOG"], "a").write('
 # a lane outlasting the fake builds, so that the six lanes are seen to wait for it
 FAKE_FZ = ('import os, sys, time\na = sys.argv[1:]\nlog = open(os.environ["FAKELOG"], "a")\n'
            'log.write("fuzz|" + " ".join(a) + "\\n")\nlog.flush()\n'
-           'if a[0] == "--report":\n    print("3 seeds, 3 ok, 0 failing")\n    sys.exit(0)\n'
+           'if a[0] == "--report":\n    print("3 seeds, 3 ok, 0 known, 0 failing")\n    sys.exit(0)\n'
            'time.sleep(20 * float(os.environ.get("FAKESLEEP", "0")))\n'
            'open(a[a.index("--out") + 1] + "/result-" + a[a.index("--tag") + 1] + ".txt", "a")'
            '.write("1 ok (1 runs, 0s)\\n")\n'
@@ -1219,9 +1211,8 @@ def self_test():
             bad.append(f'the tickets ran {of("tickets")}')
         if of('utf8') != [f'run {g1}/ghc-x {o}/utf8-x.tsv 4']:
             bad.append(f'the Text scan ran {of("utf8")}')
-        skip = f' --skip {",".join(str(x) for x in FUZZ_SKIP)}' if FUZZ_SKIP else ''
         want = [f'--work {w} --out {o}/fuzz-x --first {FUZZ_FIRST + i * FUZZ_PER_LANE}'
-                f' --count {FUZZ_PER_LANE}{skip} --tag {i} {i} {c} {FUZZ_SECONDS} {g1}/ghc-x'
+                f' --count {FUZZ_PER_LANE} --tag {i} {i} {c} {FUZZ_SECONDS} {g1}/ghc-x'
                 f' {FUZZ_BASE}' for i, c in enumerate(('4', '5', '6'))]
         rep = f'--report {o}/fuzz-x/result-0.txt {o}/fuzz-x/result-1.txt {o}/fuzz-x/result-2.txt'
         if sorted(of('fuzz')[:3]) != want or of('fuzz')[3:] != [rep]:

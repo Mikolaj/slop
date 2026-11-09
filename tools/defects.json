@@ -8861,8 +8861,8 @@
    "expect_exit": 0,
    "expect_text": [
     "utf8 Text scan\n  B against A: 1 rows in both\n  rows that differ: 1\n    W2 -O2: per-element 84.000 -> 84.840 +1.00%",
-    "  A: FAIL, 1 seeds run, 1 ok, 0 failing; not run: 1000001-",
-    "  B: FAIL, 1 seeds run, 0 ok, 1 failing: 1000000; not run: 1000001-",
+    "  A: FAIL, 1 seeds run, 1 ok, 0 known, 0 failing; not run: 1000001-",
+    "  B: FAIL, 1 seeds run, 0 ok, 0 known, 1 failing: 1000000; not run: 1000001-",
     "      1 run"
    ],
    "bug_exit": 0,
@@ -8945,6 +8945,50 @@
    ],
    "expect_exit": 1,
    "expect_text": "  M.hs:5 s3: none -> INLINABLE [class constraint]"
+  },
+  {
+   "id": "NCG-fuzz-01",
+   "program": "NCG-fuzz/run.py",
+   "name": "run.py failed a seed on a panic of an upstream issue, GHC #27915's or #27638's, so the battery's fuzz part failed a step wherever the label's compiler panicked by them, seeds that move from compiler to compiler, outside the skip list chosen at two compilers",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "a seed whose tree compiler panics with \"Can't find weight for edge that should have one\" (GHC #27915) and whose base compiler compiles it, the seed in no --skip list",
+   "ok": "the seed's line `SEED known t-O1 panic[...]; t-O2 panic[...]`, the lane exiting 0 and counting it known",
+   "bug": "the seed's line `SEED FAIL t-O1 panic[...]`, the lane exiting 1",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "2026-11-09: bt1's scan of seeds 1000000 to 1000179 by round 17's compiler and the base found GHC #27915 at both, at round 17 alone and at the base alone, and GHC #27638 at the base alone; the rebuild runs 59 compilers, one a commit, the commits below the series' #27638 fix carrying its panic too.",
+   "plant_cmd": "mkdir -p bin t b o && printf '#!/bin/bash\\nshift 2\\nexec \"$@\"\\n' > bin/taskset && cat > t/ghc <<'EOF'\n#!/bin/bash\nprintf \"<no location info>: error:\\n    panic! (the 'impossible' happened)\\n  GHC version 10.1:\\n\\tCan't find weight for edge that should have one\\n  triple (n7w, n7T, c2V6)\\n\"\nexit 1\nEOF\ncat > b/ghc <<'EOF'\n#!/bin/bash\nout=; prev=; for a in \"$@\"; do [ \"$prev\" = -o ] && out=$a; prev=$a; done\nprintf '#!/bin/bash\\necho same\\n' > \"$out\"; chmod +x \"$out\"\nEOF\nchmod +x bin/taskset t/ghc b/ghc",
+   "env": {
+    "PATH": "{tmp}/bin:/usr/bin:/bin"
+   },
+   "invoke": [
+    "--work",
+    "{tmp}",
+    "--out",
+    "{tmp}/o",
+    "--first",
+    "1000000",
+    "--count",
+    "1",
+    "--quick",
+    "--tag",
+    "x",
+    "0",
+    "1",
+    "60",
+    "{tmp}/t/ghc",
+    "{tmp}/b/ghc"
+   ],
+   "probe_cmd": "cat o/result-x.txt",
+   "expect_exit": 0,
+   "expect_text": [
+    "1000000 known t-O1 panic[Can't find weight for edge that should have one]; t-O2 panic[Can't find weight for edge that should have one] (2 runs, ",
+    "lane x: 1 seeds, 0 failing, 1 known, "
+   ],
+   "bug_exit": 1,
+   "bug_text": "1000000 FAIL t-O1 panic[Can't find weight for edge that should have one]; t-O2 panic[Can't find weight for edge that should have one] (2 runs, "
   }
  ]
 }
