@@ -64,3 +64,11 @@ d/../src/
 # into the reader's own scratch directory from the issue's text, never a file of
 # ~/slop.
 Amode.hs
+
+# Names in docs/ghc-issue-i386-high-half-unique.md, never files of ~/slop:
+# its Haskell reproducer, written into the reader's own scratch directory from
+# the issue's text, and two files of GHC's tree, a link's text and a header
+# of the library directory.
+M3.hs
+CodeGen.hs
+DerivedConstants.h
