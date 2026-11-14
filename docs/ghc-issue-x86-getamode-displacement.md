@@ -1,6 +1,22 @@
 # GHC issue: x86-64 NCG `getAmode` emits address displacements outside the signed 32-bit range, which the assembler rejects
 
-Filed as GHC [#28105](https://gitlab.haskell.org/ghc/ghc/-/work_items/28105) on 2026-11-09; the text from "## Summary" down is the filed body, in the tracker's bug template. Title: **x86-64 NCG: three clauses of `getAmode` emit a displacement outside the signed 32-bit range, which the assembler rejects**. Verified on 2026-11-09 with a stage-1 build of master 37ad471050 (10.1.20261103), with ghc-9.14.1 and with ghc-9.6.7, from the files and commands as shown here, the output being master's with GHC's temporary directory written as `/tmp/`; the links pin 37ad471050. One issue and not one per clause, because the clauses are in one function and give one symptom, and one file reproduces all three. The `x + ((y << shift) + offset)` and `x - lit` clauses were found while testing changes to x86's `add_int` and `getAmode`, and the `CmmRegOff` clause by reading the clauses beside them. Tracker search 2026-11-09, issues and merge requests, for `getAmode`, `is32BitInteger`, `is32BitLit`, `x86_complex_amode`, `mangleIndexTree`, "displacement", "32bit displacement", "out of range" and "relocation out of range": no issue or MR about these clauses.
+Filed as GHC [#28105](https://gitlab.haskell.org/ghc/ghc/-/work_items/28105) on 2026-11-09; the text from "## Summary" down is the filed body, in the tracker's bug template, posted under a preface of Mikolaj's, which is not carried here, and with the `Amode.hs` block fenced as `hs`. Title: **x86-64 NCG: three clauses of `getAmode` emit a displacement outside the signed 32-bit range, which the assembler rejects**. Verified on 2026-11-09 with a stage-1 build of master 37ad471050 (10.1.20261103), with ghc-9.14.1 and with ghc-9.6.7, from the files and commands as shown here, the output being master's with GHC's temporary directory written as `/tmp/`; the links pin 37ad471050. One issue and not one per clause, because the clauses are in one function and give one symptom, and one file reproduces all three. The `x + ((y << shift) + offset)` and `x - lit` clauses were found while testing changes to x86's `add_int` and `getAmode`, and the `CmmRegOff` clause by reading the clauses beside them. Tracker search 2026-11-09, issues and merge requests, for `getAmode`, `is32BitInteger`, `is32BitLit`, `x86_complex_amode`, `mangleIndexTree`, "displacement", "32bit displacement", "out of range" and "relocation out of range": no issue or MR about these clauses.
+
+Read on the tracker 2026-11-14: on 2026-11-10 MangoIV commented that this is probably working as intended and that Sylvain Henry (hsyl20) would look at it, and assigned it to him; its labels are now `T::bug`, `NCG backend` and `llm-derived::unverified`. A search of merge requests for 28105 finds only GHC [!16891](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16891), which does not fix it (below).
+
+Checked after filing, on master: `amode.cmm` passes `-dcmm-lint` with master's compiler at `-O0` and `-O` (2026-11-09), its failures being the assembler's, so it can serve as a testsuite test, which runs with `-dcmm-lint`. The bug is x86-64's: on i386 `is32BitLit` holds of every literal, and `as --32` accepts a displacement of 2^32 with a warning, shortening it to 0, its value modulo 2^32 (2026-11-14). No other variant on master was found.
+
+In !16891's series as of 2026-11-09, the clauses that its commit "Gather a Cmm sum's literals into one constant, and narrow != as ==" adds ahead of master's in `getAmode` take the `x + ((y << shift) + offset)` and `CmmRegOff` shapes, after folding has put them in its normal form `(x + (y << shift)) + offset`, under their own `is32BitInteger` checks; master's three clauses stay below them unchanged and each is still reachable. Folding runs at `-O0` in the code generator and at `-O1` and `-O2` in Cmm sinking; `Amode.hs` compiles there at `-O`, `-O -fno-cmm-sink` and `-O2 -fno-cmm-sink`. With `-fno-cmm-sink` at `-O1` or `-O2` nothing folds: the `CmmRegOff` clause is reached by `ByteArray#` and `Array#` indexing, whose offsets, 16 and 24, fit, and the guard clause by hand-written Cmm, which the series' compiler rejects with `ghc -c -O -fno-cmm-sink` on
+
+```
+#include "Cmm.h"
+
+dbig (W_ p, W_ i) {
+    return (I64[p + ((i << 2) + 4294967296)]);
+}
+```
+
+giving `movq 4294967296(%rbx,%r14,4)`, as does master's compiler at `-O0` and `-O`. The `x - lit` clause's default alternative there still emits `-lit`, and `subneg` fails at `-O0` and `-O` as on master; at `-O -fno-cmm-sink` it compiles, `-2147483648` staying an unfolded negation.
 
 ## Summary
 
