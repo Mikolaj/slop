@@ -72,3 +72,9 @@ Amode.hs
 M3.hs
 CodeGen.hs
 DerivedConstants.h
+
+# Names in docs/ghc-issue-aarch64-label-offset.md, never files of ~/slop:
+# its Haskell reproducer, written into the reader's own scratch directory from
+# the issue's text, and a file of GHC's tree, a link's text.
+Neg.hs
+Ppr.hs
