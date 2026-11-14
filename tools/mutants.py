@@ -3039,6 +3039,8 @@ MUTANTS = [
      "        failing += word == 'FAIL'\n", "        failing += word != 'ok'\n", ST),
     ('NCG-fuzz #28088 not known', 'NCG-fuzz/run.py',
      "         'getSuccessorEdges: Block does not exist': 'GHC #28088',\n", '', ST),
+    ('NCG-fuzz #27694 not known', 'NCG-fuzz/run.py',
+     "         'Failed to classify edge of CFG - not not timed': 'GHC #27694',\n", '', ST),
     ('NCG-fuzz #28088 given to #27694', 'NCG-fuzz/run.py',
      "'getSuccessorEdges: Block does not exist': 'GHC #28088'",
      "'getSuccessorEdges: Block does not exist': 'GHC #27694'", ST),

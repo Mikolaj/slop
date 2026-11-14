@@ -9075,6 +9075,50 @@
    "bug_text": "known GHC #27694, 1 seeds: base only 108"
   },
   {
+   "id": "NCG-fuzz-03",
+   "program": "NCG-fuzz/run.py",
+   "name": "run.py failed a seed on the panic \"Failed to classify edge of CFG - not not timed\", which is GHC #27694's fault reaching classifyEdges under -fasm-shortcutting, an open upstream issue as the three it knew",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "a seed whose compiler panics with \"Failed to classify edge of CFG - not not timed\", the seed in no --skip list",
+   "ok": "the seed's line `SEED known t-O1 panic[...]; t-O2 panic[...]`, the lane exiting 0 and counting it known",
+   "bug": "the seed's line `SEED FAIL t-O1 panic[...]`, the lane exiting 1",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "2026-11-14: fz1's scan of 10000 seeds at master 37ad471050 met it on four, at -O2 only; fz2 traced it to two word-to-float conversions in one Cmm block, the second diamond recorded at the wrong block (GHC #27694), where shortcutting then cuts a lone jump and leaves the first diamond unreachable in the CFG with its edges. The case's fake compilers put the panic at the tree's side, as NCG-fuzz-01's do; at master it falls at the base's.",
+   "plant_cmd": "mkdir -p bin t b o && printf '#!/bin/bash\\nshift 2\\nexec \"$@\"\\n' > bin/taskset && cat > t/ghc <<'EOF'\n#!/bin/bash\nprintf \"<no location info>: error:\\n    panic! (the 'impossible' happened)\\n  GHC version 10.1:\\n\\tFailed to classify edge of CFG - not not timed\\n  edges(n4, cxl) [starts] [ends]\\n\"\nexit 1\nEOF\ncat > b/ghc <<'EOF'\n#!/bin/bash\nout=; prev=; for a in \"$@\"; do [ \"$prev\" = -o ] && out=$a; prev=$a; done\nprintf '#!/bin/bash\\necho same\\n' > \"$out\"; chmod +x \"$out\"\nEOF\nchmod +x bin/taskset t/ghc b/ghc",
+   "env": {
+    "PATH": "{tmp}/bin:/usr/bin:/bin"
+   },
+   "invoke": [
+    "--work",
+    "{tmp}",
+    "--out",
+    "{tmp}/o",
+    "--first",
+    "1000000",
+    "--count",
+    "1",
+    "--quick",
+    "--tag",
+    "x",
+    "0",
+    "1",
+    "60",
+    "{tmp}/t/ghc",
+    "{tmp}/b/ghc"
+   ],
+   "probe_cmd": "cat o/result-x.txt",
+   "expect_exit": 0,
+   "expect_text": [
+    "1000000 known t-O1 panic[Failed to classify edge of CFG - not not timed]; t-O2 panic[Failed to classify edge of CFG - not not timed] (2 runs, ",
+    "lane x: 1 seeds, 0 failing, 1 known, "
+   ],
+   "bug_exit": 1,
+   "bug_text": "1000000 FAIL t-O1 panic[Failed to classify edge of CFG - not not timed]; t-O2 panic[Failed to classify edge of CFG - not not timed] (2 runs, "
+  },
+  {
    "id": "captured-unbox-01",
    "program": "captured-unbox.py",
    "name": "a case whose alternative GHC prints on the next line, `case eta6 of` over `{ GHC.Internal.Types.I# n1 ->`, was not read, BOX wanting `case X of { B# ` on one line, so a loop unboxing a captured value at every iteration went unreported wherever a long qualified constructor breaks the line",

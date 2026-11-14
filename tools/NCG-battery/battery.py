@@ -209,7 +209,8 @@ The settings, each stated here and nowhere else:
     panics or fails, the assembler's errors among them, or whose program
     crashes (Mikolaj's ruling 202, 2026-11-09), but for a panic
     of https://gitlab.haskell.org/ghc/ghc/-/work_items/27915,
-    https://gitlab.haskell.org/ghc/ghc/-/work_items/28088 or
+    https://gitlab.haskell.org/ghc/ghc/-/work_items/28088,
+    https://gitlab.haskell.org/ghc/ghc/-/work_items/27694 or
     https://gitlab.haskell.org/ghc/ghc/-/work_items/27638, open upstream,
     which run.py knows by its text and counts: these fall at seeds that move
     from compiler to compiler, so that no list of seeds passed over serves
