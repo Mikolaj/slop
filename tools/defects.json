@@ -9050,6 +9050,31 @@
    "bug_text": "1000000 FAIL t-O1 panic[Can't find weight for edge that should have one]; t-O2 panic[Can't find weight for edge that should have one] (2 runs, "
   },
   {
+   "id": "NCG-fuzz-02",
+   "program": "NCG-fuzz/run.py",
+   "name": "run.py's report gave the panic \"getSuccessorEdges: Block does not exist\" to GHC #27694, where the seeds that give it are GHC #28088's: a block that a folded branch on a literal left out of the CFG",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "--report over a result line `108 known b-O1 panic[getSuccessorEdges: Block does not exist] (16 runs, 9s)`",
+   "ok": "the report's line `known GHC #28088, 1 seeds: base only 108`",
+   "bug": "the line `known GHC #27694, 1 seeds: base only 108`",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "review",
+   "notes": "2026-11-14: at master 37ad471050 seven seeds give the message (300117 and six of 10000 scanned, at -O1 and -O2); each loses it when the literal condition is made an argument, and when the conversion in the dead block is removed with the literal branch kept. GHC #27694's own fault, a stale current block after a word-to-float conversion, passes getSuccessorEdges a block that is a node and ends in GHC #27915's message. The seed's verdict was right before the fix; only the issue named was wrong.",
+   "plant_cmd": "mkdir -p o && printf '108 known b-O1 panic[getSuccessorEdges: Block does not exist] (16 runs, 9s)\\n' > o/result-x.txt",
+   "invoke": [
+    "--report",
+    "{tmp}/o/result-x.txt"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "known GHC #28088, 1 seeds: base only 108"
+   ],
+   "bug_exit": 0,
+   "bug_text": "known GHC #27694, 1 seeds: base only 108"
+  },
+  {
    "id": "captured-unbox-01",
    "program": "captured-unbox.py",
    "name": "a case whose alternative GHC prints on the next line, `case eta6 of` over `{ GHC.Internal.Types.I# n1 ->`, was not read, BOX wanting `case X of { B# ` on one line, so a loop unboxing a captured value at every iteration went unreported wherever a long qualified constructor breaks the line",

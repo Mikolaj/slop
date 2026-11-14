@@ -87,12 +87,12 @@ QUICK = ('t-O1', 't-O2', 'b-O0')
 RUNS = (('d', []), ('a', ['+RTS', '-A16k', '-RTS']))
 # The panics of open upstream issues, by MESSAGE, matched whole: CFG.hs's two
 # (https://gitlab.haskell.org/ghc/ghc/-/work_items/27915,
-# https://gitlab.haskell.org/ghc/ghc/-/work_items/27694) and JoinToTargets.hs's
+# https://gitlab.haskell.org/ghc/ghc/-/work_items/28088) and JoinToTargets.hs's
 # (https://gitlab.haskell.org/ghc/ghc/-/work_items/27638). The series' fix
 # of the second keeps a panic, for a move with no free register, whose message
 # differs and is not known.
 KNOWN = {"Can't find weight for edge that should have one": 'GHC #27915',
-         'getSuccessorEdges: Block does not exist': 'GHC #27694',
+         'getSuccessorEdges: Block does not exist': 'GHC #28088',
          "makeMove: we don't handle mem->mem moves": 'GHC #27638'}
 PANIC = re.compile(r'(\S+) panic\[(.*)\]')
 
@@ -337,7 +337,7 @@ not a seed line
 # own panic beside #27638's fix, which must fail.
 W27915 = "Can't find weight for edge that should have one"
 M27638 = "makeMove: we don't handle mem->mem moves"
-G27694 = 'getSuccessorEdges: Block does not exist'
+G28088 = 'getSuccessorEdges: Block does not exist'
 MSERIES = 'makeMove: no free register for a mem->mem move'
 
 
@@ -365,7 +365,7 @@ def self_test():
     kw, km = f't-O1 panic[{W27915}]', f'b-O2 panic[{M27638}]'
     for what, b, want in (('nothing failed', [], 'ok'),
                           ('two known panics', [kw, km], 'known'),
-                          ("#27694's panic", [f'b-O0 panic[{G27694}]'], 'known'),
+                          ("#28088's panic", [f'b-O0 panic[{G28088}]'], 'known'),
                           ("the series' own panic", [f't-O1 panic[{MSERIES}]'], 'FAIL'),
                           ('a known message cut short', [f't-O1 panic[{W27915[:26]}]'], 'FAIL'),
                           ('beside a disagreement', [kw, 'outputs differ: t-O0/d | b-O0/d'],
@@ -465,6 +465,8 @@ def self_test():
             'outside the largest group: t-O1-pic 1',
             'known GHC #27638, 1 seeds: base only 106',
             'known GHC #27915, 3 seeds: both 105; tree only 106; base only 107'])
+        check("report of #28088's panic", report([f'108 known b-O1 panic[{G28088}] (16 runs, 9s)'])[-1],
+              'known GHC #28088, 1 seeds: base only 108')
         for k in fakes:
             os.environ.pop(k, None)
         o = f'{d}/out'
