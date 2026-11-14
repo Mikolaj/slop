@@ -78,3 +78,11 @@ DerivedConstants.h
 # the issue's text, and a file of GHC's tree, a link's text.
 Neg.hs
 Ppr.hs
+
+# Paths of GHC's tree in docs/ghc-issue-ncg-stale-comments.md and
+# docs/ghc-issue-ncg-working-knowledge.md, the records of GHC #28127 and
+# GHC #28128, never files of ~/slop:
+compiler/GHC/CmmToAsm.hs
+compiler/GHC/CmmToAsm/
+.gitlab/ci.sh
+.gitlab/jobs.yaml
