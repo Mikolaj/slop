@@ -555,11 +555,10 @@ so such a layer can be `INLINE` throughout. The trade is weighed by P. GHC's
 **Catches** a binding whose pragma differs from what P's rule gives it
 with no comment saying why: one missing, one superfluous or one of the wrong
 kind, a forwarder's and a thin wrapper's included. **Seen:** orthotope's boxed
-`fmap`, `foldr` and `traverse` forwarded a caller's function to `mapA`, `foldrA`
-and `traverseA` with no pragma, and the list instance of `Vector` took function
-arguments with none. Acting on every finding of orthotope's tree at once, before
-its fusing bindings were marked, stripped `INLINE` from `toListT`'s wrappers
-and ran `toList` 8 to 10 times slower (2026-10-11).
+`fmap`, `foldr` and `traverse` forwarding a caller's function to `mapA`,
+`foldrA` and `traverseA` with no pragma; and acting on every finding before
+the fusing bindings were marked, which ran `toList` 8 to 10 times slower
+(2026-10-11).
 
 **Recipe:**
 
@@ -604,14 +603,11 @@ for itself or going.
 
 **Catches** a producer written `build`-style, `... cons nil`, whose consumer
 never meets it, so that cells and boxes are built after all. **Seen:** `toListT`
-fused per route, `fold/build` firing for each and `foldr/nil` for the empty
-case, its guard and its case on the route notwithstanding. `maximumA` folded
-by `foldr` over its producer, and `rerank` with `subArraysT` written
-as a `build`, ran faster than before. `vConcatN` fuses with a `build` producer
-and not with a recursive local function, and vector's `concat` walks its list
-twice, and its `fromList` and base's `maximum` take theirs apart by `case`,
-so none of them fuses. A fused element walk can regress a route it was not meant
-for: allocation rose 160 times on views of runs in one variant.
+fused per route despite its guard and its case on the route, and `maximumA`
+and `rerank` ran faster fused; `vConcatN` fuses with a `build` producer
+and not with a recursive local function, while vector's `concat`, its `fromList`
+and base's `maximum` do not fuse; and a fused element walk raised allocation 160
+times on a route it was not meant for.
 
 **Recipe:**
 
@@ -679,11 +675,10 @@ at orthotope's API that would fuse its operations are refuted
 ### L1. Bangs
 
 **Catches** an argument or binding the code forces anyway left lazy, its loop
-then boxing or thunking. **Seen:** in 908, `allSameT`'s `x` had its bang dropped
-for a reason a later guard removed. The binding stayed lazy, and the element
-was unboxed again on every iteration once a client specialised it. A new Unboxed
-min/max loop allocated more than vector's own until its reads were forced,
-`let !x`.
+then boxing or thunking. **Seen:** `allSameT`'s `x` in 908, its bang dropped
+for a reason a later guard removed, unboxed again on every iteration once
+a client specialised it; and a new Unboxed min/max loop allocating more
+than vector's until its reads were forced, `let !x`.
 
 **Recipe:**
 
@@ -853,13 +848,10 @@ state, A3 the values meant never to be built. This is the sweep of the evidence
 they share, allocation, the Core's arguments and results, captured values
 and dictionaries, whose findings each reads for its own form, and it finds what
 none of them looks for, an argument taken apart though passed boxed
-and a product returned boxed. **Seen:** on GHC HEAD (2026-10-19), a NOINLINE
-function taking six two-field products apart got a worker taking eight fields
-unboxed and the last two products boxed, at `-fmax-worker-args`'s default of 10,
-all twelve unboxed at 20; the same function small enough to inline got no worker
-at all, all six passed boxed wherever a call does not inline it, though
-its demand signature called four of them unboxed, so the final Core
-is the evidence; and orthotope's cases of the five checks.
+and a product returned boxed. **Seen:** on GHC HEAD (2026-10-19), a function
+taking six two-field products apart, small enough to inline, got no worker
+and passed all six boxed wherever a call did not inline it, though its demand
+signature called four of them unboxed: the final Core is the evidence.
 
 **Recipe**, over the tip's dump build and the project's benchmark:
 
@@ -903,13 +895,10 @@ made right after a client's loop, keeps all of them live through the loop, each
 reloaded from the stack on every iteration that evaluates a boxed element.
 The reloads allocate nothing: instructions move, by the element and the value
 kept live. **Seen:** orthotope's `compare`, made INLINABLE (2026-10-19):
-its specialised worker took ten arguments, a dictionary and nine fields
-of the two arrays, and a client summing the boxed elements of `min a b` before
-computing `min b a` reloaded ten values an element where the inlined `compare`,
-whose first out-of-line call takes the two shapes, reloaded three, and moved
-values through C-stack slots 12 times against 2: 55 instructions an element
-against 38, 1.21 times at 200000 elements. The saving and restoring around each
-element's evaluation, evaluated already or not, is GHC
+with its ten-argument worker, a client summing the boxed elements of `min a b`
+before computing `min b a` reloaded ten values an element where the inlined
+`compare` reloaded three, 55 instructions an element against 38. The saving
+and restoring around each element's evaluation, evaluated already or not, is GHC
 [#25349](https://gitlab.haskell.org/ghc/ghc/-/work_items/25349).
 
 **Recipe:**
@@ -954,11 +943,10 @@ The accepted forms:
   and none is filed (Mikolaj's ruling of 2026-10-06).
 
 Where a workaround gives something up by design, its comment says what,
-as orthotope's instance comments say that no fusion is given up. **Seen:**
-a survey of orthotope's comment blocks found blocks citing an issue, blocks
-standing in for a flag, design notes, and a few hidden ones. One hidden block
-matched GHC [#27737](https://gitlab.haskell.org/ghc/ghc/-/work_items/27737),
-filed from that same loop, and now cites it.
+as orthotope's instance comments say that no fusion is given up. **Seen:** a few
+hidden workarounds among orthotope's comment blocks, one matching GHC
+[#27737](https://gitlab.haskell.org/ghc/ghc/-/work_items/27737), filed
+from that same loop, which it now cites.
 
 **Recipe:** `python3 $T/workaround-cites.py SRC`, both directions at once:
 the comment blocks that mention a workaround and name no cause, each read whole
@@ -1058,246 +1046,86 @@ the body's terms.
 
 ## The tools
 
-Scripts under `tools/` measure a difference between two builds and take
-it from "something moved" to the function or module that moved it, and the last
-two of its list concern where loops happen to land: `align-as.py` keeps it out
-of that difference and `loop-offsets.py` determines it from a binary. Each
+Scripts under `tools/` take a difference between two builds from "something
+moved" to the function or module that moved it; `align-as.py` keeps where loops
+land out of that difference and `loop-offsets.py` reads it from a binary. Each
 of the others has a `--self-test` and exits 2 rather than 0 when its run did
 not happen, so that a build made without the needed flags cannot look like one
-where nothing changed. `horde-ad/docs/overloaded-unfoldings.md` shows `ab-time`,
-`cachegrind-per-call`, `ticky-diff` and `core-diff` in use,
-and `horde-ad/docs/pragmas-and-flags.md` `pragma-calls`.
+where nothing changed. A tool's options, modes and the meaning of its output
+are in its docstring: read it before the first run.
+`horde-ad/docs/overloaded-unfoldings.md` shows `ab-time`, `cachegrind-per-call`,
+`ticky-diff` and `core-diff` in use, and `horde-ad/docs/pragmas-and-flags.md`
+`pragma-calls`.
 
-- `tools/ab-time.py` runs the A/B procedure of M as a script over two or more
-  builds' benchmark executables: interleaved rounds, the order rotated
-  from round to round, one benchmark per process, optionally pinned to one CPU,
-  and for each build after the first the median of its per-round ratios
-  of criterion's time slope to the first's, or with `--iters` of the time a call
-  the benchmark prints, beside both builds' allocation per iteration. Single
-  pairs on a loaded or virtual machine scatter far more than the effect
-  under test --- 0.42 to 1.36 around a true 1.00 in that study --- so read only
-  the median, and only after allocation has been compared.
-- `tools/perf-per-call.py` gives instructions and cycles per call of one
-  benchmark in each of several builds, from `perf stat` runs at `--iters 2N`
-  and `--iters N`, interleaved, rotated and optionally pinned, over a few
-  repetitions: the instructions from the lowest count at each `--iters`,
-  and the cycles from the median. Where a build's instruction differences spread
-  over more than 1%, it reports that and exits 1. Its instruction counts back
-  a wall-time ratio as cachegrind's do, at native speed; its cycles carry
-  the machine's noise. With `--alloc` it also gives the bytes allocated a call,
-  from the RTS's statistics of the same runs, taken as the instructions are;
-  the benchmark must accept RTS options.
-- `tools/cachegrind-per-call.py` gives instructions and estimated cycles per
-  call of one benchmark, from cachegrind runs at `--iters 2N` and `--iters N`,
-  for a machine where `perf stat` cannot run. It is deterministic, so it is what
-  backs a wall-time ratio that decides whether a change is banned; in that study
-  it showed wall-time medians of 1.05 to 1.06 to be noise, the instruction
-  counts equal to 0.003%. With `--cells FILE` it counts every cell of a file
-  of `MODE NAME N` lines in each of several builds, a `summed` cell run
-  with `--summed` as orthotope's specialisation benchmark takes it, each figure
-  exact to two decimals; give a cell of large arrays 100 calls or more,
-  a collection still moving its level by up to 0.8% at 100 (M). `--cpu` pins
-  the runs to one CPU, and `--arg` passes the benchmark an argument.
-  With `--callgrind PREFIX` the N and 2N runs of each of two binaries
-  are callgrind's instead, in the form `cg-read.py` reads, kept, a finished one
-  reused, and followed by `cg-read.py incr` over the pair.
-- `tools/cg-read.py` reads a benchmark binary's callgrind runs, made
-  with `valgrind --tool=callgrind --dump-instr=yes --compress-pos=no`, names
-  compressed or not, against the binary's symbols and disassembly, each symbol's
-  z-encoded unit prefix stripped so that a function keeps its name across
-  builds, and a module-internal procedure's unique with it. Such a procedure has
-  a symbol only in a build given `-fexpose-internal-symbols`, which
-  in a one-module probe on GHC 10.1.20261019 changed no code byte; elsewhere
-  its instructions count under the symbol before it, which the tool notes
-  on stderr. So do a library binding's, built into a section of its own
-  as hadrian builds the boot libraries, and there the symbol before it can
-  be another module's: in nofib's banner, `hPutStr`'s character loop counted
-  under `GHC.Internal.IO.Handle.Internals.$wwantWritableHandle'`, 7 KB before
-  it. `owner` names the object file, section and symbol holding an address's
-  code, found by its bytes. `bysym` gives instructions a call by symbol in two
-  runs, `incr` the same between N and 2N calls of each of two binaries, which
-  cancels the process's setup, `allocs` the heap-pointer bumps executed at least
-  half as often as the calls and the info pointers stored into the memory they
-  allocate, `region` the executed instructions of one symbol's code in two runs,
-  diffed, `regincr` the same over `incr`'s four runs, each instruction's
-  increase from N to 2N calls, which cancels the setup the harness runs
-  in that code too, and `seq` one run's, filtered by count a call. `kinds` sums
-  two runs' instructions by kind, every conditional jump as `jcc` and a jmp
-  as `jmp` or, indirect, `jmp*`, over the binary or one symbol's code: a change
-  of block layout alone moves `jmp` and nothing else. Its disassembly restarts
-  at every executed address a sweep did not decode: a linear sweep through one
-  of GHC's info tables falls out of step with the code after it, dropping
-  executed instructions and printing the table's bytes as code. In orthotope's
-  specialisation benchmark a run of N calls executes the row N + 2 times, so one
-  run's counts over N are high by (N + 2)/N, and `incr`'s are not. `sweep`
-  reports whether every `perf record` sample of a range decodes
-  as an instruction start in a linear sweep from the range's start; settle
-  that before reading a hot loop off the samples and objdump at the hot
-  addresses, and where it reports a miss, read the loop from `seq` instead.
-- `tools/obj-diff.py` compares the object and assembly files of two builds
-  by two compilers, file by file, with what the compiler's identity puts
-  into them masked: a development GHC's dated version, which it takes
-  from its commit's date and writes into every `.ident` and `.comment`,
-  and the cabal unit ids' hashes that cover it in the symbols. Without the masks
-  every file of two such builds differs; with them, the builds of GHC's master
-  and of the commit after it, which changed only the RTS, compared equal in all
-  431 of nofib's objects. `--ext` names the kinds of file compared in place
-  of the default ones, `--ext .dump-asm` reaching GHC's assembly dumps, whose
-  timestamp lines are masked too, and two files may stand in for the two
-  directories. `--procs` follows each differing assembly file with the units
-  that differ and their instruction counts, the file split at every `.section`
-  and each unit named by its first label; only the labels a unit defines
-  are renumbered, so that a changed reference to another unit's label still
-  shows. `--show REGEX` prints the diffs of the units it selects.
-- `tools/ticky-diff.py` diffs the per-closure allocation of two ticky-ticky runs
-  of one benchmark, closure names normalised across builds. Build both
-  with `--ghc-options=-ticky` and run the same `--iters` with `+RTS -rFILE`.
-  It is how a whole allocation difference was pinned on one function,
-  `astTimesK`, in one step. Given one run, it lists its closures by allocation
-  (A1).
-- `tools/core-diff.py` compares two builds' optimised Core module by module,
-  from `-ddump-simpl -ddump-to-file -dsuppress-uniques` dumps in two build
-  directories or `-dumpdir` trees: bindings and terms per module;
-  the specialisations and workers a module has in one build and not the other,
-  with their terms where the dumps keep the size comments
-  of `-dsuppress-idinfo`; or a verdict per module, the Core the same, the same
-  but for unboxed literals, or different. Compile-time cost lands in the modules
-  that specialise an exposed function, not in the module that exposes it,
-  so this --- not timing the module --- is how to see where a flag or pragma
-  puts its cost. Given one build and `--module`, it lists every binding name
-  of the modules matched, with its count and terms (S2, C1).
-- `tools/row-core.py` tells which rows of orthotope's specialisation benchmark
-  have Core that differs between two builds, from their `-ddump-simpl` dumps
-  and a source tree resolving the qualifiers: for each row, the forced
-  and the summing function are each `same`, `literals` or `differs`, following
-  the benchmark's own code alone and then every reference, a binding's hash
-  covering everything it reaches. `diff` names a row's first differing node,
-  `dump` writes a row's closures to a file, and `nodes` and `tokens` compare two
-  such files node by node and one node token by token, names normalised.
-  It is the first reading of a change, the rows it leaves `same` serving
-  as controls for the counts and timings after it.
-- `tools/census.py` runs a census of orthotope's specialisation benchmark
-  over two builds: `cells` takes the cells of the rows `row-core.py` marks
-  `differs`, and `movers` those whose bytes differ between the two builds'
-  tables; `count` counts each with `perf-per-call.py` at N and 2N calls, N sized
-  from the first build's table to about 20 ms, resuming where an earlier count
-  stopped, and `--cpus` splits it over lanes, one a CPU; give CPUs on separate
-  cores. `read` groups the cells whose ratio moves by 0.2% or more, one exactly
-  at it included, and lists apart those counted over fewer than 200 calls
-  in a group not every cell of which moves, which `noise` counts again at ten
-  times N. Its figures are differences between N and 2N calls, so the two
-  evaluations the harness makes before each batch cancel.
-- `tools/pragma-calls.py` sorts the inlining pragmas a worktree's diff removes
-  by whether their removal changed the Core, counting each target's name per
-  module in two builds' dumps: DEAD where every count agrees, MOVED
-  with the modules that differ; a name removed in several modules is judged per
-  module, each counting only the tokens that name its own module's binding.
-  It is the step between removing a whole group of pragmas and bisecting it.
-  DEAD is weaker than identical Core, and does not make a pragma removable: P's
-  rule on removing keeps it. With `--inline` it processes one build instead,
-  marking each INLINE target of a source tree CALLED, COPIED or RECURSIVE (I1,
-  I2).
-- `tools/pragma-map.py` sets the inlining pragmas of two source trees side
-  by side, keyed by file, enclosing class or instance head, name and occurrence,
-  and prints those that differ, `none` where a tree has none for a key:
-  the pragmas two commits of a library disagree on, where `pragma-calls.py`
-  reads what removing some does to the Core.
-- `tools/rules-diff.py` compares which rewrite rules fired per module in two
-  builds, from `-ddump-simpl-stats` dumps, the fusion rules marked,
-  and with `--unfolding NAME` how often a function was inlined. It reports
-  whether what fused still fuses; a fusion count can fall only because
-  a duplicated consumer went, so read a drop against `core-diff`. Given one
-  build, it lists the fusion rules that fired (F1, F2).
-- `tools/ctime-diff.py` compares two builds' compile time and GHC allocation per
-  module, from `-ddump-timings` dumps beside the Core dumps, the modules whose
-  Core is the same in both serving as controls whose time ratios are the noise
-  of the run. On one pair of orthotope builds whose Core shrank by 2.3%,
-  the time ratio was 1.005, inside the controls' 1.004 to 1.114,
-  and the allocation ratio 0.978, the steadier measure.
-- `tools/compile-cost.py` counts what compiling each of a set of modules costs
-  several GHCs --- instructions natively under `+RTS -A3G -V0`, allocation
-  and collections --- and whether their assembly differs, by default
-  over the fifteen compilations of the NCG series' measurements, and says where
-  a compile collected more than once, a figure moved between rounds or a compile
-  failed. `compare` sets the `--out` files of compilers counted at different
-  times in one table, against the first file's first compiler or `--base`'s,
-  and `--min PCT` leaves out a row within PCT percent of the base's in both
-  instructions and allocation whose assembly is the same. Its `cg` mode runs one
-  compile under cachegrind and splits its instructions into the collector's,
-  the RTS's with libc's, and the compiler's own, and `cg-diff` gives the last's
-  difference by function, z-decoded: the split and the decoding are Simon
-  Jakobi's
-  [cgwork.py](https://gist.github.com/sjakobi/eed39b23f41b06fc41337d137067bd8b).
-  `tools/NCG-scale/run.sh` compiles its scaling probes under the same options
-  and records each compile's collections, which `report.py` marks where they
-  exceed one.
-- `tools/NCG-battery/battery.py` runs the NCG series' measurement battery
-  for one GHC tree under one label, or any of its parts alone: nofib at -O2, -O1
-  and -O0, the tasty-papi benchmarks of containers, vector and megaparsec at -O2
-  and -O1, a thin sample of orthotope's A2T counted by `perf-per-call.py`,
-  the fifteen compilations by the tree's stage-1 and stage-2 compilers through
-  `compile-cost.py`, GHC's perf and size tests, the scaling probes, the tickets'
-  reproducers through `tickets.py`, a Text scan over UTF-8 digits of width 1
-  to 4 through `utf8.py` and `NCG-fuzz/run.py`'s random test over a fixed range
-  of seeds. Its docstring states each setting once with its reason, nofib's
-  compiler under `+RTS -A3G -V0` and the benchmarks with the RTS clock running
-  among them, and `--dry` prints the script it would run. A package's part
-  or A2T's may name its steps, `containers-O2:build` or `a2t:deps,build`,
-  so that a build and its runs go in separate calls; `--compilers` puts
-  the label's compilers in place, the tree's own or a stage-1 compiler built
-  elsewhere; `--a2t-lock FILE` holds a lock over A2T's dependencies and build,
-  which wait for memory while it is held; and `--min-free GIB` refuses to start
-  under that much free on the work directory's disk. `rebuild.py` runs it
-  over a series' base and every commit, each built from nothing, one after
-  another, going on past a step that fails, records each build's compile time,
-  allocation and object size by module through `bstats.py`, and ends
-  with `runreport.py`'s report of the last commit against the base; `--pair`
-  measures the base and the tip alone, and `--build` builds one tree behind
-  the machine's memory and disk gates and measures nothing. `nbcmp.py` compares
-  two labels' nofib runs, the collections and copied bytes beside
-  the instructions, `pkgcmp.py` their package benchmarks, `a2tcmp.py` their A2T
-  samples, `perfcmp.py` their perf and size tests and which leave the window
-  GHC's CI holds them to, `tickets.py compare` their tickets' figures or their
-  Text scans', `bstats.py compare` their builds, and `alone.py` reruns one
-  containers benchmark alone.
-- `tools/memguard.sh` stops a process group, a chain started by `setsid`, while
-  MemAvailable is under one bar and continues it once it is over another,
-  so that a chain beside a build taking most of the memory waits rather
-  than running the machine out of it. It measures nothing, and exits 0 once
-  the group ends or a done file appears, 2 on a usage error.
-- `tools/NCG-fuzz/run.py` compiles and runs `gen.py`'s random programs
-  under many flag sets, by a GHC tree's stage-2 compiler and a base tree's,
-  or by compilers named by path, for a time or over a fixed range of seeds,
-  and reports each disagreement, panic and crash: a test of the NCG's
-  correctness, which measures nothing. `--report` counts its result files.
-- `tools/one-shot.py` recompiles one module of a finished build alone, flags
-  added, from the arguments a `cabal build -v2` log records, reading the build's
-  interfaces and writing none of its files: a module's Core under a flag,
-  or with its call sites edited, for the price of that module's compilation.
-- `tools/src-attrib.py` credits the code of a `-g1` Core dump to the source
-  definitions its innermost source notes name, and compares two dumps so.
-  It shows where a module's code came from, but on the module it was tried
-  on `-g1` changed what GHC floated and duplicated, so it does not predict what
-  a pragma saves: build the change and compare with `core-diff`.
-- `tools/align-as.py` stands in for the assembler,
-  as `--ghc-options="-pgma $PWD/tools/align-as.py -fforce-recomp"`, and aligns
-  loop heads to a cache line, which GHC's native backend never does, so that two
-  builds compared do not differ by where their hot loops happen to straddle one.
-  A build uses it, or an edited copy of it, only from a fresh `--builddir`,
-  an existing one keeping its object code whether or not `-fforce-recomp`
-  is passed. `LOOP_*` variables choose the placement; its docstring describes
-  each, and what orthotope's micro-regime3 benchmark, where it was written,
-  measured of the forms they build; its cases are in `tools/defects.json`,
-  and it exits with the real assembler's status, or 1 on a setting it refuses.
-- `tools/loop-offsets.py` finds a binary's copies of a hot loop structurally,
-  by a backward branch and the bytes it spans, groups them by their bytes
-  and reports where each lands in its cache line, so that a margin between two
-  builds can be checked for being one of them placing a loop astride a line
-  where the other did not: on micro-regime3 a straddled copy of one 28-byte loop
-  was priced at 1.19 against a resident one. `--survey` counts every loop up
-  to a line long and the straddlers among them, `--delta` reports how far
-  a rebuild moved the tracked loops, and `--match` names a binary's straddlers
-  off its `-g3` twins; its cases are in `tools/defects.json`.
+- `tools/ab-time.py`: M's interleaved A/B of benchmark executables, time against
+  the first build with allocation beside it; read only the median, and only
+  after allocation (M, I3, F1, F2, W2).
+- `tools/perf-per-call.py`: instructions, cycles and with `--alloc` bytes
+  a call, from `perf stat` at N and 2N calls; exits 1 where the instruction
+  counts spread over 1% (M, I3, A1, B1, B2).
+- `tools/cachegrind-per-call.py`: the same from cachegrind, deterministic, where
+  `perf stat` cannot run; `--cells` counts a file of cells, `--callgrind` keeps
+  callgrind runs for `cg-read.py` (M).
+- `tools/cg-read.py`: which symbol, instruction or region of a binary
+  callgrind's counts belong to, two runs or N and 2N calls compared, a loop's
+  executions read by `seq`; run `sweep` before reading a hot loop off
+  `perf record` samples (B2).
+- `tools/obj-diff.py`: which object or assembly files, and which procedures
+  in them, differ between two builds, the compiler's identity masked.
+- `tools/ticky-diff.py`: which closure allocates, or moved its allocation
+  between two builds, from ticky runs of builds made with `-ticky` (I3, A1, B1).
+- `tools/core-diff.py`: which modules' Core, bindings, specialisations
+  and workers differ between two builds, or one build's bindings with counts
+  and terms; compile-time cost lands in the modules that specialise an exposed
+  function, so this, not timing the module, shows where a flag or pragma puts
+  its cost (S2, I3, F1, L1, A1, W2, C1).
+- `tools/row-core.py`: which rows of orthotope's specialisation benchmark have
+  Core that differs between two builds, the rows left `same` serving
+  as controls.
+- `tools/census.py`: the instruction census over the cells of orthotope's
+  specialisation benchmark that moved between two builds, counted
+  with `perf-per-call.py`, resuming where an earlier count stopped,
+  over `--cpus` lanes, one a CPU (give CPUs on separate cores), and grouped
+  by its own `read`.
+- `tools/pragma-calls.py`: whether removing a diff's pragmas changed the Core,
+  DEAD or MOVED per module, which does not make a pragma removable: P's rule
+  on removing keeps it; with `--inline`, each INLINE target CALLED, COPIED
+  or RECURSIVE (I1, I2, I3).
+- `tools/pragma-map.py`: the inlining pragmas two source trees disagree on.
+- `tools/rules-diff.py`: which rewrite and fusion rules fired per module, in one
+  build or two, and with `--unfolding NAME` how often NAME was inlined (I1, I3,
+  F1, F2).
+- `tools/ctime-diff.py`: two builds' compile time and allocation per module
+  against the controls of unchanged Core, allocation the steadier measure (P,
+  I3, C1).
+- `tools/compile-cost.py`: what compiling a set of modules costs several GHCs,
+  natively under `+RTS -A3G -V0`, with `compare` across counts and `cg`
+  splitting a compile's instructions (M). `tools/NCG-scale/run.sh` compiles
+  its scaling probes under the same options and records each compile's
+  collections, which `report.py` marks where they exceed one.
+- `tools/NCG-battery/battery.py`: the NCG series' measurement battery for one
+  GHC tree, its parts, steps and comparison tools in its docstring; `rebuild.py`
+  beside it builds and measures a series, and `alone.py` reruns one containers
+  benchmark alone.
+- `tools/memguard.sh`: holds a `setsid` chain while MemAvailable is under a bar
+  and resumes it over another, measuring nothing; it exits 0 once the group ends
+  or a done file appears, 2 on a usage error.
+- `tools/NCG-fuzz/run.py`: the NCG's correctness under random programs and many
+  flag sets, measuring nothing.
+- `tools/one-shot.py`: one module of a finished build recompiled alone, flags
+  added, writing none of the build's files: a module's Core under a flag,
+  or with its call sites edited, for the price of that module's compilation
+  (C1).
+- `tools/src-attrib.py`: which source definitions a `-g1` Core dump's code came
+  from; on the module it was tried on `-g1` changed what GHC floated
+  and duplicated, so it does not predict what a pragma saves: build the change
+  and compare with `core-diff` (C1).
+- `tools/align-as.py`: the assembler stand-in that aligns loop heads to a cache
+  line; a build uses it, or an edited copy of it, only from a fresh
+  `--builddir`, and it exits with the real assembler's status, or 1 on a setting
+  it refuses (M).
+- `tools/loop-offsets.py`: where a binary's copies of a hot loop land in their
+  cache lines, for a margin between two builds.
 
 The tools written for the checks of one build or one source tree,
 `tools/pragma-census.py`, `tools/spec-audit.py`, `tools/bang-drops.py`,
@@ -1308,36 +1136,26 @@ not happen, as `pragma-calls.py --inline` does; `tools/bang-lazy-check.py`,
 without `--allow`, exits 0 whatever it printed, its candidates being
 for the reader.
 
-- `tools/pragma-census.py` lists the overloaded functions, instance methods
-  and class default methods of a source tree that carry no pragma,
-  and with `--rule` every one whose pragma differs from what P's rule gives it,
-  a forwarder's and a thin wrapper's included (I4), and each one taking
-  or returning a sum marked as never to be built that lacks its comment (A3);
-  with `--write` it writes the pragmas the rule adds or strengthens
-  into the tree (I4).
-- `tools/spec-audit.py` lists the calls in optimised Core that hand a function
-  an instance dictionary, by callee, and the bindings that take a dictionary
-  as a lambda argument: code running unspecialised (S1).
-- `tools/bang-lazy-check.py` flags an argument banged on some equations
-  of a definition and left unforced on another, and checks each against GHC's
-  demand signatures (L1).
-- `tools/bang-drops.py` lists the bangs a later version of a source tree dropped
-  (L1).
-- `tools/lazy-reads.py` lists the unbanged bindings that a lambda, a section
-  or a per-element combinator reads (L1, L2).
-- `tools/captured-unbox.py` finds the loops that unbox, on every iteration,
-  a value captured from outside them (L2).
-- `tools/box-audit.py` lists the arguments optimised Core takes apart though
-  they are passed boxed, marking those whose box is used besides, and, from CPR
-  dumps, the results returned boxed (B1).
-- `tools/loop-reloads.py` lists, from `-ddump-asm`, the loops whose every
-  iteration reloads values from the enclosing frame (B2).
-- `tools/workaround-cites.py` lists the comment blocks that mention a workaround
-  and name no cause, and each filed issue of `docs/` with the files citing
-  it (W1).
-- `tools/hascallstack.py` checks orthotope's `HasCallStack` constraints,
-  and the error wording they depend on, against the rule its docstring states,
-  and rewrites the constraints to it (A2).
-- `tools/hpc-untaken.py` lists the functions and expressions a run of an `-fhpc`
-  build never entered, from its `hpc draft`, error calls and type-only
-  placeholders left out where the draft quotes them (M).
+- `tools/pragma-census.py`: the overloaded functions, instance methods and class
+  default methods that carry no pragma, with `--rule` every binding whose pragma
+  differs from what P's rule gives it, and with `--write` the pragmas the rule
+  adds or strengthens, written into the tree (I4, F1, A3).
+- `tools/spec-audit.py`: the calls and bindings running unspecialised,
+  by dictionary (S1).
+- `tools/bang-lazy-check.py`: an argument banged on some equations
+  and not others, against GHC's demand signatures (L1).
+- `tools/bang-drops.py`: the bangs a later tree dropped (L1).
+- `tools/lazy-reads.py`: the unbanged bindings a lambda, a section
+  or a per-element combinator reads (L1).
+- `tools/captured-unbox.py`: the loops unboxing a captured value on every
+  iteration (L2, B1).
+- `tools/box-audit.py`: the arguments taken apart though passed boxed,
+  and the results returned boxed (L1, A3, B1).
+- `tools/loop-reloads.py`: the loops reloading values from the enclosing frame
+  on every iteration (B2).
+- `tools/workaround-cites.py`: the workarounds naming no cause, and each filed
+  issue's citing files (W1).
+- `tools/hascallstack.py`: orthotope's `HasCallStack` constraints against
+  the rule its docstring states, rewritten to it (A2).
+- `tools/hpc-untaken.py`: the functions and expressions an `-fhpc` run never
+  entered (M).
