@@ -8946,6 +8946,56 @@
    "no_audit": "other:the-planted-chain-lives-in-the-tools-own-self-test"
   },
   {
+   "id": "NCG-battery-15",
+   "program": "NCG-battery/rebuild.py",
+   "name": "rebuild.py's prune kept nofib's tables, all that the comparisons of a measured label's nofib runs read, inside nofib-r/nofib/_make, a directory of build output, so removing it for space removed the label's nofib results with nothing reporting their loss",
+   "family": "other:record-kept-in-a-build-directory",
+   "fix_rev": "self",
+   "trigger": "a label measured and pruned, then its nofib-r/nofib/_make/cLABEL-LABEL, o1-LABEL and o0-LABEL removed",
+   "ok": "the prune has copied the tables to battery/nofib-RUN.tsv, checked the copy and removed _make/RUN, so runreport.py's nofib section compares the label at each level",
+   "bug": "'not compared: no Main.perf.results.tsv under .../_make/cA-A' at each level",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-14 (findings 1222 and 1223 of the investigation): a disk-freeing script took _make for build output and removed it, the full rebuild's 63 labels' nofib tables with it, and `runreport.py fr00 fr62` said 'not compared' thirteen hours later.",
+   "plant_cmd": "mkdir -p w/battery && for r in cA-A o1-A o0-A; do mkdir -p w/nofib-r/nofib/_make/$r/spectral/x && printf 'spectral/x//run//perf//instructions:u\\t1.0e3\\n' > w/nofib-r/nofib/_make/$r/spectral/x/Main.perf.results.tsv && printf 'spectral/x//objects//Main.o//size\\t2.0e2\\n' > w/nofib-r/nofib/_make/$r/spectral/x/Main.o.compile.tsv && echo binary > w/nofib-r/nofib/_make/$r/spectral/x/Main; done",
+   "unit": "(prune('{tmp}/w', 'A'), remove('{tmp}/w/nofib-r/nofib/_make'), runreport.nofib('{tmp}/w', 'A', 'A'))[2]",
+   "expect_text": [
+    "'cA-A to cA-A: benchmarks run by both 1 (only cA-A: 0, only cA-A: 0)'",
+    "'o1-A to o1-A: benchmarks run by both 1 (only o1-A: 0, only o1-A: 0)'",
+    "'o0-A to o0-A: benchmarks run by both 1 (only o0-A: 0, only o0-A: 0)'",
+    "'  object size (1): geomean 1.00000"
+   ],
+   "expect_absent": "not compared",
+   "bug_text": "'  not compared: no Main.perf.results.tsv under "
+  },
+  {
+   "id": "NCG-battery-16",
+   "program": "NCG-battery/rebuild.py",
+   "name": "rebuild.py counted a step as measured without testing whether its nofib tables still existed, so a label whose tables were gone stayed measured and nothing said so until a report compared it",
+   "family": "unverified-state",
+   "fix_rev": "self",
+   "trigger": "a label whose LABEL.done stands and whose every battery record is there, but none of its nofib tables, in battery/ or under nofib-r/nofib/_make",
+   "ok": "unrecorded() names the nofib tables missing at each level, so the step is measured again",
+   "bug": "unrecorded() returned [], the step counted as measured",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-14: after _make was removed (NCG-battery-15) a run of the chain would have passed over fr00 to fr62, every one of them lacking its nofib tables.",
+   "plant_cmd": "mkdir -p w/battery w/nofib-r/stats && cd w/battery && for s in ghcb pkgb tix utf8; do echo x > $s-A.tsv; done && echo x > fuzz-A.txt && printf 'c\\t1.0\\t0\\t2.0\\n' > a2t-A.tsv",
+   "unit": "unrecorded('{tmp}/w', 'A')",
+   "expect_text": [
+    "nofib -O2: no Main.perf.results.tsv in ",
+    "/w/battery/nofib-cA-A.tsv or under ",
+    "/w/nofib-r/nofib/_make/cA-A",
+    "nofib -O1: no Main.perf.results.tsv in ",
+    "/w/battery/nofib-o1-A.tsv",
+    "nofib -O0: no Main.perf.results.tsv in ",
+    "/w/battery/nofib-o0-A.tsv"
+   ],
+   "bug_text": "[]"
+  },
+  {
    "id": "pragma-census-27",
    "program": "pragma-census.py",
    "name": "reasoned() took a reason citing a development version, as on GHC 10.1.20261108, for undated, DATE matching only an ISO date beside the version, though such a version carries the date of its tree",

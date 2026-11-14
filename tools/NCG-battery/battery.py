@@ -72,8 +72,12 @@ tests and the probes. The layout, perf and scale apart, is that of the scripts
 this replaces, so that their results stay comparable through nbcmp.py
 and pkgcmp.py:
 
-  nofib       nofib-r/nofib/_make/cTREE-LABEL, o1-LABEL and o0-LABEL, the
-              compiler's figures in nofib-r/stats under the same names
+  nofib       OUT/nofib-cTREE-LABEL.tsv, nofib-o1-LABEL.tsv and
+              nofib-o0-LABEL.tsv, every table of the run's, written by
+              nbcmp.py --keep after nofib-run from the run's directory
+              nofib-r/nofib/_make/cTREE-LABEL, o1-LABEL or o0-LABEL, which
+              stays; the compiler's figures in nofib-r/stats under the
+              run's name
   containers  vpapi/cres/cTREE-LABEL/PROGRAM-I.csv, cTREE-o1-LABEL at -O1
   vector      vpapi/res-cTREE-LABEL-I.csv, res-cTREE-o1-LABEL-I.csv at -O1
   megaparsec  vpapi/mres/cTREE-LABEL/bench-speed-I.csv, cTREE-o1-LABEL
@@ -240,6 +244,7 @@ COMPILE_COST = os.path.join(os.path.dirname(HERE), 'compile-cost.py')
 SCALE_RUN = os.path.join(os.path.dirname(HERE), 'NCG-scale', 'run.sh')
 PER_CALL = os.path.join(os.path.dirname(HERE), 'perf-per-call.py')
 TICKETS = os.path.join(HERE, 'tickets.py')
+NBCMP = os.path.join(HERE, 'nbcmp.py')
 UTF8 = os.path.join(HERE, 'utf8.py')
 FUZZ_RUN = os.path.join(os.path.dirname(HERE), 'NCG-fuzz', 'run.py')
 
@@ -408,7 +413,7 @@ def ghcw(tree, label, ghc):
             f'{ghc} {rts} "$@"\n')
 
 
-def nofib_part(work, t, label, level):
+def nofib_part(work, t, label, level, outdir):
     n = f'{work}/nofib-r'
     ghc = f'{t.bin1}/ghc-{label}'
     if level == 2:
@@ -437,7 +442,7 @@ def nofib_part(work, t, label, level):
         f'chmod +x {q(w + "/ghc")}',
         f'ln -s {q(t.build + "/stage1/bin/ghc-pkg")} {q(w + "/ghc-pkg")}',
         f'cd {q(n + "/nofib")} || exit 2',
-        f'rm -rf {q("_make/" + res)} {q(stats)}; mkdir -p {q(stats)}',
+        f'rm -rf {q("_make/" + res)} {q(stats)} {q(f"{outdir}/nofib-{res}.tsv")}; mkdir -p {q(stats)}',
         f'echo "{tag} start $(date +%T)" >> {q(lines)}',
         f'NB_STATS={q(stats)} setarch -R {shlex.join(argv)} > {q(log)} 2>&1;'
         ' e=$?',
@@ -446,6 +451,8 @@ def nofib_part(work, t, label, level):
         '# the shootout inputs and outputs a run generates, 1.1 GB, which'
         ' nothing reads after it',
         f'rm -f {shootout}',
+        f'python3 {q(NBCMP)} --work {q(work)} --out {q(outdir)} --keep {q(res)} >> {q(lines)} 2>&1'
+        f' || {{ echo "{tag}: its tables not kept" >> {q(lines)}; exit 2; }}',
         '# 1 with every failed target under real/eff is no failure: GHC rejects'
         ' some of its programs',
         f'd=$(grep -a "^\\* Depends on: " {q(log)})',
@@ -705,7 +712,7 @@ def part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TIC
               fz=FUZZ_RUN):
     fam, _, lev = name.partition('-O')
     if fam == 'nofib':
-        body = nofib_part(work, t, label, int(lev))
+        body = nofib_part(work, t, label, int(lev), outdir)
     elif fam in PKGS:
         body = pkg_part(work, t, label, fam, int(lev), steps or ('build', 'run'))
     elif name == 'a2t':
@@ -856,7 +863,9 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
                          + ['exit $f', ')']) + '\n'
     n, v = f'{work}/nofib-r', f'{work}/vpapi'
     stop = [f'{n}/nofib/_make/c{tree}-{label}', f'{n}/nofib/_make/o1-{label}',
-            f'{n}/nofib/_make/o0-{label}', f'{v}/cres/c{tree}-{label}',
+            f'{n}/nofib/_make/o0-{label}', f'{outdir}/nofib-c{tree}-{label}.tsv',
+            f'{outdir}/nofib-o1-{label}.tsv', f'{outdir}/nofib-o0-{label}.tsv',
+            f'{v}/cres/c{tree}-{label}',
             f'{v}/mres/c{tree}-{label}', f'{v}/store-c{tree}-{label}',
             f'{outdir}/comp1-{label}.txt', f'{outdir}/comp1-{label}.runs',
             f'{outdir}/comp2-{label}.runs', f'{outdir}/perf-{label}.tsv',
@@ -991,6 +1000,9 @@ me=$(basename "$0")
 case $me in
   nofib-run) echo "nofib-run|$PWD|$NB_STATS|$*" >> "$FAKELOG"
              for d in ${FAKEDEPENDS:-}; do echo "* Depends on: _make/x/$d"; done
+             o=; p=; for a in "$@"; do [ "$p" = -o ] && o=$a; p=$a; done
+             mkdir -p "_make/$o/spectral/x"
+             [ -n "${FAKENOTABLES:-}" ] || printf 'spectral/x//run//perf//instructions:u\t1.0e3\n' > "_make/$o/spectral/x/Main.perf.results.tsv"
              exit "${FAKENOFIB:-0}";;
   cabal) echo "cabal|$PWD|$*" >> "$FAKELOG"
          [ -z "${FAKELOCK:-}" ] || echo "cabal-lock|$2|$(flock -n "$FAKELOCK" true && echo free || echo held)" >> "$FAKELOG"
@@ -1160,6 +1172,12 @@ def self_test():
         want = [f'--reps 1 --alloc {fb}/bench {c} {A2T_CALLS}' for c in A2T_SAMPLE]
         if of('perf-per-call') != want or of('setarch').count(f'-R python3 {pc} {want[0]}') != 1:
             bad.append(f'A2T counted {of("perf-per-call")}')
+        for r in ('ct-x', 'o1-x', 'o0-x'):  # nofib's tables kept beside the others
+            k, t = f'{o}/nofib-{r}.tsv', f'{nb}/nofib/_make/{r}/spectral/x/Main.perf.results.tsv'
+            have = open(k).read() if os.path.isfile(k) else ''
+            if have != 'spectral/x/Main.perf.results.tsv\tspectral/x//run//perf//instructions:u\t1.0e3\n' \
+                    or not os.path.isfile(t):
+                bad.append(f'{k} is {have!r}, {t} {"is" if os.path.isfile(t) else "is not"} there')
         tsv = f'{o}/a2t-x.tsv'
         have = open(tsv).read() if os.path.isfile(tsv) else ''
         if have != ''.join(f'{c}\t5.0\t0\t8.0\n' for c in A2T_SAMPLE):
@@ -1440,7 +1458,8 @@ def self_test():
                                  ('e', 'FAKEBENCH', 'mres/ct-o1-e/'),
                                  ('g', 'FAKEPCFAIL', '1'), ('h', 'FAKEA2TBUILD', '1'),
                                  ('i', 'FAKEA2TDEPS', '1'), ('j', 'FAKETK', '2'),
-                                 ('fzw', 'FAKEFZ', '1'), ('u8w', 'FAKEU8', '1')):
+                                 ('fzw', 'FAKEFZ', '1'), ('u8w', 'FAKEU8', '1'),
+                                 ('nt', 'FAKENOTABLES', '1')):
             o3 = f'{d}/out-whole-{lab}'
             p = subprocess.run(['bash', '-c', script(w, 't', lab, '4-6', o3, cc=f'{d}/cc.py',
                                                      sc=f'{d}/scale.sh', pc=pc, tk=tk, u8=u8,

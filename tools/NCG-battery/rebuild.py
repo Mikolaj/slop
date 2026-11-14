@@ -7,6 +7,7 @@ build and benchmark each commit in turn").
 Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--pair] [--work DIR] BASE TIP CPUS
        python3 tools/NCG-battery/rebuild.py --build [--patch P]... [--target T]
            [--setting L]... [--logs DIR] [--max-wait S] [--work DIR] TREE COMMIT CPUS
+       python3 tools/NCG-battery/rebuild.py [--work DIR] --keep-nofib LABEL...
        python3 tools/NCG-battery/rebuild.py --self-test
 
 BASE and TIP name commits of ~/slop/ghc and CPUS is a taskset list, to which
@@ -29,8 +30,10 @@ cfr00-fr00 cfr01-fr01`, `o1-fr00 o1-fr01` at -O1. A step:
    the packages' and A2T's builds, WORK/battery/pkgb-frNN.tsv.
 3. What the comparison tools read kept and the rest deleted: the tree,
    the packages' and A2T's build directories, stores, project files and
-   wrapper records, and every file but the tables in nofib's runs. A step
-   that failed keeps all of them, to read.
+   wrapper records; and nofib's runs, each run's tables first written to
+   WORK/battery/nofib-RUN.tsv (nbcmp.py --keep) and read back, which the
+   battery's nofib part has done already, and then its directory under
+   nofib-r/nofib/_make removed. A step that failed keeps all of them, to read.
 
 The run exits once, 0 with every step measured and 2 otherwise, so a session
 waiting on it in the harness's background mode wakes at its end. A failed
@@ -42,9 +45,10 @@ measured, each begun again from nothing: a step counts as measured when its
 LABEL.done stands and every record of 2026-11-07 exists (ghcb, pkgb and tix,
 and A2T's table with its bytes allocated) and of 2026-11-09 (the utf8 part's
 table and the fuzz part's report), so steps measured before then are measured
-again; and a label whose commit is not the one steps.txt names is
-measured again, its old results deleted. It refuses a base other than
-steps.txt's, or a run while another holds the lock; a first run refuses if any
+again, and when nofib's tables and compile counts are there at each level,
+as runreport.py --check requires them; and a label whose commit is not the
+one steps.txt names is measured again, its old results deleted. It refuses
+a base other than steps.txt's, or a run while another holds the lock; a first run refuses if any
 step's results exist. --pair builds and measures the base and the tip alone,
 under the labels the chain gives them, steps.txt naming the whole chain, so
 that a later run of the chain takes them up where their commits are the same.
@@ -58,6 +62,10 @@ for each step build-LABEL.log, boot-LABEL.log, configure-LABEL.log,
 hadrian-LABEL.log.gz, hperf-LABEL.csv (perf stat's) and battery-LABEL.log;
 LABEL.done or LABEL.failed, holding what the log's line says; the report.
 --repo, --battery, --timeout and --min-free are the self-test's.
+
+--keep-nofib does step 3's part for nofib's runs alone, for each LABEL
+measured with the tree of the same name, whether the rebuild's or not, and
+exits 1 if any run's tables could not be kept.
 
 --build builds the one tree WORK/ghc-TREE at COMMIT by step 1's script
 and measures nothing. Each P is applied by patch -p1, in the order given,
@@ -94,6 +102,7 @@ from battery import (A2T_CELLS, A2T_SRC, CONTAINERS_CABAL, FLAVOUR, MBB,  # noqa
                      NOFIB_RUN, PAPIPKG, PERF_TESTS, PKGS, SPECTRAL_MAKEFILE, WORK,
                      Failures, cpu_list, q, run_self_test)
 import bstats  # noqa: E402
+import nbcmp  # noqa: E402
 import runreport  # noqa: E402
 
 REPO = os.path.join(os.path.dirname(WORK), 'ghc')
@@ -192,8 +201,8 @@ def label_paths(work, label):
     ps = [f'{work}/ghc-{label}', f'{n}/c{label}', f'{n}/co/{label}',
           f'{n}/nbf-{label}.log', f'{n}/nbo1-{label}.log', f'{n}/nbo0-{label}.log',
           f'{v}/store-{c}', f'{v}/cres/{c}', f'{v}/cres/{o1}', f'{v}/mres/{c}', f'{v}/mres/{o1}']
-    for r in (c, f'o1-{label}', f'o0-{label}'):
-        ps += [f'{n}/nofib/_make/{r}', f'{n}/stats/{r}']
+    for _, r in runreport.nofib_runs(label):
+        ps += [f'{n}/nofib/_make/{r}', f'{n}/stats/{r}', nbcmp.kept(n, r)]
     for lab in (c, o1):
         for p in PKGS.values():
             ps += [f'{v}/{p["builddir"]}-{lab}', f'{v}/{p["src"]}/cabal.project.{lab}',
@@ -219,16 +228,27 @@ def remove(p):
         os.unlink(p)
 
 
+def keep_nofib(work, label, say=print):
+    """Each of label's nofib runs kept in battery/ and its _make directory
+    removed, nbcmp.keep's lines said; the runs that could not be kept."""
+    failed = []
+    for _, r in runreport.nofib_runs(label):
+        try:
+            nbcmp.keep(f'{work}/nofib-r', r, drop=True, say=say)
+        except (ValueError, OSError) as e:
+            say(f'{r}: not kept, {e}')
+            failed.append(r)
+    return failed
+
+
 def prune(work, label):
-    """A measured step's files that no comparison tool reads."""
+    """A measured step's files that no comparison tool reads, its nofib
+    tables kept first, which raises where they could not be."""
     n, v = f'{work}/nofib-r', f'{work}/vpapi'
     c, o1 = f'c{label}-{label}', f'c{label}-o1-{label}'
-    for r in (c, f'o1-{label}', f'o0-{label}'):
-        for root, _, fs in os.walk(f'{n}/nofib/_make/{r}'):
-            for f in fs:
-                p = os.path.join(root, f)
-                if not f.endswith('.tsv') and os.path.isfile(p) and not os.path.islink(p):
-                    os.unlink(p)
+    failed = keep_nofib(work, label, say=lambda line: None)
+    if failed:
+        raise ValueError(f'nofib\'s tables of {" ".join(failed)} not kept')
     gone = [f'{work}/ghc-{label}', f'{n}/c{label}', f'{n}/co/{label}', f'{v}/store-{c}']
     for lab in (c, o1):
         for p in PKGS.values():
@@ -242,11 +262,13 @@ def prune(work, label):
 def unrecorded(work, label):
     """The records a measured step of this label lacks: those added on
     2026-11-07, and the utf8 and fuzz parts' of 2026-11-09, which steps
-    measured before then lack."""
+    measured before then lack; and nofib's tables and compile counts, as
+    runreport.py --check requires them."""
     out = f'{work}/battery'
     miss = [f'{out}/{s}' for s in (f'ghcb-{label}.tsv', f'pkgb-{label}.tsv', f'tix-{label}.tsv',
                                    f'utf8-{label}.tsv', f'fuzz-{label}.txt')
             if not os.path.exists(f'{out}/{s}')]
+    miss += runreport.missing(work, label, sections=('nofib',))
     a2t = f'{out}/a2t-{label}.tsv'
     with open(a2t) if os.path.exists(a2t) else open(os.devnull) as fh:
         first = fh.readline()
@@ -472,6 +494,13 @@ def main(argv):
         return run_self_test('rebuild.py', self_test)
     if argv[:1] == ['--build']:
         return build_main(argv[1:])
+    work = os.path.abspath(argv[1]) if argv[:1] == ['--work'] and len(argv) > 1 else WORK
+    rest = argv[2:] if argv[:1] == ['--work'] else argv
+    if rest[:1] == ['--keep-nofib']:
+        if len(rest) < 2:
+            print(__doc__.split('\n\n')[1], file=sys.stderr)
+            return 2
+        return 1 if [r for lab in rest[1:] for r in keep_nofib(work, lab)] else 0
     o = {'work': WORK, 'repo': REPO, 'battery': BATTERY, 'timeout': TIMEOUT, 'min_free': MIN_FREE}
     dry = False
     while argv[:1] and argv[0].startswith('--'):
@@ -546,7 +575,9 @@ def put(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, 'w').write('x')
 for r in (c, f'o1-{label}', f'o0-{label}'):
-    put(f'{n}/nofib/_make/{r}/x/Main'); put(f'{n}/nofib/_make/{r}/x/Main.perf.results.tsv')
+    put(f'{n}/nofib/_make/{r}/x/Main')
+    if os.environ.get('FAKENOTABLES') != label:
+        put(f'{n}/nofib/_make/{r}/x/Main.perf.results.tsv')
     put(f'{n}/stats/{r}/1.csv')
 put(f'{n}/c{tree}/{label}/w/ghc'); put(f'{n}/co/{label}/w/ghc')
 put(f'{v}/store-{c}/x'); put(f'{v}/cdist-{c}/x'); put(f'{v}/mdist-{o1}/x'); put(f'{v}/dist-{c}/x')
@@ -695,8 +726,7 @@ def self_test():
         n, v = f'{w}/nofib-r', f'{w}/vpapi'
         for lab in all_labels:
             c, o1 = f'c{lab}-{lab}', f'c{lab}-o1-{lab}'
-            for rel in (f'{n}/nofib/_make/{c}/x/Main.perf.results.tsv',
-                        f'{n}/nofib/_make/o0-{lab}/x/Main.perf.results.tsv',
+            for rel in (f'{w}/battery/nofib-{c}.tsv', f'{w}/battery/nofib-o0-{lab}.tsv',
                         f'{n}/stats/o1-{lab}/1.csv', f'{v}/cres/{c}/m-1.csv', f'{v}/mres/{o1}/b-1.csv',
                         f'{v}/res-{c}-1.csv', f'{v}/cb-{c}.log', f'{w}/battery/perf-{lab}.tsv',
                         f'{v}/ab-{c}.log', f'{w}/battery/a2t-{lab}.tsv',
@@ -704,7 +734,8 @@ def self_test():
                         f'{logs}/hadrian-{lab}.log.gz', f'{logs}/{lab}.done'):
                 if not os.path.exists(rel):
                     bad.append(f'{rel} was not kept')
-            for rel in (f'{w}/ghc-{lab}', f'{n}/nofib/_make/{c}/x/Main', f'{n}/c{lab}', f'{n}/co/{lab}',
+            for rel in (f'{w}/ghc-{lab}', f'{n}/nofib/_make/{c}', f'{n}/nofib/_make/o1-{lab}',
+                        f'{n}/c{lab}', f'{n}/co/{lab}',
                         f'{v}/store-{c}', f'{v}/cdist-{c}', f'{v}/mdist-{o1}', f'{v}/dist-{c}',
                         f'{v}/ctr/cabal.project.{c}', f'{v}/adist-{c}', f'{v}/a2t/cabal.project.{c}',
                         f'{v}/wstats-cdist-{c}',
@@ -740,15 +771,19 @@ def self_test():
             if p.returncode != 2 or lines or 'lock' not in p.stdout:
                 bad.append(f'the lock: {p.returncode} {p.stdout[-200:]}')
 
-        # A measured step lacking a record of 2026-11-07 or 2026-11-09 is
-        # measured again, and so is one whose commit is another now.
+        # A measured step lacking a record of 2026-11-07 or 2026-11-09, or
+        # nofib's tables, is measured again, and so is one whose commit is
+        # another now.
+        with open(f'{w}/battery/nofib-o1-fr00.tsv', 'w'):
+            pass
         os.unlink(f'{w}/battery/utf8-fr01.tsv')
         os.unlink(f'{w}/battery/tix-fr02.tsv')
         with open(f'{w}/battery/a2t-fr03.tsv', 'w') as fh:
             fh.write('c\t1.0\t0\n')
         os.unlink(f'{w}/battery/fuzz-fr04.txt')
         p, lines = go()
-        if p.returncode != 0 or measured(lines) != all_labels[1:] or 'measured without' not in p.stdout:
+        if p.returncode != 0 or measured(lines) != all_labels or 'measured without' not in p.stdout \
+                or 'nofib -O1: no Main.perf.results.tsv in' not in p.stdout:
             bad.append(f'steps lacking records: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
         with open(f'{logs}/steps.txt') as fh:
             st = fh.read()
@@ -791,6 +826,29 @@ def self_test():
         if p.returncode != 0 or measured(lines) != ['fr01'] or os.path.exists(f'{w2}/ghc-fr01') \
                 or os.path.exists(f'{w2}/battery/rebuild/fr01.failed'):
             bad.append(f'taking up the failed step: {p.returncode} {measured(lines)}')
+        # A step whose nofib tables could not be kept fails and keeps its files.
+        w8 = fresh('w8')
+        p, lines = go(work=w8, FAKENOTABLES='fr02')
+        if p.returncode != 2 or "fr02 FAILED, ValueError: nofib's tables of cfr02-fr02 o1-fr02 o0-fr02" \
+                not in p.stdout or not os.path.isdir(f'{w8}/ghc-fr02') \
+                or not os.path.isdir(f'{w8}/nofib-r/nofib/_make/o1-fr02'):
+            bad.append(f'nofib tables not kept: {p.returncode} {p.stdout[-300:]}')
+        # --keep-nofib: a label measured elsewhere, its runs kept and removed;
+        # again, nothing to do; a label with no runs, 1.
+        for run_ in ('cm-m', 'o1-m', 'o0-m'):
+            os.makedirs(f'{w8}/nofib-r/nofib/_make/{run_}/x')
+            for f, text in (('Main', 'bin'), ('Main.perf.results.tsv', 'x//run//perf//instructions:u\t5.0\n')):
+                with open(f'{w8}/nofib-r/nofib/_make/{run_}/x/{f}', 'w') as fh:
+                    fh.write(text)
+        outs = []
+        for labs in (['m'], ['m'], ['m', 'none']):
+            q = subprocess.run([sys.executable, os.path.abspath(__file__), '--work', w8, '--keep-nofib',
+                                *labs], capture_output=True, text=True)
+            outs.append((q.returncode, q.stdout))
+        if [rc for rc, _ in outs] != [0, 0, 1] or os.path.exists(f'{w8}/nofib-r/nofib/_make/o0-m') \
+                or open(f'{w8}/battery/nofib-o0-m.tsv').read() != 'x/Main.perf.results.tsv\tx//run//perf//instructions:u\t5.0\n' \
+                or 'removed' not in outs[0][1] or 'o1-none: not kept' not in outs[2][1]:
+            bad.append(f'--keep-nofib: {outs}')
         # A failed build runs no battery; three steps failing in a row stop the run.
         w3 = fresh('w3')
         p, lines = go(work=w3, FAKEHADRIAN='ghc-fr02')

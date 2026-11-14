@@ -9,6 +9,7 @@ compare); each section's summary, then every row moving by its threshold, up
 and down. rebuild.py writes it for the last label against the base's, fr00.
 
 Usage: python3 tools/NCG-battery/runreport.py [--work DIR] A B OUT
+       python3 tools/NCG-battery/runreport.py [--work DIR] --check [LABEL...]
        python3 tools/NCG-battery/runreport.py --self-test
 
 The thresholds (tests/rev2/ol2/rows.py's, and Mikolaj's of 2026-11-07 for
@@ -31,6 +32,16 @@ and `FAIL` otherwise, naming the failing seeds and those not run.
 A section whose tables are missing says so and the others go on. The work
 directory is battery.py's, dist-ghcho by default. Exits 0 when the report
 was written.
+
+--check tests for each LABEL, or for each label with a LABEL.done in
+WORK/battery/rebuild where none is given, whether every record the report's
+sections read is there and not empty, the tree's name taken to be the
+label's, as rebuild.py's are: nofib's tables at each level, read as nbcmp.py
+reads them, and its compiles' counts; containers', megaparsec's and vector's
+runs at -O2 and -O1; the A2T, compilations', perf tests', scaling, tickets'
+and Text scan's tables; the random test's lanes; and the builds' tables. It
+prints a line for each label lacking any, naming what, then a count, and
+exits 1 when any label lacks one, 0 otherwise.
 """
 
 import glob
@@ -74,15 +85,19 @@ def listing(title, rs, bar):
             + [f'  {r * 100:+.3f}%  {k}  {x:.0f} {y:.0f}' for r, k, x, y in m])
 
 
-def nofib(work, a, b):
+def nofib_runs(label):
+    """Label's nofib runs, by level, as battery.py names them."""
+    return (('-O2', f'c{label}-{label}'), ('-O1', f'o1-{label}'), ('-O0', f'o0-{label}'))
+
+
+def nofib(work, a, b, outdir=None):
     n = os.path.join(work, 'nofib-r')
     out = []
-    for lev, ra, rb in (('-O2', f'c{a}-{a}', f'c{b}-{b}'), ('-O1', f'o1-{a}', f'o1-{b}'),
-                        ('-O0', f'o0-{a}', f'o0-{b}')):
+    for (lev, ra), (_, rb) in zip(nofib_runs(a), nofib_runs(b)):
         out.append(f'nofib {lev}')
         try:
-            out += nbcmp.compare(n, ra, rb)
-            fa, fb = nbcmp.load(n, ra), nbcmp.load(n, rb)
+            out += nbcmp.compare(n, ra, rb, outdir)
+            fa, fb = nbcmp.load(n, ra, outdir), nbcmp.load(n, rb, outdir)
         except (ValueError, OSError) as e:
             out.append(f'  not compared: {e}')
             continue
@@ -271,7 +286,7 @@ def builds(outdir, a, b):
 def report(work, a, b, path, outdir=None):
     outdir = outdir or os.path.join(work, 'battery')
     lines = [f'{b} against {a}, work directory {work}', '']
-    for sec in (lambda: nofib(work, a, b), lambda: packages(work, a, b),
+    for sec in (lambda: nofib(work, a, b, outdir), lambda: packages(work, a, b),
                 lambda: a2t(outdir, a, b), lambda: comp(outdir, a, b),
                 lambda: perf(work, outdir, a, b), lambda: scale(outdir, a, b),
                 lambda: tix(outdir, a, b), lambda: tix(outdir, a, b, 'utf8 Text scan', 'utf8'),
@@ -284,6 +299,55 @@ def report(work, a, b, path, outdir=None):
     with open(path, 'w') as fh:
         fh.write('\n'.join(lines))
     return path
+
+
+def missing(work, label, outdir=None, sections=None):
+    """What of label's records the report reads is absent or empty, a line
+    each, of the sections named or of all."""
+    outdir = outdir or os.path.join(work, 'battery')
+    n, v = os.path.join(work, 'nofib-r'), os.path.join(work, 'vpapi')
+    c, o1, e = f'c{label}-{label}', f'c{label}-o1-{label}', glob.escape
+    out = []
+
+    def need(section, pattern):
+        if sections and section not in sections:
+            return
+        files = sorted(glob.glob(pattern))
+        empty = [p for p in files if os.path.isfile(p) and not os.path.getsize(p)]
+        if not files:
+            out.append(f'{section}: no {pattern}')
+        elif empty:
+            out.append(f'{section}: {len(empty)} of {len(files)} {pattern} empty, the first {empty[0]}')
+    for lev, r in nofib_runs(label):
+        if not sections or 'nofib' in sections:
+            try:
+                nbcmp.load(n, r, outdir)
+            except (ValueError, OSError) as x:
+                out.append(f'nofib {lev}: {x}')
+        need('nofib', os.path.join(e(n), 'stats', e(r), '*.csv'))
+    for lab in (c, o1):
+        need('containers', os.path.join(e(v), 'cres', e(lab), '*.csv'))
+        need('megaparsec', os.path.join(e(v), 'mres', e(lab), '*.csv'))
+        need('vector', os.path.join(e(v), f'res-{e(lab)}-*.csv'))
+    o, b = e(outdir), e(label)
+    for section, name in (('A2T', f'a2t-{b}.tsv'), ('comp', f'comp1-{b}.runs'),
+                          ('comp', f'comp2-{b}.runs'), ('perf', f'perf-{b}.tsv'),
+                          ('scale', f'scale-{b}.txt'), ('tickets', f'tix-{b}.tsv'),
+                          ('utf8', f'utf8-{b}.tsv'), ('fuzz', f'fuzz-{b}/result-*.txt'),
+                          ('builds', f'ghcb-{b}.tsv'), ('builds', f'pkgb-{b}.tsv')):
+        need(section, os.path.join(o, name))
+    return out
+
+
+def check(work, labels):
+    """--check's lines and status."""
+    logs = os.path.join(work, 'battery', 'rebuild')
+    labels = labels or sorted(os.path.basename(p)[:-5]
+                              for p in glob.glob(os.path.join(glob.escape(logs), '*.done')))
+    if not labels:
+        return [f'no label given and no LABEL.done in {logs}'], 2
+    lines = [f'{lab}: {"; ".join(m)}' for lab in labels for m in [missing(work, lab)] if m]
+    return lines + [f'{len(labels)} labels checked, {len(lines)} lacking records'], 1 if lines else 0
 
 
 # --- self-test: two labels' tables planted by the tools' own planters,
@@ -367,6 +431,39 @@ def self_test():
                       f'  C: FAIL, no results in {o}/fuzz-C'):
             if piece not in text:
                 bad.append(f'the report lacks {piece!r}')
+    # --check: a label K with every record, nofib's tables kept in battery/,
+    # passes; each record emptied in turn fails it, naming the record; a
+    # label with none fails by every section.
+    with tempfile.TemporaryDirectory(prefix='runreport-') as w:
+        n, v, o = f'{w}/nofib-r', f'{w}/vpapi', f'{w}/battery'
+        recs = [f'{o}/nofib-{r}.tsv' for _, r in nofib_runs('K')]
+        recs += [f'{n}/stats/{r}/1.csv' for _, r in nofib_runs('K')]
+        for lab in ('cK-K', 'cK-o1-K'):
+            recs += [f'{v}/cres/{lab}/p-1.csv', f'{v}/mres/{lab}/bench-speed-1.csv',
+                     f'{v}/res-{lab}-1.csv']
+        recs += [f'{o}/{x}' for x in ('a2t-K.tsv', 'comp1-K.runs', 'comp2-K.runs', 'perf-K.tsv',
+                                      'scale-K.txt', 'tix-K.tsv', 'utf8-K.tsv',
+                                      'fuzz-K/result-0.txt', 'ghcb-K.tsv', 'pkgb-K.tsv',
+                                      'rebuild/K.done')]
+        for p in recs:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, 'w') as fh:
+                fh.write('spectral/x/Main.perf.results.tsv\tspectral/x//run//perf//instructions:u\t1.0e3\n'
+                         if '/nofib-' in p else 'x\n')
+        got = check(w, [])
+        if got != (['1 labels checked, 0 lacking records'], 0):
+            bad.append(f'--check of a whole label: {got}')
+        for p in recs[:-1]:
+            os.rename(p, p + '.aside')
+            open(p, 'w').close()
+            (lines, rc), rel = check(w, ['K']), os.path.relpath(p, w)
+            if rc != 1 or len(lines) != 2 or not lines[0].startswith('K: ') \
+                    or os.path.basename(os.path.dirname(rel) if '/stats/' in p else rel)[:6] not in lines[0]:
+                bad.append(f'--check with {rel} empty: {rc} {lines}')
+            os.replace(p + '.aside', p)
+        lines, rc = check(w, ['Z'])
+        if rc != 1 or len(lines[0].split('; ')) != len(recs) - 1:
+            bad.append(f'--check of a label with nothing: {rc} {lines[0].split("; ")}')
     for x in bad:
         print('FAIL', x)
     print('ok   runreport.py self-test' if not bad else f'{len(bad)} failed')
@@ -379,6 +476,10 @@ def main(argv):
     work = WORK
     if argv[:1] == ['--work'] and len(argv) > 1:
         work, argv = os.path.abspath(argv[1]), argv[2:]
+    if argv[:1] == ['--check']:
+        lines, rc = check(work, argv[1:])
+        print('\n'.join(lines))
+        return rc
     if len(argv) != 3:
         print(__doc__.split('\n\n')[1], file=sys.stderr)
         return 2

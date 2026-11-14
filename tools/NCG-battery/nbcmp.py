@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""battery.py's nofib runs A and B, each NAME's results in the work
-directory's nofib-r/nofib/_make/NAME and nofib-r/stats/NAME, compared
+"""battery.py's nofib runs A and B, each NAME's tables in the work
+directory's battery/nofib-NAME.tsv, or under nofib-r/nofib/_make/NAME where
+that file is missing or empty, and its compiles' counts in
+nofib-r/stats/NAME, compared
 benchmark by benchmark over the benchmarks both ran: the program's instructions:u, bytes allocated, collections and
 copied bytes, and, summed over the benchmark's modules, the compiler's bytes
 allocated, its instructions:u (with the assembler it runs; stats/NAME, the
@@ -10,13 +12,19 @@ the collector's at least in part; rising with both steady, the mutator's.
 For each figure, the geometric mean of B/A, the total's ratio, the
 benchmarks moving by 0.2% and 1% either way, the extremes.
 
-Usage: python3 tools/NCG-battery/nbcmp.py [--work DIR] A B
-       python3 tools/NCG-battery/nbcmp.py [--work DIR] --table A
+Usage: python3 tools/NCG-battery/nbcmp.py [--work DIR] [--out DIR] A B
+       python3 tools/NCG-battery/nbcmp.py [--work DIR] [--out DIR] --table A
+       python3 tools/NCG-battery/nbcmp.py [--work DIR] [--out DIR] --keep A
        python3 tools/NCG-battery/nbcmp.py --self-test
 
-A and B are the runs' names under _make: cTREE-LABEL at -O2, o1-LABEL and
-o0-LABEL. --table prints A's figures, a benchmark a line. The work
-directory is battery.py's, dist-ghcho by default."""
+A and B are the runs' names: cTREE-LABEL at -O2, o1-LABEL and o0-LABEL.
+--table prints A's figures, a benchmark a line. --keep writes every .tsv
+under _make/A into OUT/nofib-A.tsv, a line `PATH<TAB>LINE` a line of each,
+PATH relative to _make/A, and exits 0 only once that file reads back to the
+same tables; battery.py's nofib part runs it after nofib-run, and
+rebuild.py's prune does the same and then removes _make/A. The work
+directory is battery.py's, dist-ghcho by default, and OUT battery.py's
+--out, WORK/battery by default."""
 import contextlib
 import glob
 import io
@@ -46,71 +54,149 @@ COMPILE = {'//rts stats//bytes allocated': 'calloc', '//size': 'size',
            '//rts stats//copied_bytes': 'ccopied'}
 
 
-def tsv(path):
+def tsv(lines):
+    for line in lines:
+        k, _, v = line.rstrip('\n').partition('\t')
+        if v:
+            yield k, float(v)
+
+
+def kept(n, out, outdir=None):
+    """Where run out's tables are kept: OUT/nofib-out.tsv, OUT the work
+    directory's battery unless given."""
+    return os.path.join(outdir or os.path.join(os.path.dirname(os.path.abspath(n)), 'battery'),
+                        f'nofib-{out}.tsv')
+
+
+def made(n, out):
+    """{path relative to _make/out: its lines} of every .tsv under it."""
+    root = os.path.join(n, 'nofib', '_make', out)
+    t = {}
+    for p in glob.glob(os.path.join(glob.escape(root), '**', '*.tsv'), recursive=True):
+        if os.path.isfile(p):
+            with open(p) as fh:
+                lines = fh.read().split('\n')
+            t[os.path.relpath(p, root)] = lines[:-1] if lines[-1] == '' else lines
+    return t
+
+
+def read_kept(path):
+    t = {}
     with open(path) as fh:
         for line in fh:
-            k, _, v = line.rstrip('\n').partition('\t')
-            if v:
-                yield k, float(v)
+            rel, sep, rest = line.rstrip('\n').partition('\t')
+            if not sep:
+                raise ValueError(f'{path}: a line without a path, {line[:60]!r}')
+            t.setdefault(rel, []).append(rest)
+    return t
 
 
-def load(n, out):
+def tables(n, out, outdir=None):
+    """Run out's tables, {path: lines}, from its kept file where that is not
+    empty, else from under _make."""
+    k = kept(n, out, outdir)
+    if os.path.isfile(k) and os.path.getsize(k):
+        return read_kept(k)
+    return made(n, out)
+
+
+def load_from(t, n, out):
+    """The figures of tables t, {path: lines}, and of stats/out, by benchmark."""
     root = os.path.join(n, 'nofib', '_make', out)
     figs = {}
-    for p in glob.glob(os.path.join(root, '**', 'Main.perf.results.tsv'),
-                       recursive=True):
-        test = os.path.relpath(os.path.dirname(p), root)
-        f = figs.setdefault(test, {})
-        for k, v in tsv(p):
+    for p in t:
+        if os.path.basename(p) != 'Main.perf.results.tsv':
+            continue
+        f = figs.setdefault(os.path.dirname(p) or '.', {})
+        for k, v in tsv(t[p]):
             for suffix, key in RUN.items():
                 if k.endswith(suffix):
                     f[key] = v
     tests = sorted(figs, key=len, reverse=True)
 
-    def owner(path):
+    def owner(rel):
+        for test in tests:
+            if rel.startswith(test + os.sep):
+                return test
+        return None
+
+    def below(path):
         # A compile's paths are those of the nofib-r it ran in, which may
         # since have moved: below the run's _make directory they are n's.
-        _, sep, below = path.rpartition(os.sep + os.path.join('nofib', '_make', out) + os.sep)
-        rel = below if sep else os.path.relpath(path, root)
-        for t in tests:
-            if rel.startswith(t + os.sep):
-                return t
-        return None
-    for p in glob.glob(os.path.join(root, '**', '*.compile.tsv'),
-                       recursive=True):
-        t = owner(p)
-        if t is None:
+        _, sep, rel = path.rpartition(os.sep + os.path.join('nofib', '_make', out) + os.sep)
+        return rel if sep else os.path.relpath(path, root)
+    for p in t:
+        if not p.endswith('.compile.tsv'):
             continue
-        f = figs[t]
-        for k, v in tsv(p):
+        test = owner(p)
+        if test is None:
+            continue
+        f = figs[test]
+        for k, v in tsv(t[p]):
             for suffix, key in COMPILE.items():
                 if k.endswith(suffix):
                     f[key] = f.get(key, 0) + v
     sdir = os.path.join(n, 'stats', out)
-    for a in glob.glob(os.path.join(sdir, '*.args')):
+    for a in glob.glob(os.path.join(glob.escape(sdir), '*.args')):
         with open(a) as fh:
             lines = fh.read().split('\n')
         cwd, args = lines[0], lines[1:]
         if '-c' not in args or '-o' not in args:
             continue
-        o = os.path.normpath(os.path.join(cwd, args[args.index('-o') + 1]))
-        t = owner(o)
+        test = owner(below(os.path.normpath(os.path.join(cwd, args[args.index('-o') + 1]))))
         csv = a[:-5] + '.csv'
-        if t is None or not os.path.exists(csv):
+        if test is None or not os.path.exists(csv):
             continue
         with open(csv) as fh:
             for line in fh:
                 x = line.split(',')
                 if len(x) > 2 and x[2] == 'instructions:u':
-                    figs[t]['cinstr'] = figs[t].get('cinstr', 0) + float(x[0])
-    if not figs:
-        raise ValueError(f'no Main.perf.results.tsv under {root}')
+                    figs[test]['cinstr'] = figs[test].get('cinstr', 0) + float(x[0])
     return figs
 
 
-def compare(n, a, b):
+def load(n, out, outdir=None):
+    figs = load_from(tables(n, out, outdir), n, out)
+    if not figs:
+        raise ValueError(f'no Main.perf.results.tsv in {kept(n, out, outdir)}'
+                         f' or under {os.path.join(n, "nofib", "_make", out)}')
+    return figs
+
+
+def keep(n, out, outdir=None, drop=False, say=print):
+    """Run out's tables written to its kept file and read back; with drop,
+    _make/out then removed. Where _make/out is gone, a kept file that
+    reads is enough."""
+    root, k = os.path.join(n, 'nofib', '_make', out), kept(n, out, outdir)
+    if not os.path.isdir(root):
+        load(n, out, outdir)
+        say(f'{out}: no {root}, the tables kept in {k}')
+        return
+    t = made(n, out)
+    load_made = load_from(t, n, out)
+    if not load_made:
+        raise ValueError(f'no Main.perf.results.tsv under {root}')
+    os.makedirs(os.path.dirname(k), exist_ok=True)
+    part = k + '.partial'
+    with open(part, 'w') as fh:
+        for rel in sorted(t):
+            if '\t' in rel or '\n' in rel:
+                raise ValueError(f'{root}/{rel}: a path a kept file cannot hold')
+            fh.writelines(f'{rel}\t{line}\n' for line in t[rel])
+    back = read_kept(part)
+    if back != {r: ls for r, ls in t.items() if ls} or load_from(back, n, out) != load_made:
+        os.unlink(part)
+        raise ValueError(f'{part} does not read back to the tables under {root}')
+    os.replace(part, k)
+    say(f'{out}: {len(t)} tables under {root} kept in {k}')
+    if drop:
+        shutil.rmtree(root)
+        say(f'{out}: removed {root}')
+
+
+def compare(n, a, b, outdir=None):
     out = []
-    fa, fb = load(n, a), load(n, b)
+    fa, fb = load(n, a, outdir), load(n, b, outdir)
     both = sorted(set(fa) & set(fb))
     out.append(f'{a} to {b}: benchmarks run by both {len(both)}'
                f' (only {a}: {len(set(fa) - set(fb))}, only {b}:'
@@ -137,8 +223,8 @@ def compare(n, a, b):
     return out
 
 
-def table(n, a):
-    fa = load(n, a)
+def table(n, a, outdir=None):
+    fa = load(n, a, outdir)
     out = ['benchmark\t' + '\t'.join(k for k, _ in NAMES)]
     for t in sorted(fa):
         out.append(t + '\t' + '\t'.join(str(int(fa[t][k])) if k in fa[t] else '-'
@@ -242,10 +328,39 @@ def self_test():
         shutil.copytree(n, os.path.join(d, 'moved', 'nofib-r'))
         if table(os.path.join(d, 'moved', 'nofib-r'), 'B') != table(n, 'B'):
             bad.append('the moved results lost figures')
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
             rc = main(['--work', d, 'A', 'C'])
-        if rc != 2:
-            bad.append(f'a run with no results exited {rc}, not 2')
+        if rc != 2 or f'no Main.perf.results.tsv in {d}/battery/nofib-C.tsv or under' not in err.getvalue():
+            bad.append(f'a run with no results exited {rc}, not 2: {err.getvalue()!r}')
+        # Kept: B's tables in battery/nofib-B.tsv, _make/B removed, and the
+        # figures as they were; A's kept without the removal, the kept file
+        # read before _make, here missing a benchmark.
+        before, said = table(n, 'B'), []
+        keep(n, 'B', drop=True, say=said.append)
+        k = os.path.join(d, 'battery', 'nofib-B.tsv')
+        if os.path.exists(os.path.join(n, 'nofib', '_make', 'B')) or not os.path.isfile(k) \
+                or table(n, 'B') != before or len(said) != 2 or 'removed' not in said[1]:
+            bad.append(f'kept B: {said}, {table(n, "B") if os.path.isfile(k) else "no file"}')
+        if sorted(read_kept(k)) != ['real/y/Main.perf.results.tsv', 'spectral/x/Foo.o.compile.tsv',
+                                    'spectral/x/Main.o.compile.tsv',
+                                    'spectral/x/Main.perf.results.tsv',
+                                    'spectral/xx/Main.o.compile.tsv',
+                                    'spectral/xx/Main.perf.results.tsv']:
+            bad.append(f'kept B holds {sorted(read_kept(k))}')
+        keep(n, 'B', say=said.append)  # _make/B gone, the kept file enough
+        keep(n, 'A', say=said.append)
+        shutil.rmtree(os.path.join(n, 'nofib', '_make', 'A', 'spectral', 'xx'))
+        if [x.split('\t')[0] for x in table(n, 'A')[1:]] != ['spectral/x', 'spectral/xx']:
+            bad.append(f'kept A read after _make: {table(n, "A")}')
+        # Nothing to keep: no _make, or one with no program's table.
+        os.makedirs(os.path.join(n, 'nofib', '_make', 'E', 'spectral', 'x'))
+        with open(os.path.join(n, 'nofib', '_make', 'E', 'spectral', 'x', 'Main.link.tsv'), 'w') as fh:
+            fh.write('spectral/x//size\t1.0\n')
+        for out in ('C', 'E'):
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = main(['--work', d, '--keep', out])
+            if rc != 2 or os.path.exists(os.path.join(d, 'battery', f'nofib-{out}.tsv')):
+                bad.append(f'--keep {out}, nothing to keep: {rc}')
     for x in bad:
         print('FAIL', x)
     print('ok   nbcmp.py self-test' if not bad else f'{len(bad)} failed')
@@ -255,15 +370,19 @@ def self_test():
 def main(argv):
     if argv == ['--self-test']:
         return self_test()
-    work = WORK
+    work, outdir = WORK, None
     if argv[:1] == ['--work'] and len(argv) > 1:
         work, argv = argv[1], argv[2:]
+    if argv[:1] == ['--out'] and len(argv) > 1:
+        outdir, argv = argv[1], argv[2:]
     n = os.path.join(work, 'nofib-r')
     try:
         if argv[:1] == ['--table'] and len(argv) == 2:
-            print('\n'.join(table(n, argv[1])))
-        elif len(argv) == 2:
-            print('\n'.join(compare(n, *argv)))
+            print('\n'.join(table(n, argv[1], outdir)))
+        elif argv[:1] == ['--keep'] and len(argv) == 2:
+            keep(n, argv[1], outdir)
+        elif len(argv) == 2 and not argv[0].startswith('--'):
+            print('\n'.join(compare(n, *argv, outdir)))
         else:
             print(__doc__, file=sys.stderr)
             return 2
