@@ -98,7 +98,8 @@ STEPS = [
     ('cases, ok direction',    ['python3', '{bin}/defect-run.py', '{root}']),
     ('cases, bug direction',   ['python3', '{bin}/defect-run.py', '--audit', '{root}']),
     ('source lint',            ['python3', '{bin}/defect-lint.py', '{root}']),
-    ('selftest mutants',       ['python3', '{bin}/selftest-mutants.py', '{root}']),
+    # Four at once gave the serial verdicts, measured twice.
+    ('selftest mutants',       ['python3', '{bin}/selftest-mutants.py', '-j', '4', '{root}']),
 ]
 
 UNCOVERED = {
