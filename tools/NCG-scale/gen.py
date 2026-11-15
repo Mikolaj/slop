@@ -6,6 +6,8 @@ flagging the rows.
 
 Usage: python3 tools/NCG-scale/gen.py N...      (into the current directory)
        python3 tools/NCG-scale/gen.py --shapes  (the shapes in run order)
+       python3 tools/NCG-scale/gen.py --shapes L  (those compiled at -OL)
+       python3 tools/NCG-scale/gen.py --levels  (the levels, ascending)
        python3 tools/NCG-scale/gen.py --self-test
 
 chainN.hs, T3294 with N strict unpacked Double fields; loopsN.hs, one function
@@ -26,12 +28,25 @@ loop carrying N variables, each updated from its neighbour at every iteration;
 rotateN.cmm, one loop rotating N variables at its back edge, so a cyclic join
 fixup of N registers and slots; diamondsN.cmm, one loop whose body is N if-else
 diamonds in sequence, each arm updating another variable, so N joins in one
-cyclic SCC.
+cyclic SCC; claimsN.cmm, one loop whose body is one block of N steps, each
+writing t afresh and reading it twice, t's last value returned in R1, so that
+each allocation of t, a vreg with no preference but R1's register as its wide
+destination, reaches the linear allocator's scan of the vregs the block reads
+or writes with a first-used register (claims); joinN.hs, a case whose two arms
+jump to one join point with N Int#s, loaded last, and seventeen Doubles, one arm
+broadcasting a Double that the other reads again, so that the join's target
+expects it both in a register and in a slot other than its own
+(https://gitlab.haskell.org/ghc/ghc/-/work_items/27638), the Int#s leaving no
+register spare there: a compiler that panics on it fails the compile.
 
-chain, loops and ccalls are kept byte for byte as first written, so that their
-figures stay comparable with the runs that found a quadratic compile cost on
-loops and a superlinear one on ccalls; the self-test checks their hashes at N =
-50, and of every shape that the item it grows occurs N times."""
+Every shape is compiled at -O1 and -O2, and claims at -O0 too: at -O1 and -O2
+the base's own cost on claims is superlinear as well, hiding the scan's.
+
+chain, loops, ccalls and claims are kept byte for byte as first written, so that
+their figures stay comparable with the runs that found a quadratic compile cost
+on loops and on claims and a superlinear one on ccalls; the self-test checks
+their hashes at N = 50, and of every shape that the item it grows occurs N
+times."""
 import hashlib
 import os
 import sys
@@ -168,24 +183,72 @@ def diamonds(n):
     return proc('diamonds', ['i', 'x', 'y', 'z'], body)
 
 
+def claims(n):
+    body = ('    x = n + 1;\n    y = n + 2;\n    s = 0;\n    q = 0;\n'
+            '    i = 0;\n    goto body;\n\nbody:\n')
+    for k in range(1, n + 1):
+        body += (f'    t = x * {2 * k + 1} + y + i;\n'
+                 '    s = s ^ t;\n    q = q + t;\n')
+    body += ('    i = i + 1;\n'
+             '    if (i < n) { goto body; } else { goto done; }\n\n'
+             'done:\n    return (t, s, q);\n')
+    return proc('claims', ['i', 'x', 'y', 's', 'q', 't'], body)
+
+
+def join(n):
+    # A local function both arms tail-call, not the unboxed tuple of the
+    # tests T27638b to T27638f: a tuple has at most 64 components, and nested
+    # tuples left GHC no join, the continuation copied into each arm. The
+    # arguments load last first, so the Int#s after the Doubles.
+    iz = [f'i{k}' for k in range(n)]
+    ds = [f'd{k}' for k in range(17)]
+    loads = ' '.join(f'(indexIntOffAddr# q {k}#)' for k in range(n))
+    dl = ' '.join(f'(indexDoubleOffAddr# p {k}#)' for k in range(17))
+    return ('{-# LANGUAGE MagicHash, UnboxedTuples, UnliftedFFITypes #-}\n'
+            'module Join (f) where\n\nimport GHC.Exts\n\n'
+            'foreign import ccall unsafe "fabs" c_fabs :: Double# -> Double#\n\n'
+            'f :: Int# -> Addr# -> Addr# -> Double# -> Double#\n'
+            'f b p q x =\n'
+            '  let !y = c_fabs x\n'
+            f'      j r {" ".join(iz)} {" ".join(ds)} =\n'
+            f'        (r *## x) +## ({" +## ".join(ds)})'
+            f' +## int2Double# (0#{"".join(f" +# {i}" for i in iz)})\n'
+            '      {-# NOINLINE j #-}\n'
+            '  in case b of\n'
+            '       0# -> case unpackDoubleX2# (broadcastDoubleX2# x) of\n'
+            f'               (# u, _ #) -> let !z = c_fabs u in j z {loads} {dl}\n'
+            f'       _  -> j (y +## x) {loads} {dl}\n'
+            '{-# NOINLINE f #-}\n')
+
+
 SHAPES = [('chain', '.hs', chain), ('loops', '.hs', loops),
           ('ccalls', '.hs', ccalls), ('calls', '.hs', calls),
           ('allocs', '.hs', allocs), ('lists', '.hs', lists),
           ('cases', '.hs', cases), ('deadchain', '.cmm', deadchain),
           ('nest', '.cmm', nest), ('carry', '.cmm', carry),
-          ('rotate', '.cmm', rotate), ('diamonds', '.cmm', diamonds)]
+          ('rotate', '.cmm', rotate), ('diamonds', '.cmm', diamonds),
+          ('claims', '.cmm', claims), ('join', '.hs', join)]
+
+# The levels a shape is compiled at, where not -O1 and -O2.
+LEVELS = {'claims': (0, 1, 2)}
+
+
+def shapes_at(level):
+    return [name for name, _, _ in SHAPES if level in LEVELS.get(name, (1, 2))]
 
 # What each shape grows, one occurrence per unit of N.
 MARKS = {'chain': '{-# UNPACK #-} !Double', 'loops': '| otherwise = loop',
          'ccalls': 'let !a', 'calls': ' <- h ', 'allocs': ' <- h ',
          'lists': ' [] !acc = ', 'cases': ' -> j (', 'deadchain': ' = t',
          'nest': 'if (i', 'carry': ' = a', 'rotate': ' = a',
-         'diamonds': 'if (x > y + '}
+         'diamonds': 'if (x > y + ', 'claims': '    t = x * ',
+         'join': ' +# i'}
 # The sources kept byte for byte, at N = 50.
 PINNED = {
     'chain50.hs': '33c65e1873fe32d41b13c354184f988409387ffa0e21859492064023fd30d0a8',
     'loops50.hs': '40f8fb45f73099954e8d9ef27a16c4a190f93b288e0ddc671ebbc387aeaa3007',
     'ccalls50.hs': '54d4107283c2529375c4e8887a1141ef9cfa2eccd7eb8e491ea5fe153d6ebcd2',
+    'claims50.cmm': '2f60d42e34fe3a0e784be8a7217240ec3fcc7744df3708e5c9bb848a361b0312',
 }
 
 
@@ -211,6 +274,11 @@ def self_test():
                 got = hashlib.sha256(h.read()).hexdigest()
             if got != want:
                 bad.append(f'{f} changed: sha256 {got}')
+    every = [name for name, _, _ in SHAPES]
+    if shapes_at(1) != every or shapes_at(2) != every:
+        bad.append(f'not every shape at -O1 and -O2: {shapes_at(1)}, {shapes_at(2)}')
+    if 'claims' not in shapes_at(0):
+        bad.append('claims not at -O0')
     for x in bad:
         print('FAIL', x)
     print('ok   gen.py self-test' if not bad else f'{len(bad)} failed')
@@ -220,6 +288,11 @@ def self_test():
 if __name__ == '__main__':
     if sys.argv[1:] == ['--shapes']:
         print(' '.join(name for name, _, _ in SHAPES))
+    elif sys.argv[1:2] == ['--shapes'] and len(sys.argv) == 3:
+        print(' '.join(shapes_at(int(sys.argv[2]))))
+    elif sys.argv[1:] == ['--levels']:
+        print(' '.join(map(str, sorted({v for name, _, _ in SHAPES
+                                        for v in LEVELS.get(name, (1, 2))}))))
     elif sys.argv[1:] == ['--self-test']:
         sys.exit(self_test())
     elif not sys.argv[1:]:

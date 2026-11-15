@@ -8506,6 +8506,91 @@
    "no_audit": "other:needs-built-ghc-compilers"
   },
   {
+   "id": "NCG-scale-02",
+   "program": "NCG-scale/report.py",
+   "name": "a label's rows of a shape and level the base failed at every N, or compiled at one N only, were left out without a line, so a later compiler compiling a probe the base fails read the same as one never run",
+   "family": "quiet-failure",
+   "fix_rev": "self",
+   "trigger": "the base's file with FAILED lines for join at -O1 at N = 50 and 100, the label's with rows there",
+   "ok": "a line for the label's join at -O1 saying it has rows at N = 50 100 and the base none, beside the base's FAILED lines",
+   "bug": "the label's chain rows and the base's FAILED lines, and no line for the label's join",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "Found on 2026-11-14 adding the probe join, which TIP41 of GHC's NCG series fails from N = 11 by a panic; a base failing it would have hidden every later label's join rows, the tip's included.",
+   "plant_cmd": "printf 'x2 chain O1 50 100 200 300 1\\nx2 chain O1 100 210 420 610 1\\nFAILED x2 join O1 50: ghc: panic!\\nFAILED x2 join O1 100: ghc: panic!\\nscale DONE 12:00:00\\n' > a && printf 'x3 chain O1 50 100 200 300 1\\nx3 chain O1 100 210 420 610 1\\nx3 join O1 50 100 200 300 1\\nx3 join O1 100 200 400 600 1\\nscale DONE 12:00:00\\n' > b",
+   "invoke": [
+    "{tmp}/a",
+    "{tmp}/b"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "x3     join      O1 no ratio: rows at N = 50 100, the base's at none",
+    "FAILED x2 join O1 100: ghc: panic!",
+    "base x2"
+   ],
+   "bug_exit": 0,
+   "bug_absent": "x3     join      O1"
+  },
+  {
+   "id": "NCG-scale-03",
+   "program": "NCG-scale/report.py",
+   "name": "a base that failed every compile was no label, the next label's rows then taken as the base's, so that label's own rows were the ratios' denominators and nothing it compiled was reported",
+   "family": "quiet-failure",
+   "fix_rev": "self",
+   "trigger": "the base's file of FAILED lines alone, the label's with chain rows at -O1 at N = 50 and 100",
+   "ok": "base x2 in the summary line, and a line for the label's chain at -O1 saying it has rows at N = 50 100 and the base none",
+   "bug": "base x3 in the summary line, and no line for x3's chain",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "Found with NCG-scale-02, reading how report.py takes its base: from the first row, a FAILED line naming no label.",
+   "plant_cmd": "printf 'FAILED x2 chain O1 50: ghc: panic!\\nFAILED x2 chain O1 100: ghc: panic!\\nscale DONE 12:00:00\\n' > a && printf 'x3 chain O1 50 100 200 300 1\\nx3 chain O1 100 210 420 610 1\\nscale DONE 12:00:00\\n' > b",
+   "invoke": [
+    "{tmp}/a",
+    "{tmp}/b"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "x3     chain     O1 no ratio: rows at N = 50 100, the base's at none",
+    "base x2"
+   ],
+   "bug_exit": 0,
+   "bug_text": "base x3"
+  },
+  {
+   "id": "NCG-scale-04",
+   "program": "NCG-scale/run.sh",
+   "name": "a failed compile's line carried the log's last line, which for a GHC panic is blank, so the FAILED line said nothing of why",
+   "family": "quiet-failure",
+   "fix_rev": "self",
+   "trigger": "a compiler that panics, its output ending in a blank line, as GHC's panic message does",
+   "ok": "FAILED x chain O1 3: exit 1: Please report this as a GHC bug, the exit status and the log's last line that is not blank",
+   "bug": "FAILED x chain O1 3: and nothing after it",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired on 2026-11-14 on the probe join, which TIP41 of GHC's NCG series fails from N = 11 by makeMove's panic: its eight FAILED lines carried no text. The case fakes perf and taskset on PATH, so that it needs neither performance counters nor a CPU of its own.",
+   "plant_cmd": "mkdir -p bin && printf '#!/bin/sh\\nwhile [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\\n' > bin/perf && printf '#!/bin/sh\\nshift 2; exec \"$@\"\\n' > bin/taskset && printf '#!/bin/sh\\nprintf \"ghc: panic! (the impossible happened)\\\\n\\\\tmakeMove: no free register\\\\n\\\\nPlease report this as a GHC bug\\\\n\\\\n\"; exit 1\\n' > fakeghc && chmod +x bin/perf bin/taskset fakeghc",
+   "invoke": [
+    "{tmp}/out.txt",
+    "x={tmp}/fakeghc"
+   ],
+   "env": {
+    "SCALEN": "3",
+    "PATH": "{tmp}/bin:/usr/local/bin:/usr/bin:/bin"
+   },
+   "probe_cmd": "cat out.txt",
+   "expect_exit": 0,
+   "expect_text": [
+    "FAILED x chain O1 3: exit 1: Please report this as a GHC bug",
+    "FAILED x join O2 3: exit 1: Please report",
+    "scale DONE"
+   ],
+   "bug_exit": 0,
+   "bug_absent": "Please report"
+  },
+  {
    "id": "NCG-battery-01",
    "program": "NCG-battery/battery.py",
    "name": "a nofib part failed on any exit but 0, and nofib-run exits 1 on every run over the real/eff programs GHC rejects, so a whole battery could only end in exit 2 and a program failing elsewhere read the same",

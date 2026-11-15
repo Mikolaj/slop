@@ -2221,11 +2221,28 @@ MUTANTS = [
      "    body = '    s = 0;\\n    i1 = 0;\\n    goto l1;\\n'\n    for k in range(1, n):\n", ST),
     ('NCG-scale gen ccalls source changed', 'NCG-scale/gen.py',
      '+## 1.0##', '+## 2.0##', ST),
+    ('NCG-scale gen claims source changed', 'NCG-scale/gen.py',
+     "'    s = s ^ t;\\n    q = q + t;\\n'", "'    s = s ^ t;\\n    q = q - t;\\n'", ST),
+    ('NCG-scale gen join one Int# short', 'NCG-scale/gen.py',
+     "    iz = [f'i{k}' for k in range(n)]\n    ds = [f'd{k}' for k in range(17)]\n",
+     "    iz = [f'i{k}' for k in range(n - 1)]\n    ds = [f'd{k}' for k in range(17)]\n", ST),
+    # NCG-scale's levels: claims at -O0 too, every shape at -O1 and -O2.
+    ('NCG-scale gen claims not at -O0', 'NCG-scale/gen.py',
+     "LEVELS = {'claims': (0, 1, 2)}", "LEVELS = {'claims': (1, 2)}", ST),
+    ('NCG-scale gen a shape not at -O2', 'NCG-scale/gen.py',
+     'if level in LEVELS.get(name, (1, 2))]', 'if level in LEVELS.get(name, (1,))]', ST),
     # NCG-scale's report (2026-11-03): an instr row whose compiles collected
     # more than once is marked.
     ('NCG-scale collections unmarked', 'NCG-scale/report.py',
      "                coll = name == 'instr' and any(\n",
      '                coll = False and any(\n', ST),
+    # NCG-scale's report: a base's failure hides no label's rows
+    # (NCG-scale-02, NCG-scale-03).
+    ('NCG-scale report no-ratio line dropped', 'NCG-scale/report.py',
+     '                if own:\n', '                if own and False:\n', ST),
+    ('NCG-scale report failed label unnamed', 'NCG-scale/report.py',
+     "        if f[0] == 'FAILED' and len(f) > 1 and f[1] not in labels:\n",
+     "        if False:\n", ST),
     # cg-read.py (2026-11-03): bysym's and incr's buckets and --decode.
     ('cg-read other taken as the program', 'cg-read.py',
      "            t['rts' if k == 'other' else bucket(k)] += v\n",

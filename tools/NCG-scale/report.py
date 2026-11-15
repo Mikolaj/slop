@@ -11,7 +11,10 @@ from the smallest N to the largest: the label's excess over the base then grows
 faster than the base. An instr row is marked "(collections)" where a line of
 its label or the base's, the eighth field being the compile's collections,
 collected more than once: its instructions then include the collector's work.
-"base^" is the base's own growth exponent over the last
+A failed compile, run.sh's FAILED line, is printed after the rows, and its label
+counts as named there; where a label has rows of a shape and level but the base
+has fewer than two of its N, as where the base failed, a "no ratio" line says at
+which N each has rows. "base^" is the base's own growth exponent over the last
 doubling, so that the base's own super-linear shapes are told apart: on chain,
 assembly grows about as N^1.9 and allocation as N^2.4. The self-test replays
 the first scaling run's figures, in which mw's code on chain grew faster than
@@ -31,6 +34,10 @@ def report(lines):
         f = line.split()
         if not f or f[0] == 'scale':
             continue
+        # a failed compile's label is a label too, so that a base failing
+        # every compile is still the base
+        if f[0] == 'FAILED' and len(f) > 1 and f[1] not in labels:
+            labels.append(f[1])
         if f[0] == 'FAILED' or len(f) < 7:
             fails.append(line.rstrip())
             continue
@@ -41,7 +48,7 @@ def report(lines):
         if len(f) > 7 and f[7].isdigit():
             gcs[(lab, shape, lev, n)] = int(f[7])
     out, flagged = [], set()
-    if not labels:
+    if not rows:
         return ['no rows'] + fails, flagged
     base = labels[0]
     keys = sorted({(s, v) for (_, s, v, _) in rows})
@@ -52,6 +59,13 @@ def report(lines):
                         if (b, s, v) == (base, shape, lev)
                         and (lab, shape, lev, n) in rows)
             if len(ns) < 2:
+                # where the base failed, a label's rows still show
+                own = sorted(n for (b, s, v, n) in rows if (b, s, v) == (lab, shape, lev))
+                theirs = sorted(n for (b, s, v, n) in rows if (b, s, v) == (base, shape, lev))
+                if own:
+                    out.append(f"     {lab:6} {shape:9} {lev} no ratio: rows at N = "
+                               + ' '.join(map(str, own)) + ", the base's at "
+                               + (' '.join(map(str, theirs)) or 'none'))
                 continue
             for m, name in enumerate(('bytes', 'instr', 'asm')):
                 r = [rows[(lab, shape, lev, n)][m] / rows[(base, shape, lev, n)][m]
@@ -136,6 +150,15 @@ def self_test():
               for x in out if x.endswith('(collections)')]
     if marked != [['x3', 'loops', 'O1']]:
         bad.append(f'collections marked on {marked}, not x3 loops instr')
+    # A base failing loops, then failing every compile: the label's rows show
+    # and the base stays the base.
+    fl = ['FAILED x2 loops O1 50: panic', 'FAILED x2 loops O1 100: panic']
+    x3 = ['x3' + x[2:] for x in same]
+    nr = "     x3     loops     O1 no ratio: rows at N = 50 100 200 400, the base's at none"
+    for part in ([x for x in same if ' loops ' not in x] + fl + x3, fl + x3):
+        out, _ = report(part)
+        if nr not in out or not out[-1].endswith('; base x2'):
+            bad.append(f'a base failing loops: {out[-3:]}')
     # Several files read as one: battery.py writes a file per compiler.
     other = ['x3' + x[2:] for x in same]
     with tempfile.TemporaryDirectory(prefix='ncg-report-') as d:
