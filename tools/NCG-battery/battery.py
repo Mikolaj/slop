@@ -9,7 +9,8 @@ of these parts alone.
 
 Usage: python3 tools/NCG-battery/battery.py [--dry] [--work DIR] [--out DIR]
            [--compilers GHC0|full] [--build DIR] [--bin DIR]
-           [--a2t-lock FILE] [--min-free GIB] TREE LABEL CPUS [PART...]
+           [--a2t-lock FILE] [--min-free GIB] [--wrap-rts OPTS] [--cabal-j N]
+           TREE LABEL CPUS [PART...]
        python3 tools/NCG-battery/battery.py --self-test
 
 TREE names the work directory's ghc-TREE, whose _build/stage0/bin/ghc
@@ -50,7 +51,9 @@ the label's stage-2 compiler, the wrapper running GHC0, at DIR/ghc-LABEL beside
 DIR/ghcw-LABEL and copies GHC0 nowhere, so that the battery writes nothing into
 the build; it is refused with comp1, which runs that copy. --a2t-lock FILE takes
 a lock over A2T's builds, setting 13. --min-free GIB, MIN_FREE by default, is
-the free space nothing runs without, setting 14.
+the free space nothing runs without, setting 14. --wrap-rts OPTS, RTS options
+such as -A3G -V0, puts OPTS in place of WRAP_RTS for the run, and --cabal-j N
+N in place of CABAL_J, settings 12 and 6.
 The battery is a bash script; --dry prints it, every file it generates written
 out in it, and runs nothing. Run it unsandboxed. It exits 0 when every part ran
 and 2 when it stopped over the tree's flavour, the label's results or the disk's
@@ -137,7 +140,8 @@ The settings, each stated here and nowhere else:
    build packages when nothing runs except probes, then do `cabal -j8`". Labels
    before then ran nofib-run at -j3 and cabal at -j2, the packages in one lane.
    A2T's dependencies build at -j8 too, and A2T itself, beside the packages'
-   builds, at -j4 with --semaphore, setting 11.
+   builds, at -j4 with --semaphore, setting 11. --cabal-j N sets the -j8 of
+   both, for a run whose processes need more memory (setting 12).
 7. nofib and the packages are built by the stage-2 compiler with the
    libraries the stage-1 compiler built, the bootstrapped GHC (Mikolaj,
    2026-11-03), so that the compiler's figures beside the programs' are those
@@ -189,8 +193,16 @@ The settings, each stated here and nowhere else:
     the RTS's statistics (-t --machine-readable) and GHC's own RTS options
     (WRAP_RTS): under nofib's -A3G -V0 each of vector's processes took 3.1
     to 3.3 GB of heap where GHC's own options took 22 to 320 MB, too much
-    for eight jobs a lane beside A2T's build, and under GHC's own two builds
-    of vector differed by at most 0.46% in a process's instructions.
+    for eight jobs a lane beside A2T's build. The count includes the garbage
+    collector's instructions, so under GHC's own options a process moves
+    with the collections' schedule: one major collection more or less, from
+    allocation moving by a fraction of a percent (the output path a few
+    characters longer), moved a process of identical code by up to 13%,
+    vector's library and vector-stream by 1.16% and 1.52%, and a package's
+    own processes' sum by up to 1.3% (2026-11-16). Under -A3G -V0 the sums
+    held within 0.02%: --wrap-rts -A3G -V0 is for a figure compared across
+    labels, all of them measured under it, beside --cabal-j 4, which keeps
+    the peak of a lane's processes near 13 GiB.
 13. Under --a2t-lock FILE each of A2T's deps and build steps takes flock
     on FILE and then, holding it, waits until MemAvailable reaches A2T_MEM GiB
     (its kB over 1048576, read every 30 seconds), so that one A2T build, about
@@ -396,11 +408,11 @@ def wrapper(tree, label, ghc):
             f'{ghc} {NOFIB_RTS} "$@"\n')
 
 
-def ghcw(tree, label, ghc):
+def ghcw(tree, label, ghc, wrap_rts=WRAP_RTS):
     """The packages' and A2T's compiler: ghc, each --make run under perf stat
-    with the RTS's statistics where GHCW_STATS names a directory, its
-    arguments, those of cabal's response files written out, beside them."""
-    rts = f'+RTS {WRAP_RTS + " " if WRAP_RTS else ""}-t"$GHCW_STATS/$id.rts" --machine-readable -RTS'
+    with the RTS's statistics and wrap_rts where GHCW_STATS names a directory,
+    its arguments, those of cabal's response files written out, beside them."""
+    rts = f'+RTS {wrap_rts + " " if wrap_rts else ""}-t"$GHCW_STATS/$id.rts" --machine-readable -RTS'
     return ('#!/bin/sh\n'
             f'# ghc-{tree}\'s ghc-{label}, each --make run counted into $GHCW_STATS\n'
             'm=; for a in "$@"; do case $a in --make) m=1;;'
@@ -481,7 +493,7 @@ def project(work, t, label, pkg, level):
     return '\n'.join(head) + '\n' + ''.join('\n' + s for s in stanzas)
 
 
-def pkg_part(work, t, label, pkg, level, steps=('build', 'run')):
+def pkg_part(work, t, label, pkg, level, steps=('build', 'run'), jobs=CABAL_J):
     p = PKGS[pkg]
     v = f'{work}/vpapi'
     ghc = f'{t.bin1}/ghc-{label}'
@@ -501,7 +513,7 @@ def pkg_part(work, t, label, pkg, level, steps=('build', 'run')):
     if 'build' in steps:
         out += [heredoc(f'cabal.project.{lab}', project(work, t, label, pkg, level)),
                 f'rm -rf {stats}; mkdir -p {stats}',
-                f'GHCW_STATS={stats} {cabal} build -j{CABAL_J} {p["build"]} {opts}'
+                f'GHCW_STATS={stats} {cabal} build -j{jobs} {p["build"]} {opts}'
                 f' || {{ echo "{p["log"]} {lab} build failed"; exit 2; }}',
                 'echo "built $(date +%T)"']
     if 'run' not in steps:
@@ -536,7 +548,8 @@ def a2t_project(work, t, label):
         'package orthotope', f'  ghc-options: {DUMP_FLAGS}', ''])
 
 
-def a2t_part(work, t, label, outdir, steps=('deps', 'build', 'run'), pc=PER_CALL):
+def a2t_part(work, t, label, outdir, steps=('deps', 'build', 'run'), pc=PER_CALL,
+             jobs=CABAL_J):
     v = f'{work}/vpapi'
     ghc = f'{t.bin1}/ghc-{label}'
     lab = f'c{t.name}-{label}'
@@ -552,7 +565,7 @@ def a2t_part(work, t, label, outdir, steps=('deps', 'build', 'run'), pc=PER_CALL
     if 'deps' in steps:
         out += [heredoc(f'cabal.project.{lab}', a2t_project(work, t, label)),
                 f'rm -rf {stats}; mkdir -p {stats}',
-                f'GHCW_STATS={stats} {cabal} build -j{CABAL_J} --only-dependencies {A2T_LIB} {opts}'
+                f'GHCW_STATS={stats} {cabal} build -j{jobs} --only-dependencies {A2T_LIB} {opts}'
                 f' || {{ echo "ab {lab} dependencies failed"; exit 2; }}',
                 'echo "dependencies built $(date +%T)"']
     if 'build' in steps:
@@ -703,20 +716,20 @@ def cpu_list(spec):
 
 
 def part(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS, u8=UTF8,
-         fz=FUZZ_RUN):
-    body = part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk, u8, fz)
+         fz=FUZZ_RUN, jobs=CABAL_J):
+    body = part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk, u8, fz, jobs)
     return f'(\n{body}\n) || f=2'
 
 
 def part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TICKETS, u8=UTF8,
-              fz=FUZZ_RUN):
+              fz=FUZZ_RUN, jobs=CABAL_J):
     fam, _, lev = name.partition('-O')
     if fam == 'nofib':
         body = nofib_part(work, t, label, int(lev), outdir)
     elif fam in PKGS:
-        body = pkg_part(work, t, label, fam, int(lev), steps or ('build', 'run'))
+        body = pkg_part(work, t, label, fam, int(lev), steps or ('build', 'run'), jobs)
     elif name == 'a2t':
-        body = a2t_part(work, t, label, outdir, steps or ('deps', 'build', 'run'), pc)
+        body = a2t_part(work, t, label, outdir, steps or ('deps', 'build', 'run'), pc, jobs)
     elif name == 'perf':
         body = perf_part(work, t, label, len(cpus), outdir)
     elif name == 'scale':
@@ -797,10 +810,10 @@ def parse_parts(parts):
 def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
            sc=SCALE_RUN, pc=PER_CALL, tk=TICKETS, ghc0=None, a2t_lock=None,
            meminfo=MEMINFO, poll=A2T_POLL, min_free=MIN_FREE, build=None, bindir=None,
-           u8=UTF8, fz=FUZZ_RUN):
+           u8=UTF8, fz=FUZZ_RUN, wrap_rts=WRAP_RTS, cabal_j=CABAL_J):
     """The bash script of the battery, or of the parts named; ghc0 is
     --compilers', a2t_lock --a2t-lock's, min_free --min-free's, build
-    --build's and bindir --bin's."""
+    --build's, bindir --bin's, wrap_rts --wrap-rts's and cabal_j --cabal-j's."""
     for x in (tree, label):
         if not re.fullmatch(r'[A-Za-z0-9_.]+', x):
             raise ValueError(f'a tree or label is letters, digits, _ and .: {x!r}')
@@ -824,6 +837,12 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
                          ' --compilers GHC0 and is refused with comp1, which runs the copy')
     if not (isinstance(min_free, (int, float)) and min_free >= 0):
         raise ValueError(f'--min-free is GiB, 0 or more: {min_free!r}')
+    # written unquoted into the wrapper, so words of RTS flags alone
+    if not re.fullmatch(r'(-[-A-Za-z][-A-Za-z0-9.=]*( -[-A-Za-z][-A-Za-z0-9.=]*)*)?', wrap_rts) \
+            or {'-RTS', '--RTS'} & set(wrap_rts.split()):
+        raise ValueError(f'--wrap-rts is RTS flags, such as -A3G -V0: {wrap_rts!r}')
+    if not (isinstance(cabal_j, int) and cabal_j >= 1):
+        raise ValueError(f'--cabal-j is a count of jobs, 1 or more: {cabal_j!r}')
     cpus = cpu_list(cpus_spec)
     t = tree_of(work, tree, build, bindir)
     pin = f'taskset -cp {q(cpus_spec)} $BASHPID > /dev/null || exit 2'
@@ -833,19 +852,22 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
 
     def p(name, steps=None):
         if name != 'a2t' or a2t_lock is None:
-            return part(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk, u8, fz)
+            return part(name, work, t, label, cpus, outdir, cc, sc, pc, steps, tk, u8, fz,
+                        cabal_j)
         steps = steps or A2T_STEPS
         held = tuple(x for x in A2T_STEPS[:2] if x in steps)
         pieces = []
         if held:
             pieces.append(a2t_held(part_body(name, work, t, label, cpus, outdir, cc, sc, pc,
-                                             held, tk), label, a2t_lock, meminfo, poll))
+                                             held, tk, jobs=cabal_j),
+                                   label, a2t_lock, meminfo, poll))
         if 'run' in steps:
             pieces.append(part_body(name, work, t, label, cpus, outdir, cc, sc, pc,
                                     ('run',), tk))
         return ' && '.join(f'(\n{x}\n)' for x in pieces) + ' || f=2'
     g = t.build
-    wrap = [heredoc(f'{t.bin1}/ghcw-{label}', ghcw(tree, label, f'{t.bin1}/ghc-{label}')),
+    wrap = [heredoc(f'{t.bin1}/ghcw-{label}',
+                    ghcw(tree, label, f'{t.bin1}/ghc-{label}', wrap_rts)),
             f'chmod +x {q(f"{t.bin1}/ghcw-{label}")}']
 
     def lane(pid, done, *ps):
@@ -925,8 +947,9 @@ def main(argv):
         return run_self_test('battery.py', self_test)
     dry, work, outdir, ghc0, lock, free = False, WORK, None, None, None, MIN_FREE
     build = bindir = None
+    wrap_rts, cabal_j = WRAP_RTS, CABAL_J
     while argv[:1] and argv[0] in ('--dry', '--work', '--out', '--compilers', '--a2t-lock',
-                                   '--min-free', '--build', '--bin'):
+                                   '--min-free', '--build', '--bin', '--wrap-rts', '--cabal-j'):
         if argv[0] == '--dry':
             dry, argv = True, argv[1:]
         elif len(argv) < 2:
@@ -945,6 +968,10 @@ def main(argv):
                 build = os.path.abspath(argv[1])
             elif argv[0] == '--bin':
                 bindir = os.path.abspath(argv[1])
+            elif argv[0] == '--wrap-rts':
+                wrap_rts = argv[1]
+            elif argv[0] == '--cabal-j':
+                cabal_j = int(argv[1]) if argv[1].isdigit() else argv[1]
             else:
                 try:
                     free = float(argv[1])
@@ -958,7 +985,8 @@ def main(argv):
     outdir = os.path.abspath(outdir or os.path.join(work, 'battery'))
     try:
         text = script(work, argv[0], argv[1], argv[2], outdir, argv[3:],
-                      ghc0=ghc0, a2t_lock=lock, min_free=free, build=build, bindir=bindir)
+                      ghc0=ghc0, a2t_lock=lock, min_free=free, build=build, bindir=bindir,
+                      wrap_rts=wrap_rts, cabal_j=cabal_j)
     except ValueError as e:
         print(f'{e}; nothing run', file=sys.stderr)
         return 2
@@ -1642,6 +1670,18 @@ def self_test():
             rc = main(['--dry', '--work', w, '--min-free', '7', 't', 'x', '4-6', 'scale'])
         if rc or '-ge 7340032 ]' not in out.getvalue():
             bad.append(f'--dry with --min-free 7: {rc}')
+        # --wrap-rts in the packages' wrapper alone, --cabal-j in both -j8 builds.
+        g1 = f'{w}/ghc-t/_build/stage1/bin'
+        line = (f'exec perf stat -x, -e instructions:u -o "$GHCW_STATS/$id.csv" -- {g1}/ghc-x'
+                ' +RTS -A3G -V0 -t"$GHCW_STATS/$id.rts" --machine-readable -RTS "$@"')
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = main(['--dry', '--work', w, '--wrap-rts', '-A3G -V0', '--cabal-j', '3',
+                       't', 'x', '4-6', 'vector-O1:build', 'a2t', 'nofib-O2'])
+        t = out.getvalue()
+        if (rc or line not in t.split('\n') or t.count(' build -j3 ') != 2
+                or ' build -j8 ' in t or f'-j{A2T_J} --semaphore' not in t
+                or t.count(NOFIB_RTS) != 1):
+            bad.append(f'--dry with --wrap-rts -A3G -V0 --cabal-j 3: {rc}')
         for args in (['t', 'x', '4-5'], ['t', 'x', '4-6', 'nofib-O3'],
                      ['t', 'x/y', '4-6'], ['t', 'x', '4-6', 'nofib-O2:build'],
                      ['t', 'x', '4-6', 'a2t:count'], ['t', 'x', '4-6', 'a2t:'],
@@ -1652,7 +1692,11 @@ def self_test():
                      ['--bin', bn, '--compilers', 'full', 't', 'x', '4-6', 'scale'],
                      ['--bin', bn, '--compilers', ghc0, 't', 'x', '4-6', 'comp1'],
                      ['--build', b2, 't', 'x', '4-6', 'perf'], ['--build', b2, 't', 'x', '4-6'],
-                     ['--min-free', '-1', 't', 'x', '4-6'], ['--min-free', 'x', 't', 'x', '4-6']):
+                     ['--min-free', '-1', 't', 'x', '4-6'], ['--min-free', 'x', 't', 'x', '4-6'],
+                     ['--wrap-rts', '-A3G -RTS', 't', 'x', '4-6', 'vector-O2'],
+                     ['--wrap-rts', '-A3G; rm x', 't', 'x', '4-6', 'vector-O2'],
+                     ['--cabal-j', '0', 't', 'x', '4-6', 'vector-O2'],
+                     ['--cabal-j', 'x', 't', 'x', '4-6', 'vector-O2']):
             with contextlib.redirect_stderr(io.StringIO()):
                 rc = main(['--dry', '--work', w] + args)
             if rc != 2:
