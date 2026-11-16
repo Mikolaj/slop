@@ -2774,6 +2774,10 @@ MUTANTS = [
      "    return out\n", ST),
     ('NCG-battery pkgcmp instructions read as allocation', 'NCG-battery/pkgcmp.py',
      "[int(r[b][column]) for r in rs if b in r]", "[int(r[b]['TOT_INS']) for r in rs if b in r]", ST),
+    # The head figure over a set that moves with the label (NCG-battery-17).
+    ('NCG-battery pkgcmp minima for medians', 'NCG-battery/pkgcmp.py',
+     '    return [math.log(statistics.median(B[k]) / statistics.median(A[k]))\n',
+     '    return [math.log(min(B[k]) / min(A[k]))\n', ST),
     ('NCG-battery perfcmp window on B', 'NCG-battery/perfcmp.py',
      '        lo, hi = bounds(a[k], tol)\n', '        lo, hi = bounds(b[k], tol)\n', ST),
     ('NCG-battery perfcmp directions swapped', 'NCG-battery/perfcmp.py',

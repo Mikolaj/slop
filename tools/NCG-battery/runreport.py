@@ -405,7 +405,9 @@ def self_test():
         for piece in ('  program instructions by 0.20%: 1 up, 0 down\n    +1.000%  spectral/x  1000 1010',
                       '  compiler instructions by 1.00%: 1 up, 0 down\n    +2.010%  spectral/x  4000 4080',
                       '  object size by 0.20%: 1 up, 0 down',
-                      'containers -O2\n',
+                      'containers -O2\ncB-B against cA-A: 2 benchmarks, 2 in both, 2 stable in both;'
+                      ' geometric mean of the medians over the 2 in both +0.499%; 1 rise, 0 fall;'
+                      ' geometric mean over the stable +0.499%\n',
                       '  instructions by 0.10%: 1 up, 0 down\n    +1.000%  p/All.s (stable)  1000 1010',
                       'vector -O1\n',
                       '  allocation by 0.05%: 1 up, 0 down\n    +1.000%  All.v  100 101',

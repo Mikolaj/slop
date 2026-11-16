@@ -9081,6 +9081,30 @@
    "bug_text": "[]"
   },
   {
+   "id": "NCG-battery-17",
+   "program": "NCG-battery/pkgcmp.py",
+   "name": "containers' and megaparsec's head figure was the geometric mean over the benchmarks stable in both labels, a set that changes from label to label, so two labels whose code barely differs got figures apart by the benchmarks that left or joined the set",
+   "family": "other:figure-over-a-set-that-moves",
+   "fix_rev": "self",
+   "trigger": "a base A and two labels B and C with equal medians for every benchmark, a benchmark stable in A and B and not in C",
+   "ok": "both head lines carry the geometric mean of the medians over every benchmark both labels have, -5.132% for B and for C, beside the stable count and the stable figure",
+   "bug": "the head lines carried only the geometric mean over the stable, -5.132% for B and -10.000% for C",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-16: megaparsec -O2 against fr00, over labels s2u to s8t, whose code barely differs, the figure over the stable ranged from -16.00% to -14.57% and the medians' from -14.94% to -14.95%; s2u's is -15.056% over 96 stable, s8t's -14.572% over 83.",
+   "plant_cmd": "w(){ mkdir -p w/vpapi/cres/$1 && printf '%s\\n\"All.s\",100,%s,1,1,1\\n\"All.n\",100,%s,1,1,1\\n' benchmark,ALLOC,TOT_INS,TOT_CYC,BR_INS,BR_MSP $3 $4 > w/vpapi/cres/$1/p-$2.csv; } && for i in 1 2 3; do w A $i 1000 1000 && w B $i 900 1000 && w C $i 900 $((1000 + 10 * (i / 3))); done",
+   "unit": "[spread('{tmp}/w/vpapi', 'cres', 'A', x, 0)[0] for x in ('B', 'C')]",
+   "expect_text": [
+    "'B against A: 2 benchmarks, 2 in both, 2 stable in both; geometric mean of the medians over the 2 in both -5.132%; 0 rise, 1 fall; geometric mean over the stable -5.132%'",
+    "'C against A: 2 benchmarks, 2 in both, 1 stable in both; geometric mean of the medians over the 2 in both -5.132%; 0 rise, 1 fall; geometric mean over the stable -10.000%'"
+   ],
+   "bug_text": [
+    "'B against A: 2 benchmarks, 2 stable in both; 0 rise, 1 fall; geometric mean over the stable -5.132%'",
+    "'C against A: 2 benchmarks, 1 stable in both; 0 rise, 1 fall; geometric mean over the stable -10.000%'"
+   ]
+  },
+  {
    "id": "pragma-census-27",
    "program": "pragma-census.py",
    "name": "reasoned() took a reason citing a development version, as on GHC 10.1.20261108, for undated, DATE matching only an ISO date beside the version, though such a version carries the date of its tree",

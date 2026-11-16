@@ -12,19 +12,21 @@ Usage: python3 tools/NCG-battery/pkgcmp.py [--work DIR] containers A B [N]
 containers and megaparsec mind the runs' spread: a benchmark whose runs agree
 within 0.05% in both labels is compared by its minimum, moving if by more than
 0.05%; any other moves only where the two labels' ranges do not overlap. Prints
-how many rise and fall, the geometric mean of the minima's ratios over the
-stable ones, and the N (20 by default) largest rises and falls, then every
-benchmark whose lowest ALLOC differs, up to N each way. vector prints, per
-benchmark, ALLOC's change and the minimum TOT_INS over each label's runs, with
-the geometric mean of the TOT_INS ratios. tasty-papi's CSVs carry ALLOC beside
-the counters and no collections or copied bytes, so a rise here cannot be told
-mutator from collector. The work directory is battery.py's, dist-ghcho by
-default."""
+the geometric mean of the medians' ratios over every benchmark both labels have
+(the figure to quote, the stable set changing from label to label), how many
+rise and fall, the geometric mean of the minima's ratios over the stable ones,
+and the N (20 by default) largest rises and falls, then every benchmark whose
+lowest ALLOC differs, up to N each way. vector prints, per benchmark, ALLOC's
+change and the minimum TOT_INS over each label's runs, with the geometric mean
+of the TOT_INS ratios. tasty-papi's CSVs carry ALLOC beside the counters and
+no collections or copied bytes, so a rise here cannot be told mutator from
+collector. The work directory is battery.py's, dist-ghcho by default."""
 import csv
 import glob
 import math
 import os
 import re
+import statistics
 import sys
 import tempfile
 from collections import defaultdict
@@ -52,9 +54,22 @@ def load_spread(v, d, label, column='TOT_INS'):
             for prog, rs in runs.items() for b in rs[0]}
 
 
+def geomean(logs):
+    """The geometric mean of the ratios whose logarithms are logs, as a
+    change."""
+    return f'{(math.exp(sum(logs) / len(logs)) - 1) * 100:+.3f}%' if logs else 'none'
+
+
+def median_logs(A, B):
+    """The logarithms of the medians' ratios, B's over A's, of every benchmark
+    both have."""
+    return [math.log(statistics.median(B[k]) / statistics.median(A[k]))
+            for k in A if B.get(k)]
+
+
 def spread(v, d, a, b, n=20):
     A, B = load_spread(v, d, a), load_spread(v, d, b)
-    stable, moved, logs = 0, [], []
+    stable, moved, logs, meds = 0, [], [], median_logs(A, B)
     for k, va in A.items():
         vb = B.get(k)
         if not vb:
@@ -71,11 +86,10 @@ def spread(v, d, a, b, n=20):
             moved.append((hb / la - 1, k, f'{la}..{ha}', f'{lb}..{hb}', 'disjoint'))
     rises = sorted((m for m in moved if m[0] > 0), reverse=True)
     falls = sorted(m for m in moved if m[0] < 0)
-    gm = (f'{(math.exp(sum(logs) / len(logs)) - 1) * 100:+.3f}%' if logs
-          else 'none')
-    out = [f'{b} against {a}: {len(A)} benchmarks, {stable} stable in both; '
-           f'{len(rises)} rise, {len(falls)} fall; geometric mean over the stable '
-           + gm]
+    out = [f'{b} against {a}: {len(A)} benchmarks, {len(meds)} in both, {stable}'
+           f' stable in both; geometric mean of the medians over the {len(meds)}'
+           f' in both {geomean(meds)}; {len(rises)} rise, {len(falls)} fall;'
+           f' geometric mean over the stable {geomean(logs)}']
     for title, sel in (('rises', rises[:n]), ('falls', falls[:n])):
         out.append(title)
         for dd, k, x, y, how in sel:
@@ -124,9 +138,7 @@ def vector(v, a, b):
         logs.append(math.log(ib / ia))
         out.append(f'{k[:72]:72} alloc {(ba / aa - 1) * 100 if aa else 0:+.3f}%{da}'
                    f'  ins {ia} {ib} {ch:+.3f}%')
-    gm = (f'{(math.exp(sum(logs) / len(logs)) - 1) * 100:+.3f}%' if logs
-          else 'none')
-    out.append(f'geometric mean TOT_INS {gm} over {len(logs)}')
+    out.append(f'geometric mean TOT_INS {geomean(logs)} over {len(logs)}')
     return out
 
 
@@ -159,7 +171,8 @@ def self_test():
                 write_csv(f'{v}/cres/{lab}/p-{i + 1}.csv',
                           [(k, ALLOCS.get((lab, k), 100), x[i]) for k, x in bs.items()])
         got = spread(v, 'cres', 'A', 'B')
-        want = ['B against A: 6 benchmarks, 2 stable in both; 2 rise, 1 fall;'
+        want = ['B against A: 6 benchmarks, 5 in both, 2 stable in both; geometric'
+                ' mean of the medians over the 5 in both +0.542%; 2 rise, 1 fall;'
                 ' geometric mean over the stable +0.499%', 'rises',
                 ('p/All.d', '1000..1010', '1100..1105', '+8.911%', 'disjoint'),
                 ('p/All.s', '1000', '1010', '+1.000%', 'stable'), 'falls',
