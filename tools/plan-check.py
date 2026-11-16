@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Check a register of rulings: references that resolve, amendments readable
-from both sides, and quotes that are the user's own words.
+from both sides, quotes that are the user's own words, and the size of what
+a session reads after a compaction.
 
 Usage: python3 tools/plan-check.py RULINGS [OTHER ...] [--transcript JSONL]
+                                   [--read FILE]... [--budget CHARS]
        python3 tools/plan-check.py --self-test
 
 A register is a Markdown document holding entries "N. text", or "N, M. text"
 for a merged entry, at line starts after its first "## " heading, and, before
 that heading, a sentence beginning "Retired:" that lists the numbers dropped
 ("8, 16 and 50", "74 to 77"). An entry, and any OTHER document, cites entries
-as "ruling N" or "rulings N, M and K to L". It prints, and exits 1 where 1 or 3
-finds anything:
+as "ruling N" or "rulings N, M and K to L". It prints, and exits 1 where 1, 3
+or 6 finds anything:
 
 1. a reference, in RULINGS or an OTHER document, to a number that is neither
    an entry nor retired;
@@ -29,6 +31,14 @@ With --transcript, a Claude Code session's transcript, it also prints:
    left out; whitespace collapsed, and " ... " splitting a quote into parts
    each of which must occur. For eyeballing: a quote of a commit subject or
    of a file's text is legitimate.
+
+With --read, given once for each file a session reads after a compaction
+(the state file, the register, the open items), it also prints their size
+together and:
+
+6. that they hold more than --budget characters (200000 where none is
+   given), with the largest of them: files that grow by accretion are
+   caught when they are checked, not when a session has read them.
 
 Exit 2: a usage error or a document that cannot be read. That the self-test
 bites is mutants.py's to show.
@@ -152,6 +162,17 @@ def quotes(text, hay):
     return qs, miss
 
 
+def read_set(sizes, budget):
+    """Check 6 over [(name, characters)]: its lines, and whether it fired."""
+    total = sum(n for _, n in sizes)
+    out = [f'read after a compaction: {total} characters, budget {budget}']
+    if total > budget:
+        name, n = max(sizes, key=lambda s: s[1])
+        out.append(f'6. the files read after a compaction pass the budget by'
+                   f' {total - budget} characters; the largest is {name}, {n}')
+    return out, total > budget
+
+
 def self_test():
     """A scratch register, a document citing it and a transcript holding each
     form of the user's words, with every finding and missing quote required."""
@@ -205,10 +226,19 @@ def self_test():
     if len(qs) != 5 or miss != ['this was only in a summary']:
         bad.append(f'FAIL: {len(qs)} quotes, missing {miss}; expected 5,'
                    ' missing only the summary\'s')
+    over = read_set([('state.md', 60), ('plan.md', 50)], 100)
+    if over != (['read after a compaction: 110 characters, budget 100',
+                 '6. the files read after a compaction pass the budget by 10'
+                 ' characters; the largest is state.md, 60'], True):
+        bad.append(f'FAIL: a read set past its budget gave {over}')
+    at = read_set([('state.md', 60), ('plan.md', 40)], 100)
+    if at != (['read after a compaction: 100 characters, budget 100'], False):
+        bad.append(f'FAIL: a read set at its budget gave {at}')
     for b in bad:
         print(b)
     if not bad:
-        print('ok:   every finding and missing quote of the scratch register')
+        print('ok:   every finding and missing quote of the scratch register,'
+              ' and the read set\'s budget')
     return 1 if bad else 0
 
 
@@ -224,10 +254,24 @@ def main(argv):
             return 2
         tr = tr[0]
         argv = argv[:i] + argv[i + 2:]
+    reads, budget = [], 200000
+    for flag in ('--read', '--budget'):
+        while flag in argv:
+            i = argv.index(flag)
+            val = argv[i + 1:i + 2]
+            if not val or (flag == '--budget' and not val[0].isdigit()):
+                want = 'file' if flag == '--read' else 'number'
+                print(f'{flag} wants a {want}', file=sys.stderr)
+                return 2
+            if flag == '--read':
+                reads.append(val[0])
+            else:
+                budget = int(val[0])
+            argv = argv[:i] + argv[i + 2:]
     if not argv:
         print(__doc__.split('\n\n')[1], file=sys.stderr)
         return 2
-    common.require_readable(argv + ([tr] if tr else []))
+    common.require_readable(argv + reads + ([tr] if tr else []))
     docs = [(p, open(p, encoding='utf-8').read()) for p in argv]
     out, bad = findings(docs)
     print('\n'.join(out))
@@ -236,6 +280,11 @@ def main(argv):
         for q in miss:
             print(f'5. quote not in the user\'s words: "{q[:100]}"')
         print(f'{len(qs)} quotes, {len(miss)} not found')
+    if reads:
+        sizes = [(p, len(open(p, encoding='utf-8').read())) for p in reads]
+        lines, over = read_set(sizes, budget)
+        print('\n'.join(lines))
+        bad = bad or over
     return 1 if bad else 0
 
 

@@ -686,6 +686,11 @@ MUTANTS = [
     ('plan-check an elided quote not split', 'plan-check.py',
      "            if not all(p.strip() in hay for p in q.split(' ... ') if p.strip())]\n",
      "            if q not in hay]\n", ST),
+    # plan-check's read set (2026-11-16): each watched failing its self-test.
+    ('plan-check a read set past its budget not flagged', 'plan-check.py',
+     '    return out, total > budget\n', '    return out, False\n', ST),
+    ('plan-check a read set at its budget flagged', 'plan-check.py',
+     '    if total > budget:\n', '    if total >= budget:\n', ST),
     # pragma-calls (2026-09-30): each watched failing its self-test before
     # it was written down here.
     ('pragma-calls specialisation prefix no longer normalised', 'pragma-calls.py',
