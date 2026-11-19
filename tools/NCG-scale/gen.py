@@ -57,7 +57,11 @@ reads 2N words and then, in each of four identical arms, calls itself twice and
 then in tail position, each first call's frame slotting N b's that no later
 call needs and N a's that the second needs, each b in a younger slot than each
 a, so that the hole test of LayoutStack's allocate (holeOlder) finds no b older
-than an a, as first written by pairing each b with each a.
+than an a, as first written by pairing each b with each a; dupsN.hs, a case
+entering one of N loops, each looping by two back edges and leaving by a return,
+so that each loop's head is copied into two blocks, the loop's exit run moves
+after one copy, and the other copy ends in a duplicate of that run
+(copyLoopHeads' dupRuns in GHC.CmmToAsm.X86.CodeGen), one a loop.
 
 Every shape is compiled at -O1 and -O2 but stale, staleh and selfzb, and claims,
 stale, staleh and selfzb at -O0: at -O1 and -O2 the base's own cost on claims
@@ -350,6 +354,22 @@ def selfzb(n):
     return '\n'.join(out) + '\n'
 
 
+def dups(n):
+    # Of a loop's three jumps into its head, the entry's and the two back
+    # edges', layout lets one fall through and the other two take copies; the
+    # exit, a return of a few instructions, is the run that one copy moves
+    # after it and the other duplicates. The constants keep the loops apart.
+    s = ('module Dups (f) where\n\nf :: Int -> Int -> Int\n'
+         'f sel n = case sel of\n'
+         + ''.join(f'    {k} -> loop{k} 0 0\n' for k in range(1, n + 1))
+         + '    _ -> n\n  where\n')
+    for k in range(1, n + 1):
+        s += (f'    loop{k} !i !acc | i >= n = acc + {k}\n'
+              f'                  | even i = loop{k} (i + 1) (acc + i * {k})\n'
+              f'                  | otherwise = loop{k} (i + 2) (acc * {k + 2})\n')
+    return s
+
+
 SHAPES = [('chain', '.hs', chain), ('loops', '.hs', loops),
           ('ccalls', '.hs', ccalls), ('calls', '.hs', calls),
           ('allocs', '.hs', allocs), ('lists', '.hs', lists),
@@ -359,7 +379,7 @@ SHAPES = [('chain', '.hs', chain), ('loops', '.hs', loops),
           ('claims', '.cmm', claims), ('join', '.hs', join),
           ('waits', '.cmm', waits), ('stale', '.cmm', stale),
           ('staleh', '.cmm', staleh), ('tagchain', '.cmm', tagchain),
-          ('selfzb', '.hs', selfzb)]
+          ('selfzb', '.hs', selfzb), ('dups', '.hs', dups)]
 
 # The levels a shape is compiled at, where not -O1 and -O2.
 LEVELS = {'claims': (0, 1, 2), 'stale': (0,), 'staleh': (0,), 'selfzb': (0,)}
@@ -375,7 +395,8 @@ MARKS = {'chain': '{-# UNPACK #-} !Double', 'loops': '| otherwise = loop',
          'nest': 'if (i', 'carry': ' = a', 'rotate': ' = a',
          'diamonds': 'if (x > y + ', 'claims': '    t = x * ',
          'join': ' +# i', 'waits': '(a & 1)', 'stale': '(t & 2)',
-         'staleh': '(t & 4)', 'tagchain': '    if (n > ', 'selfzb': ', b'}
+         'staleh': '(t & 4)', 'tagchain': '    if (n > ', 'selfzb': ', b',
+         'dups': ' -> loop'}
 # The sources kept byte for byte, and selfzb's, at N = 50.
 PINNED = {
     'chain50.hs': '33c65e1873fe32d41b13c354184f988409387ffa0e21859492064023fd30d0a8',

@@ -2231,6 +2231,9 @@ MUTANTS = [
     ('NCG-scale gen join one Int# short', 'NCG-scale/gen.py',
      "    iz = [f'i{k}' for k in range(n)]\n    ds = [f'd{k}' for k in range(17)]\n",
      "    iz = [f'i{k}' for k in range(n - 1)]\n    ds = [f'd{k}' for k in range(17)]\n", ST),
+    ('NCG-scale gen dups one loop short', 'NCG-scale/gen.py',
+     "loop{k} 0 0\\n' for k in range(1, n + 1))\n",
+     "loop{k} 0 0\\n' for k in range(1, n))\n", ST),
     # NCG-scale's levels: claims at -O0 too, stale, staleh and selfzb at -O0
     # only, every other shape at -O1 and -O2.
     ('NCG-scale gen claims not at -O0', 'NCG-scale/gen.py',
