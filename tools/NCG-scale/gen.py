@@ -38,15 +38,40 @@ broadcasting a Double that the other reads again, so that the join's target
 expects it both in a register and in a slot other than its own
 (https://gitlab.haskell.org/ghc/ghc/-/work_items/27638), the Int#s leaving no
 register spare there: a compiler that panics on it fails the compile.
+waitsN.cmm, N two-way branches in sequence whose arms each end in a call, the
+two return continuations of each jumping to one join that only they reach, so
+that the linear allocator's hotFirst sets every continuation aside to wait for
+its join; staleN.cmm, after one branch that fixes t's first-used register while
+n holds a call argument's register, N branches in sequence, each arm passing t,
+written afresh before it, to a call, so that each allocation of t finds its
+wide destination and its first-used register apart and both free, and
+firstFreeInOrder's stale test lists the recorded blocks holding t
+(blocksHolding); stalehN.cmm, the same with a branch before each whose arms
+pass whether t is 3, so that more recorded blocks hold t; tagchainN.cmm, N
+if-else diamonds in sequence, the k-th assigning xk a copy of x(k-1) in one arm
+and x(k-1) & 7 in the other, then a test of xN against a literal by !=, which
+makes static prediction ask for the tag registers, so that tagRegisters
+disqualifies x1, then x2, ..., each disqualifying the next, one a round of its
+fixpoint as first written; selfzbN.hs, a function looping in a join point that
+reads 2N words and then, in each of four identical arms, calls itself twice and
+then in tail position, each first call's frame slotting N b's that no later
+call needs and N a's that the second needs, each b in a younger slot than each
+a, so that the hole test of LayoutStack's allocate (holeOlder) finds no b older
+than an a, as first written by pairing each b with each a.
 
-Every shape is compiled at -O1 and -O2, and claims at -O0 too: at -O1 and -O2
-the base's own cost on claims is superlinear as well, hiding the scan's.
+Every shape is compiled at -O1 and -O2 but stale, staleh and selfzb, and claims,
+stale, staleh and selfzb at -O0: at -O1 and -O2 the base's own cost on claims
+and selfzb is superlinear as well, hiding the scan's, and no allocation
+in stale or staleh reaches the stale test.
 
 chain, loops, ccalls and claims are kept byte for byte as first written, so that
 their figures stay comparable with the runs that found a quadratic compile cost
-on loops and on claims and a superlinear one on ccalls; the self-test checks
-their hashes at N = 50, and of every shape that the item it grows occurs N
-times."""
+on loops and on claims and a superlinear one on ccalls, and waits, stale,
+staleh and tagchain as the probes that found one in hotFirst, blocksHolding
+and tagRegisters generated them; selfzb is the probe that found one in holeOlder
+reworked so that the scan's cost shows in its compile's. The self-test checks
+the hashes of these and of selfzb at N = 50, and of every shape that the item
+it grows occurs N times."""
 import hashlib
 import os
 import sys
@@ -117,9 +142,10 @@ def cases(n):
             '           in t * (t + r) + s\n')
 
 
-def proc(name, decls, body):
-    return (f'#include "Cmm.h"\n\n{name} (W_ n)\n{{\n    W_ {", ".join(decls)};\n'
-            + body + '}\n')
+def proc(name, decls, body, imports=()):
+    return ('#include "Cmm.h"\n\n'
+            + ''.join(f'import {i};\n' for i in imports) + ('\n' if imports else '')
+            + f'{name} (W_ n)\n{{\n    W_ {", ".join(decls)};\n' + body + '}\n')
 
 
 def deadchain(n):
@@ -224,16 +250,119 @@ def join(n):
             '{-# NOINLINE f #-}\n')
 
 
+def cmm_call(f, arg, k):
+    """A call of f whose result, a local of its own, becomes a."""
+    return f'(W_ r{f[1]}{k}) = call {f}({arg}); a = r{f[1]}{k};'
+
+
+def cmm_branch(bit, arg, k):
+    """A two-way branch on a bit of a, each arm calling with arg."""
+    return (f'    if ((a & {bit}) != 0) {{ {cmm_call("pf", arg, k)} }}'
+            f' else {{ {cmm_call("pg", arg, k)} }}\n')
+
+
+def waits(n):
+    body = '    a = n;\n' + ''.join(cmm_branch(1, 'a', k) for k in range(1, n + 1))
+    return proc('waits', ['a'], body + '    return (a);\n', ('pf', 'pg'))
+
+
+# n, live to the first branch, keeps the argument's register from a and t; t
+# dies before the argument's register is written, u and v being live across
+# the calls.
+STALE_FIRST = ('    a = n + 1;\n    t = a + 1;\n'
+               '    if ((n & 2) != 0) { u = a + t; (W_ rf0) = call pf(u); a = rf0 + u; }'
+               ' else { v = a + t; (W_ rg0) = call pg(v); a = rg0 + v; }\n')
+
+
+def stale_passes(k):
+    return (f'    t = a + {k};\n'
+            + cmm_branch(2, 't', k).replace('(a & 2)', '(t & 2)'))
+
+
+def stale_reads(k):
+    return (f'    t = a + {k};\n'
+            + cmm_branch(4, 't != 3', k).replace('(a & 4)', '(t & 4)'))
+
+
+def stale(n):
+    body = STALE_FIRST + ''.join(stale_passes(k) for k in range(2, n + 2))
+    return proc('stale', ['a', 't', 'u', 'v'], body + '    return (a);\n',
+                ('pf', 'pg'))
+
+
+def staleh(n):
+    body = STALE_FIRST + ''.join(stale_reads(2 * k) + stale_passes(2 * k + 1)
+                                 for k in range(1, n + 1))
+    return proc('staleh', ['a', 't', 'u', 'v'], body + '    return (a);\n',
+                ('pf', 'pg'))
+
+
+def tagchain(n):
+    body = ''
+    for k in range(1, n + 1):
+        prev = f'x{k - 1}' if k > 1 else 'n'
+        body += (f'    if (n > {k}) {{ x{k} = {prev}; }}'
+                 f' else {{ x{k} = {prev} & 7; }}\n')
+    body += f'    if (x{n} != 3) {{ return (1); }} else {{ return (2); }}\n'
+    return proc('tagchain', [f'x{k}' for k in range(1, n + 1)], body)
+
+
+def plus_tree(xs):
+    """xs summed by +# as a balanced tree."""
+    if len(xs) == 1:
+        return xs[0]
+    m = len(xs) // 2
+    return f'({plus_tree(xs[:m])} +# {plus_tree(xs[m:])})'
+
+
+SELFZB_ARMS = 4
+
+
+def selfzb(n):
+    # The words are read through an address literal and b0 and a0 passed on
+    # as the later calls' first arguments, so that no argument of f is live
+    # after the first self call and the frame's new variables are the b's and
+    # the a's alone. spin, a join point, is the procedure's loop, without
+    # which allocate is given no counts, -O0 making no loop of the tail call;
+    # each identical arm sets up the first call's frame afresh, multiplying
+    # the scan's cost and not the reads'; the sums are balanced trees, cheaper
+    # to compile than chains.
+    b = [f'b{i}' for i in range(n)]
+    a = [f'a{i}' for i in range(n)]
+    out = ['{-# LANGUAGE MagicHash, UnboxedTuples #-}', f'module Selfzb{n} (f) where',
+           'import GHC.Exts', '',
+           'f :: Int# -> Int# -> State# RealWorld -> (# State# RealWorld, Int# #)',
+           'f n acc s0 = spin 1# where',
+           '  spin 0# = case n <=# 0# of',
+           '    1# -> (# s0, acc #)',
+           '    _ ->']
+    for i, v in enumerate(b + a):
+        out.append(f'      case readIntOffAddr# "p"# {i}# s{i} of {{ (# s{i + 1}, {v} #) ->')
+    k = 2 * n
+    calls = (f'case f (n -# 1#) acc s{k} of {{ (# t0, r #) -> '
+             f'case f b0 (r +# {plus_tree(b)}) t0 of {{ (# t1, q #) -> '
+             f'f a0 (q +# {plus_tree(a)}) t1 }}}}')
+    out.append('      case acc of {')
+    out += [f'        {j}# -> {calls};' for j in range(SELFZB_ARMS - 1)]
+    out.append(f'        _ -> {calls}')
+    out.append('      }' + '}' * k)
+    out.append('  spin j = spin (j -# 1#)')
+    return '\n'.join(out) + '\n'
+
+
 SHAPES = [('chain', '.hs', chain), ('loops', '.hs', loops),
           ('ccalls', '.hs', ccalls), ('calls', '.hs', calls),
           ('allocs', '.hs', allocs), ('lists', '.hs', lists),
           ('cases', '.hs', cases), ('deadchain', '.cmm', deadchain),
           ('nest', '.cmm', nest), ('carry', '.cmm', carry),
           ('rotate', '.cmm', rotate), ('diamonds', '.cmm', diamonds),
-          ('claims', '.cmm', claims), ('join', '.hs', join)]
+          ('claims', '.cmm', claims), ('join', '.hs', join),
+          ('waits', '.cmm', waits), ('stale', '.cmm', stale),
+          ('staleh', '.cmm', staleh), ('tagchain', '.cmm', tagchain),
+          ('selfzb', '.hs', selfzb)]
 
 # The levels a shape is compiled at, where not -O1 and -O2.
-LEVELS = {'claims': (0, 1, 2)}
+LEVELS = {'claims': (0, 1, 2), 'stale': (0,), 'staleh': (0,), 'selfzb': (0,)}
 
 
 def shapes_at(level):
@@ -245,13 +374,19 @@ MARKS = {'chain': '{-# UNPACK #-} !Double', 'loops': '| otherwise = loop',
          'lists': ' [] !acc = ', 'cases': ' -> j (', 'deadchain': ' = t',
          'nest': 'if (i', 'carry': ' = a', 'rotate': ' = a',
          'diamonds': 'if (x > y + ', 'claims': '    t = x * ',
-         'join': ' +# i'}
-# The sources kept byte for byte, at N = 50.
+         'join': ' +# i', 'waits': '(a & 1)', 'stale': '(t & 2)',
+         'staleh': '(t & 4)', 'tagchain': '    if (n > ', 'selfzb': ', b'}
+# The sources kept byte for byte, and selfzb's, at N = 50.
 PINNED = {
     'chain50.hs': '33c65e1873fe32d41b13c354184f988409387ffa0e21859492064023fd30d0a8',
     'loops50.hs': '40f8fb45f73099954e8d9ef27a16c4a190f93b288e0ddc671ebbc387aeaa3007',
     'ccalls50.hs': '54d4107283c2529375c4e8887a1141ef9cfa2eccd7eb8e491ea5fe153d6ebcd2',
     'claims50.cmm': '2f60d42e34fe3a0e784be8a7217240ec3fcc7744df3708e5c9bb848a361b0312',
+    'waits50.cmm': '1837f45b12305a326ea0aaf6cb9511b5f821141676026ac3d1d736b592f338d4',
+    'stale50.cmm': '2d55c76f2b59fbe6546f3ce0e32009f33910f756c6b5f15810d8b3e3ff1d51c0',
+    'staleh50.cmm': 'efeb3f3bf98fd04881dfb1c929013d64510dc5ddaca311ba921f74467ed3b4ca',
+    'tagchain50.cmm': 'e098e853bff255bc6c60eafea70e1f8f80b0ad02fce0c5aa4604f98eb6a792a9',
+    'selfzb50.hs': '8afd4b97aa183c9ebe2da91097c0b0eab228565417e0286e6cd46e5646bb3477',
 }
 
 
@@ -277,11 +412,13 @@ def self_test():
                 got = hashlib.sha256(h.read()).hexdigest()
             if got != want:
                 bad.append(f'{f} changed: sha256 {got}')
-    every = [name for name, _, _ in SHAPES]
+    every = [name for name, _, _ in SHAPES
+             if name not in ('stale', 'staleh', 'selfzb')]
     if shapes_at(1) != every or shapes_at(2) != every:
-        bad.append(f'not every shape at -O1 and -O2: {shapes_at(1)}, {shapes_at(2)}')
-    if 'claims' not in shapes_at(0):
-        bad.append('claims not at -O0')
+        bad.append(f'not every shape but stale, staleh and selfzb at -O1 and '
+                   f'-O2: {shapes_at(1)}, {shapes_at(2)}')
+    if shapes_at(0) != ['claims', 'stale', 'staleh', 'selfzb']:
+        bad.append(f'not claims, stale, staleh and selfzb at -O0: {shapes_at(0)}')
     for x in bad:
         print('FAIL', x)
     print('ok   gen.py self-test' if not bad else f'{len(bad)} failed')

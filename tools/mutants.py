@@ -2231,9 +2231,12 @@ MUTANTS = [
     ('NCG-scale gen join one Int# short', 'NCG-scale/gen.py',
      "    iz = [f'i{k}' for k in range(n)]\n    ds = [f'd{k}' for k in range(17)]\n",
      "    iz = [f'i{k}' for k in range(n - 1)]\n    ds = [f'd{k}' for k in range(17)]\n", ST),
-    # NCG-scale's levels: claims at -O0 too, every shape at -O1 and -O2.
+    # NCG-scale's levels: claims at -O0 too, stale, staleh and selfzb at -O0
+    # only, every other shape at -O1 and -O2.
     ('NCG-scale gen claims not at -O0', 'NCG-scale/gen.py',
-     "LEVELS = {'claims': (0, 1, 2)}", "LEVELS = {'claims': (1, 2)}", ST),
+     "LEVELS = {'claims': (0, 1, 2),", "LEVELS = {'claims': (1, 2),", ST),
+    ('NCG-scale gen selfzb at -O1 too', 'NCG-scale/gen.py',
+     "'selfzb': (0,)}", "'selfzb': (0, 1)}", ST),
     ('NCG-scale gen a shape not at -O2', 'NCG-scale/gen.py',
      'if level in LEVELS.get(name, (1, 2))]', 'if level in LEVELS.get(name, (1,))]', ST),
     # NCG-scale's report (2026-11-03): an instr row whose compiles collected

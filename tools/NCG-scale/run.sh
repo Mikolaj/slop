@@ -1,7 +1,7 @@
 #!/bin/bash
 # run.sh OUT BASE LABEL...: the scaling probes, gen.py's shapes at N = $SCALEN
-# (default 50 100 200 400), compiled to assembly at -O1 and -O2, and at -O0
-# those gen.py names for it, by each compiler, BASE first; a compiler is
+# (default 50 100 200 400), each compiled to assembly at the levels gen.py
+# names for it, by each compiler, BASE first; a compiler is
 # LABEL=PATH, or LABEL for ghc-LABEL/_build/stage1/bin/ghc under the working
 # directory, the bootstrapped stage-2 compiler, whose cost the stage-1 one
 # misstates. Appends to OUT one line per compile, "label shape level N bytes
@@ -12,7 +12,7 @@
 # the area then collects once and its instruction count repeats, where GHC's
 # own options move its collections from run to run; the sources and outputs go
 # under /tmp/claude-1000/scale/, named after OUT. On CPU $SCALECPU (default 10),
-# memory capped.
+# memory capped. $SCALESHAPES, where set, names the shapes compiled.
 set -u
 H=$(dirname "$(realpath "$0")")
 OUT=$(realpath -m "$1"); shift
@@ -23,7 +23,9 @@ mkdir -p "$W" && (cd "$W" && python3 "$H/gen.py" $NS) || exit 1
 for spec in "$@"; do
   l=${spec%%=*}; g=${spec#*=}
   [ "$g" = "$spec" ] && g=$PWD/ghc-$l/_build/stage1/bin/ghc
-  for O in $(python3 "$H/gen.py" --levels); do for p in $(python3 "$H/gen.py" --shapes $O); do for n in $NS; do
+  for O in $(python3 "$H/gen.py" --levels); do for p in $(python3 "$H/gen.py" --shapes $O); do
+    case " ${SCALESHAPES:-$p} " in *" $p "*) ;; *) continue ;; esac
+    for n in $NS; do
     src=$W/$p$n.hs; ext=-XBangPatterns
     [ -f "$src" ] || { src=$W/$p$n.cmm; ext=; }
     w=$W/$l-O$O-$p$n; rm -rf "$w"; mkdir -p "$w"
