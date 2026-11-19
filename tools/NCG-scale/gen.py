@@ -199,7 +199,10 @@ def join(n):
     # A local function both arms tail-call, not the unboxed tuple of the
     # tests T27638b to T27638f: a tuple has at most 64 components, and nested
     # tuples left GHC no join, the continuation copied into each arm. The
-    # arguments load last first, so the Int#s after the Doubles.
+    # arguments load last first, so the Int#s after the Doubles. The arm reading
+    # x again comes first and the broadcast is the default, as in T27638b and
+    # T27638f: with the broadcast first, a linear allocator that takes the SCCs
+    # in index order reaches no fixup into a register and another slot.
     iz = [f'i{k}' for k in range(n)]
     ds = [f'd{k}' for k in range(17)]
     loads = ' '.join(f'(indexIntOffAddr# q {k}#)' for k in range(n))
@@ -215,9 +218,9 @@ def join(n):
             f' +## int2Double# (0#{"".join(f" +# {i}" for i in iz)})\n'
             '      {-# NOINLINE j #-}\n'
             '  in case b of\n'
-            '       0# -> case unpackDoubleX2# (broadcastDoubleX2# x) of\n'
+            f'       1# -> j (y +## x) {loads} {dl}\n'
+            '       _  -> case unpackDoubleX2# (broadcastDoubleX2# x) of\n'
             f'               (# u, _ #) -> let !z = c_fabs u in j z {loads} {dl}\n'
-            f'       _  -> j (y +## x) {loads} {dl}\n'
             '{-# NOINLINE f #-}\n')
 
 
