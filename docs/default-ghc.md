@@ -8,10 +8,15 @@ compilers do.
 
 ### The NCG series
 
-The compiler is built from the branch `for-review` of `ghc/`, a merge of the NCG
-series of `for-review-master`, pushed as `wip/T27981-ncg-mystery-box`,
-into the branch below. The series fixes GHC
-[#27980](https://gitlab.haskell.org/ghc/ghc/-/work_items/27980),
+The compiler is built from the branch `for-review` of `ghc/`, pushed
+as the `master` of
+[Mikolaj/vibed-ghc-fixes](https://gitlab.haskell.org/Mikolaj/vibed-ghc-fixes/-/tree/master):
+a merge of the NCG series of `for-review-master`, pushed
+as `wip/T27981-ncg-mystery-box`, into the branch below, and on it a fix
+of a full-laziness float
+that [!16600](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16600) loses,
+a join point's body case-floats kept below it in the Gentle phase. The series
+fixes GHC [#27980](https://gitlab.haskell.org/ghc/ghc/-/work_items/27980),
 [#27800](https://gitlab.haskell.org/ghc/ghc/-/work_items/27800),
 [#27981](https://gitlab.haskell.org/ghc/ghc/-/work_items/27981),
 [#26631](https://gitlab.haskell.org/ghc/ghc/-/work_items/26631),
