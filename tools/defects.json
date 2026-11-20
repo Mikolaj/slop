@@ -9354,6 +9354,84 @@
    "expect_absent": "CALLED",
    "bug_exit": 1,
    "bug_text": "A.hs\tf\tCALLED B 1"
+  },
+  {
+   "id": "ctx-size-01",
+   "program": "ctx-size.py",
+   "name": "a Bash call with WORD that had finished, in another agent's transcript of the session, was counted with the caller's own call, still running, so an agent reusing a word one of its session's earlier agents had typed was refused unmeasured",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "session S1's agent-old.jsonl holding a Bash call `ctx-size.py --cap 300000 heron` and its tool_result, agent-new.jsonl the same call with no result; WORD heron",
+   "ok": "context 222 tokens (agent-new.jsonl), exit 0",
+   "bug": "'heron' in 2 transcripts, not one, exit 2",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired in session e13528a1 (2026-11-20) on words its agents reused or extended: a reader launched about 20:44 local got 'marigold' and 'quokkaplinth7' each in 3 transcripts, the other two of each being finished agents' own ctx-size calls hours earlier (a56f0e45, a2441e60; af29670e, af5c77c2), and ran on unmeasured; its twin's words differed, and the twin's first, 'heliotrope', was refused alike. In every refusal of that session listing several transcripts, each other transcript's call had returned before the refusal, the substring test also catching longer words ('quokka' in 'quokkafjord7', 'heron' in 'nbheron64'), and no parent's transcript was among them. A Bash call holding WORD stood in for the caller's call; what tells the two apart is that only the caller's has no tool_result yet.",
+   "plant_cmd": "mkdir -p .claude/projects/p/S1/subagents && cat > .claude/projects/p/S1/subagents/agent-old.jsonl <<'EOF'\n{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":1,\"cache_read_input_tokens\":1},\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\"input\":{\"command\":\"ctx-size.py --cap 300000 heron\"}}]}}\n{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"context 3 tokens\"}]}}\nEOF\ncat > .claude/projects/p/S1/subagents/agent-new.jsonl <<'EOF'\n{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":20,\"cache_read_input_tokens\":200},\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Bash\",\"input\":{\"command\":\"ctx-size.py --cap 300000 heron\"}}]}}\nEOF",
+   "env": {
+    "HOME": "{tmp}",
+    "CLAUDE_CODE_SESSION_ID": "S1"
+   },
+   "invoke": [
+    "--cap",
+    "300000",
+    "heron"
+   ],
+   "expect_exit": 0,
+   "expect_text": "context 222 tokens (agent-new.jsonl)",
+   "bug_exit": 2,
+   "bug_text": "'heron' in 2 transcripts, not one"
+  },
+  {
+   "id": "ctx-size-02-control",
+   "program": "ctx-size.py",
+   "name": "a call run in the harness's background mode, its only tool_result the launch stub, is still running: with another transcript's running call holding the same word, the word is refused, not measured in the other transcript",
+   "kind": "control",
+   "notes": "Added 2026-11-20 with ctx-size-01, whose fix as first drafted took the stub, \"Command running in background with ID: ...\", for the call's result, and so measured agent-other.jsonl here, exit 0; watched so on that draft. A control rather than a defect: the draft was never committed, and the tool before ctx-size-01 refused here as the fixed one does.",
+   "plant_cmd": "mkdir -p .claude/projects/p/S1/subagents && cat > .claude/projects/p/S1/subagents/agent-bg.jsonl <<'EOF'\n{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":10,\"cache_read_input_tokens\":100},\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\"input\":{\"command\":\"ctx-size.py --cap 300000 heron\",\"run_in_background\":true}}]}}\n{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"Command running in background with ID: b1. Output is being written to: /tmp/b1.output.\"}]}}\nEOF\ncat > .claude/projects/p/S1/subagents/agent-other.jsonl <<'EOF'\n{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":20,\"cache_read_input_tokens\":200},\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Bash\",\"input\":{\"command\":\"ctx-size.py --cap 300000 heron\"}}]}}\nEOF",
+   "env": {
+    "HOME": "{tmp}",
+    "CLAUDE_CODE_SESSION_ID": "S1"
+   },
+   "invoke": [
+    "--cap",
+    "300000",
+    "heron"
+   ],
+   "expect_exit": 2,
+   "expect_text": "'heron' in 2 transcripts, not one",
+   "expect_absent": "context "
+  },
+  {
+   "id": "ctx-size-03",
+   "program": "ctx-size.py",
+   "name": "the transcripts were read once, at once, so a call whose own entry the harness appended after the command had started, as it can for an unsandboxed one, was refused as found in no transcript",
+   "family": "environment-decides",
+   "fix_rev": "self",
+   "trigger": "session S1's agent-late.jsonl empty when the tool starts, the call `ctx-size.py --cap 300000 heron` appended to it 1 s later by a thread a sitecustomize starts in the tool's own process, so that the late write needs no second process for the runner's tracing to wait on",
+   "ok": "context 222 tokens (agent-late.jsonl), exit 0",
+   "bug": "'heron' in 0 transcripts, not one, exit 2",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "Fired twice in session e13528a1 (2026-11-20, 22:11Z and 22:13Z) on agent aff51fe8's unsandboxed calls, both refused as in 0 transcripts, while its sandboxed calls before and after measured; the tool replayed on its transcript cut at each refused call found the call. A probe polling for its own call's entry from its start found it absent at start and landing after 0.091 s and 0.086 s in two of four unsandboxed calls, and present at 0.003 s sandboxed. Mikolaj chose the fix (2026-11-20): wait half a second, then re-read for up to 3 s while no running call is found.",
+   "plant_cmd": "mkdir -p .claude/projects/p/S1/subagents site && : > .claude/projects/p/S1/subagents/agent-late.jsonl && cat > site/sitecustomize.py <<'EOF'\nimport os, threading, time\n\n\ndef late():\n    time.sleep(1.0)\n    with open(os.environ['HOME'] + '/.claude/projects/p/S1/subagents/agent-late.jsonl', 'a') as f:\n        f.write('{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":20,\"cache_read_input_tokens\":200},\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Bash\",\"input\":{\"command\":\"ctx-size.py --cap 300000 heron\"}}]}}' + '\\n')\n\n\nthreading.Thread(target=late, daemon=True).start()\nEOF",
+   "env": {
+    "HOME": "{tmp}",
+    "CLAUDE_CODE_SESSION_ID": "S1",
+    "PYTHONPATH": "{tmp}/site"
+   },
+   "invoke": [
+    "--cap",
+    "300000",
+    "heron"
+   ],
+   "expect_exit": 0,
+   "expect_text": "context 222 tokens (agent-late.jsonl)",
+   "bug_exit": 2,
+   "bug_text": "'heron' in 0 transcripts, not one",
+   "plant": "A plant's background writer is no fixture here: under defect-run's strace -f the plant returns only once the writer has written, and the late entry is then on time."
   }
  ]
 }

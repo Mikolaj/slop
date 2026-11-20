@@ -3123,8 +3123,8 @@ MUTANTS = [
     # ctx-size (2026-11-07): each watched failing its self-test before it was
     # written down here.
     ('ctx-size cache read left out of the context', 'ctx-size.py',
-     "                     + u.get('cache_read_input_tokens', 0))\n",
-     '                     + 0)\n', ST),
+     "                       + u.get('cache_read_input_tokens', 0))\n",
+     '                       + 0)\n', ST),
     ('ctx-size cap not judged', 'ctx-size.py',
      '    over = cap is not None and n > cap\n', '    over = False\n', ST),
     ('ctx-size a word in two transcripts taken', 'ctx-size.py',
@@ -3132,7 +3132,19 @@ MUTANTS = [
     ('ctx-size other sessions searched', 'ctx-size.py',
      '    if session:\n        return (glob', '    if False:\n        return (glob', ST),
     ('ctx-size first call taken, not the last', 'ctx-size.py',
-     '        if u:\n            found = (', '        if u and found is None:\n            found = (', ST),
+     '    return pending[-1] if', '    return pending[0] if', ST),
+    # ctx-size (2026-11-20): each watched failing its self-test before it was
+    # written down here.
+    ('ctx-size a finished call taken', 'ctx-size.py',
+     ' for i, n in calls if i not in done]\n', ' for i, n in calls]\n', ST),
+    ('ctx-size a background stub taken for a result', 'ctx-size.py',
+     "                        and not text_of(c).startswith(STUB))\n",
+     ')\n', ST),
+    ('ctx-size no wait before the first read', 'ctx-size.py',
+     '    time.sleep(settle)\n', '    pass\n', ST),
+    ('ctx-size no re-read while no running call is found', 'ctx-size.py',
+     '        if hits or time.monotonic() >= deadline:\n', '        if True:\n',
+     ST),
     # memguard (2026-11-07): each watched failing its self-test before it was
     # written down here.
     ('memguard continued over the stop bar', 'memguard.sh',
