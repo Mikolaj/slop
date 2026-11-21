@@ -15,7 +15,9 @@ a merge of the NCG series of `for-review-master`, pushed
 as `wip/T27981-ncg-mystery-box`, into the branch below, and on it a fix
 of a full-laziness float
 that [!16600](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16600) loses,
-a join point's body case-floats kept below it in the Gentle phase. The series
+a join point's body case-floats kept below it in the Gentle phase, which
+with !16600 fixes GHC
+[#28164](https://gitlab.haskell.org/ghc/ghc/-/work_items/28164). The series
 fixes GHC [#27980](https://gitlab.haskell.org/ghc/ghc/-/work_items/27980),
 [#27800](https://gitlab.haskell.org/ghc/ghc/-/work_items/27800),
 [#27981](https://gitlab.haskell.org/ghc/ghc/-/work_items/27981),
@@ -37,7 +39,8 @@ The merge's first parent is the branch `merged-mrs`, also pushed to
 [Mikolaj/vibed-ghc-fixes](https://gitlab.haskell.org/Mikolaj/vibed-ghc-fixes/-/tree/merged-mrs):
 GHC master at `83038fbee5`, plus MRs
 [!16658](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16658),
-[!16600](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16600),
+[!16600](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16600), fixing
+[#28163](https://gitlab.haskell.org/ghc/ghc/-/work_items/28163),
 [!16675](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16675),
 [!16684](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16684),
 [!16619](https://gitlab.haskell.org/ghc/ghc/-/merge_requests/16619),

@@ -35,6 +35,10 @@ run.mjs
 # Filed GHC issues name their second module `Lib.hs` too, and their
 # documents are the filed bodies, so the name stays as filed.
 Lib.hs
+# GHC #28164's filed body names its two reproducers `S.hs` and `R.hs`,
+# so the names stay as filed.
+S.hs
+R.hs
 # A Claude Code issue comment names `.claude.json`, the file its
 # reproduction sets up in a fresh HOME, and its document is the posted
 # body, so the name stays as posted.
