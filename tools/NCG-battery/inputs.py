@@ -91,6 +91,9 @@ INPUTS = (
           'bcbba7e959146f5916eb0ad2685050d7a86cbe66', None, 'vpapi/a2t',
           ('cabal.project.*',)),
     Input('a2t-cells', 'tracked', 'a2t-cells.txt', None, None, 'vpapi/a2t-cells.txt', ()),
+    # the two tables p103's A2T binary printed, battery.py's setting 17,
+    # from which a2t-full and a2t-groups size every label's N alike
+    Input('a2t-tables', 'tracked', 'a2t-tables', None, None, 'vpapi/a2t-tables', ()),
     # !16269's genManyBasicBlocks, as compile-cost.py's cell MBB
     Input('mbb', 'generate', 'gen-ManyBasicBlocks.py',
           '442291b8e445cdff326238a7d45a275e637ae412fd147a75afbe7c2239091bab', None,
@@ -136,7 +139,8 @@ NEEDS = {'nofib': ('nofib',),
          'containers': ('containers', 'tasty-bench-papi', 'tasty-papi'),
          'vector': ('vector', 'tasty-papi'),
          'megaparsec': ('megaparsec', 'case-insensitive', 'criterion-papi', 'tasty-papi'),
-         'a2t': ('a2t', 'a2t-cells'), 'a2t-full': ('a2t',), 'a2t-groups': ('a2t',),
+         'a2t': ('a2t', 'a2t-cells'), 'a2t-full': ('a2t', 'a2t-tables'),
+         'a2t-groups': ('a2t', 'a2t-tables'),
          'comp1': ('mbb',), 'comp2': ('mbb',)}
 
 

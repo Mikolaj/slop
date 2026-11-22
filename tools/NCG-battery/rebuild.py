@@ -680,7 +680,7 @@ def self_test():
             bad.append(f'--dry --pair: {p.returncode}, {p.stdout[:120]!r}')
         p = subprocess.run([sys.executable, os.path.abspath(__file__), '--work', w, '--repo', r,
                             '--dry', base, tip, spec], capture_output=True, text=True)
-        if p.returncode or 'inputs inputs.py is to put in place: a2t a2t-cells mbb nofib' \
+        if p.returncode or 'inputs inputs.py is to put in place: a2t a2t-cells a2t-tables mbb nofib' \
                 not in p.stdout:
             bad.append(f'--dry over a work directory lacking the inputs: {p.returncode}')
         for args, word in (((tip, base, spec), 'not an ancestor'), ((base, 'nosuch', spec), 'no commit'),

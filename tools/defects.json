@@ -9520,6 +9520,40 @@
    ],
    "bug_exit": 0,
    "bug_absent": "windows:"
+  },
+  {
+   "id": "NCG-battery-20",
+   "program": "NCG-battery/battery.py",
+   "name": "a2t-full and a2t-groups sized each cell's N from the label's own fresh tables, so two labels could count a large cell at different N and differ on it by up to a sixth with no change of its code",
+   "family": "environment-decides",
+   "fix_rev": "self",
+   "trigger": "battery.py --dry over an empty WORK for label x on tree t, part a2t-full",
+   "ok": "the part gives a2tcells.py count the pinned tables WORK/vpapi/a2t-tables/forced.txt and summed.txt, which inputs.py puts in place, refuses where they are absent, and has the label's binary print no table",
+   "bug": "the part had the label's binary print its two tables into WORK/vpapi/at-ct-x and gave those to a2tcells.py count, which sizes N from them",
+   "proved": "ran",
+   "harm": "latent",
+   "discovery": "review",
+   "notes": "2026-11-23: Shaped/mapA/large/flip/boxed by perf-per-call.py on p103's binary gives 24068004.5 instructions a call at N 10 and 20102147.4 at N 20 (finding 1758 in dist-ghcho); found by the session checking agent oc3's account of the large cells past 1% between orthotope's in-process counts and p103's records. The sweep before the battery sized every build of a comparison from one build's tables. Mikolaj's ruling 470.",
+   "plant_cmd": "mkdir -p w",
+   "invoke": [
+    "--dry",
+    "--work",
+    "{tmp}/w",
+    "t",
+    "x",
+    "4-6",
+    "a2t-full"
+   ],
+   "expect_exit": 0,
+   "expect_text": [
+    "/vpapi/a2t-tables/forced.txt /",
+    "/vpapi/a2t-tables/summed.txt /",
+    "no pinned tables"
+   ],
+   "expect_absent": "GHCRTS=-V0 taskset",
+   "bug_exit": 0,
+   "bug_text": "/vpapi/at-ct-x/forced.txt",
+   "bug_absent": "a2t-tables"
   }
  ]
 }

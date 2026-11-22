@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The cells of orthotope's A2T that battery.py's parts a2t-full and
-a2t-groups count (its setting 17), taken from the binary's own tables,
+a2t-groups count (its setting 17), taken from an A2T binary's tables,
 and their count.
 
 Usage: python3 tools/NCG-battery/a2tcells.py cells [--groups] FORCED SUMMED
@@ -8,8 +8,10 @@ Usage: python3 tools/NCG-battery/a2tcells.py cells [--groups] FORCED SUMMED
            [--meminfo FILE] CPUS BIN FORCED SUMMED OUT
        python3 tools/NCG-battery/a2tcells.py --self-test
 
-FORCED and SUMMED are the tables BIN prints, `GHCRTS=-V0 BIN` and
-`GHCRTS=-V0 BIN --summed`, a line a row `Family/op/size/view`
+FORCED and SUMMED are the tables an A2T binary prints, `GHCRTS=-V0 BIN`
+and `GHCRTS=-V0 BIN --summed`, battery.py giving every label the pinned
+pins/a2t-tables, so that each counts a cell at one N; a line a row
+`Family/op/size/view`
 with three times and three bytes, tools/census.py's form. The cells are those
 of the sweep's count3.py: every row and kind to which a table gives a time,
 the forced table's then the summed one's, in the tables' order, an operation
