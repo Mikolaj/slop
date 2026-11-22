@@ -355,10 +355,11 @@ PKGS = {
         'resdir': None, 'csv': 'res-{lab}-$i.csv'},
     'megaparsec': {
         'log': 'mb', 'src': 'mtr', 'builddir': 'mdist',
-        # every tree but ghc-f also builds mtr's case-insensitive-1.2.1.0,
-        # GHC's master rejecting the package's noncanonical mappend
+        # every tree but ghc-f also builds mtr's case-insensitive-1.2.2.0 in
+        # place of the index-state's 1.2.1.0, whose noncanonical mappend
+        # GHC's master rejects
         'packages': 'megaparsec-9.8.1 criterion-papi',
-        'unless_f': ' case-insensitive-1.2.1.0',
+        'unless_f': ' case-insensitive-1.2.2.0',
         'allow': ', text, bytestring',
         'constraints': 'constraints: hashable ==1.5.0.0',
         'stanzas': ('megaparsec',), 'flags': {},
@@ -1439,7 +1440,7 @@ def self_test():
                  '  ghc-options: -O1 -ddump-timings -ddump-to-file\n'),
                 ('mtr/cabal.project.ct-x', str.startswith,
                  'packages: megaparsec-9.8.1 criterion-papi'
-                 f' case-insensitive-1.2.1.0 {w}/vpapi/tasty-papi-settle2\n'),
+                 f' case-insensitive-1.2.2.0 {w}/vpapi/tasty-papi-settle2\n'),
                 ('a2t/cabal.project.ct-x', str.startswith,
                  f'packages: .\nwith-compiler: {g}/ghcw-x\nwith-hc-pkg: {g}/ghc-pkg\n'),
                 ('a2t/cabal.project.ct-x', str.endswith,

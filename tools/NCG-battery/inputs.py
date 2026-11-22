@@ -117,10 +117,11 @@ INPUTS = (
     Input('megaparsec', 'hackage', 'megaparsec-9.8.1',
           'e05c71a12a085b8e87f156dfee4a9a7c8cbd483a3abe9c779f921d0563b97aa8',
           'megaparsec-9.8.1.patch', 'vpapi/mtr/megaparsec-9.8.1', ()),
-    # mappend left to its default, GHC's master rejecting the noncanonical one
-    Input('case-insensitive', 'hackage', 'case-insensitive-1.2.1.0',
-          '296dc17e0c5f3dfb3d82ced83e4c9c44c338ecde749b278b6eae512f1d04e406',
-          'case-insensitive-1.2.1.0.patch', 'vpapi/mtr/case-insensitive-1.2.1.0', ()),
+    # 1.2.2.0, its mappend the default, where 1.2.1.0's noncanonical one,
+    # which GHC's master rejects, took a patch (Mikolaj's ruling 465)
+    Input('case-insensitive', 'hackage', 'case-insensitive-1.2.2.0',
+          '54125d4bfa3199730787e050dde8ee5e0e2e28a07f67adcae89f72f3f5d132cc', None,
+          'vpapi/mtr/case-insensitive-1.2.2.0', ()),
     Input('criterion-papi', 'tracked', 'criterion-papi', None, None,
           'vpapi/mtr/criterion-papi', ()),
     # settle2, findings 499 to 501: Shimuuar/tasty-papi#7 in an earlier form,
