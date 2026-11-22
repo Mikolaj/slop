@@ -67,6 +67,7 @@ STEPS = [
     ('NCG-battery a2tcells self-test', ['python3', '{root}/NCG-battery/a2tcells.py', '--self-test']),
     ('NCG-battery alone self-test', ['python3', '{root}/NCG-battery/alone.py', '--self-test']),
     ('NCG-battery rebuild self-test', ['python3', '{root}/NCG-battery/rebuild.py', '--self-test']),
+    ('NCG-battery label self-test', ['python3', '{root}/NCG-battery/label.py', '--self-test']),
     ('NCG-battery bstats self-test', ['python3', '{root}/NCG-battery/bstats.py', '--self-test']),
     ('NCG-battery runreport self-test', ['python3', '{root}/NCG-battery/runreport.py', '--self-test']),
     ('NCG-battery tickets self-test', ['python3', '{root}/NCG-battery/tickets.py', '--self-test']),

@@ -12,21 +12,28 @@ Usage: python3 tools/NCG-battery/runreport.py [--work DIR] A B OUT
        python3 tools/NCG-battery/runreport.py [--work DIR] --check [LABEL...]
        python3 tools/NCG-battery/runreport.py --self-test
 
-The thresholds (tests/rev2/ol2/rows.py's, and Mikolaj's of 2026-11-07 for
-object size and compile instructions): nofib's instructions, allocation,
-compile allocation and object size 0.2%, its compile instructions 1%;
-containers' and megaparsec's instructions and allocation 0.1%, a
-benchmark's instructions moving by pkgcmp.py's rule (the minima where both
-labels' runs agree within 0.05%, else the nearer ends where the ranges are
-disjoint, else the minima, marked `overlap`); vector's 0.05%, by the
-minima; A2T's instructions and allocation a call 0.2%; a compilation's
-allocation 0.1% and its instructions 1%; the perf tests by the windows GHC's
-CI holds them to, taken from the work directory's ghc-B where it stands,
-the tree of the GHC under test where the tree is named as the label, as
-the rebuild's are (Mikolaj's ruling 457); a scaling row
-where report.py flags it; the tickets' and the Text scan's rows tickets.py
-compare lists, instructions an element 0.2%; a module's allocation 0.1% and
-size 0.2%, a compiler process's instructions 1%. A label's random test is
+The thresholds, taken up on 2026-11-07 where no other date is given, from
+the outliers pass over the series' full rebuild, object size and compile
+instructions set by Mikolaj's ruling 120 that day: nofib's instructions,
+allocation, compile allocation and object size 0.2%, its compile
+instructions 1%; containers' and megaparsec's instructions and allocation
+0.1%, a benchmark's instructions moving by pkgcmp.py's rule (the minima
+where both labels' runs agree within 0.05%, else the nearer ends where the
+ranges are disjoint, else the minima, marked `overlap`); vector's 0.05%, by
+the minima; the three packages' falls listed by those bars, where the
+outliers pass took a fall for a gain to explain only from 0.5%; A2T's
+instructions and allocation a call 0.2%, the bar of its cells' counts since
+2026-10-20; a compilation's allocation 0.1% and its instructions 1%; the
+perf tests by the windows GHC's CI holds them to, taken from the testsuite
+of the work directory's ghc-TREE, TREE B's as below, the tree of the GHC
+under test (Mikolaj's ruling 457, 2026-11-22), and said not checked where
+it is absent; a scaling row where report.py flags it; the tickets' rows
+tickets.py compare lists, instructions an element 0.2%, and the Text
+scan's by the same rule since 2026-11-09; a module's allocation 0.1% and
+size 0.2%, a compiler process's instructions 1%. A label's nofib -O2 and
+package runs are battery.py's cTREE-LABEL (cTREE-o1-LABEL at -O1), TREE
+the one tree they name or the label's own name where it is among several;
+several without it leave the section not compared. A label's random test is
 reported `pass` only where every seed battery.py's setting 16 runs has a line
 and every line is ok or known, run.py's word for a seed whose only failures
 are panics of the upstream issues it knows, these listed by issue beside it,
@@ -88,16 +95,45 @@ def listing(title, rs, bar):
 
 
 def nofib_runs(label):
-    """Label's nofib runs, by level, as battery.py names them."""
+    """Label's nofib runs, by level, as battery.py names them, its tree
+    named as the label, as rebuild.py's are."""
     return (('-O2', f'c{label}-{label}'), ('-O1', f'o1-{label}'), ('-O0', f'o0-{label}'))
+
+
+def run_name(names, label, o1=''):
+    """battery.py's name of label's run, cTREE-LABEL or with o1 cTREE-o1-LABEL,
+    among names: TREE the label's own name where one is there, else the one
+    tree they name, as p103's ct103-p103; several without the label's are a
+    ValueError."""
+    pat = re.compile(rf'c([^-]+)-{o1}{re.escape(label)}')
+    trees = sorted({m.group(1) for x in names for m in [pat.fullmatch(x)] if m})
+    if len(trees) > 1 and label not in trees:
+        raise ValueError(f'runs of {label} on trees {", ".join(trees)}')
+    return f'c{trees[0] if len(trees) == 1 else label}-{o1}{label}'
+
+
+def listed(path, pattern=r'(.*)'):
+    """The names in directory path, each matching pattern whole, its group."""
+    names = os.listdir(path) if os.path.isdir(path) else []
+    return [m.group(1) for x in names for m in [re.fullmatch(pattern, x)] if m]
+
+
+def nofib_names(work, outdir=None):
+    """The names of nofib's runs, its kept tables' and its _make's."""
+    n = os.path.join(work, 'nofib-r')
+    return (listed(os.path.dirname(nbcmp.kept(n, 'x', outdir)), r'nofib-(.*)\.tsv')
+            + listed(os.path.join(n, 'nofib', '_make')))
 
 
 def nofib(work, a, b, outdir=None):
     n = os.path.join(work, 'nofib-r')
+    names = nofib_names(work, outdir)
     out = []
     for (lev, ra), (_, rb) in zip(nofib_runs(a), nofib_runs(b)):
         out.append(f'nofib {lev}')
         try:
+            if lev == '-O2':
+                ra, rb = run_name(names, a), run_name(names, b)
             out += nbcmp.compare(n, ra, rb, outdir)
             fa, fb = nbcmp.load(n, ra, outdir), nbcmp.load(n, rb, outdir)
         except (ValueError, OSError) as e:
@@ -134,9 +170,12 @@ def packages(work, a, b):
     v = os.path.join(work, 'vpapi')
     out = []
     for pkg, bar in PKG.items():
-        for lev, la, lb in (('-O2', f'c{a}-{a}', f'c{b}-{b}'), ('-O1', f'c{a}-o1-{a}', f'c{b}-o1-{b}')):
+        names = (listed(v, r'res-(.*)-\d+\.csv') if pkg == 'vector'
+                 else listed(os.path.join(v, pkgcmp.DIRS[pkg])))
+        for lev, o1 in (('-O2', ''), ('-O1', 'o1-')):
             out.append(f'{pkg} {lev}')
             try:
+                la, lb = run_name(names, a, o1), run_name(names, b, o1)
                 if pkg == 'vector':
                     _, A = pkgcmp.load_vector(v, la)
                     _, B = pkgcmp.load_vector(v, lb)
@@ -203,11 +242,19 @@ def comp(outdir, a, b):
 
 
 def perf(work, outdir, a, b):
+    """The perf and size tests, by the windows of the testsuite of the tree
+    b's nofib -O2 run names (run_name), b's own name where it names none."""
     argv = [sys.executable, os.path.join(HERE, 'perfcmp.py'), '--work', work, '--out', outdir, a, b]
-    if os.path.isdir(os.path.join(work, f'ghc-{b}', 'testsuite')):
-        argv.append(b)
+    try:
+        tree = run_name(nofib_names(work, outdir), b)[1:-len(b) - 1]
+    except ValueError:
+        tree = b
+    have = os.path.isdir(os.path.join(work, f'ghc-{tree}', 'testsuite'))
+    if have:
+        argv.append(tree)
     rc, text = run_tool(argv)
-    return ['perf and size tests'] + ['  ' + x for x in text.rstrip('\n').split('\n')]
+    return (['perf and size tests'] + ['  ' + x for x in text.rstrip('\n').split('\n')]
+            + ([] if have else [f'  windows: not checked, no ghc-{tree}/testsuite in {work}']))
 
 
 def scale(outdir, a, b):
@@ -400,10 +447,34 @@ def self_test():
         plant_fuzz('B', (failed,), tail)
         plant_fuzz('S', (), tail[-1:])
         plant_fuzz('F', (first,))
+        # Label Q measured on tree T, as p103 on t103, and label A's -O2 runs
+        # on a tree U too, beside its own.
+        for run in ('cT-Q', 'cU-A'):
+            nbcmp.plant(n, run, 'spectral/x', {'instr': 1010, 'alloc': 100}, [], [])
+            pkgcmp.write_csv(f'{w}/vpapi/cres/{run}/p-1.csv', [('All.s', 100, 1010), ('All.q', 50, 500)])
+        pkgcmp.write_csv(f'{w}/vpapi/res-cT-o1-Q-1.csv', [('All.v', 101, 2000)])
         n9 = len(want)
         path = report(w, 'A', 'B', f'{w}/r.txt')
         text = open(path).read()
         text += '\n'.join([''] + fuzz(o, 'S', 'F') + fuzz(o, 'A', 'C'))
+        qt = '\n'.join(nofib(w, 'A', 'Q', o)[:3] + packages(w, 'A', 'Q') + [''])
+        for piece in ('nofib -O2\ncA-A to cT-Q: benchmarks run by both 1 (only cA-A: 0, only cT-Q: 0)\n',
+                      'containers -O2\ncT-Q against cA-A: 2 benchmarks',
+                      '+1.000%  p/All.s (stable)  1000 1010\n  allocation by 0.10%: 0 up, 0 down\n'
+                      f'containers -O1\n  not compared: no runs in {w}/vpapi/cres/cQ-o1-Q\n',
+                      'vector -O1\ngeometric mean TOT_INS',
+                      '  allocation by 0.05%: 1 up, 0 down\n    +1.000%  All.v  100 101\n'):
+            if piece not in qt:
+                bad.append(f'the report of Q on tree T lacks {piece!r}')
+        for names, o1, want_name in ((['cT-Q', 'cU-Q'], '', None),
+                                     (['cT-Q', 'cQ-Q', 'cU-Q'], '', 'cQ-Q'),
+                                     (['cT-o1-Q'], '', 'cQ-Q'), (['cT-o1-Q'], 'o1-', 'cT-o1-Q')):
+            try:
+                got = run_name(names, 'Q', o1)
+            except ValueError as e:
+                got = None if str(e) == 'runs of Q on trees T, U' else e
+            if got != want_name:
+                bad.append(f'run_name({names}, Q, {o1!r}): {got!r}, not {want_name!r}')
         for piece in ('  program instructions by 0.20%: 1 up, 0 down\n    +1.000%  spectral/x  1000 1010',
                       '  compiler instructions by 1.00%: 1 up, 0 down\n    +2.010%  spectral/x  4000 4080',
                       '  object size by 0.20%: 1 up, 0 down',
