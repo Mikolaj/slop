@@ -21,7 +21,9 @@ labels' runs agree within 0.05%, else the nearer ends where the ranges are
 disjoint, else the minima, marked `overlap`); vector's 0.05%, by the
 minima; A2T's instructions and allocation a call 0.2%; a compilation's
 allocation 0.1% and its instructions 1%; the perf tests by the windows GHC's
-CI holds them to, taken from the work directory's ghc-g; a scaling row
+CI holds them to, taken from the work directory's ghc-B where it stands,
+the tree of the GHC under test where the tree is named as the label, as
+the rebuild's are (Mikolaj's ruling 457); a scaling row
 where report.py flags it; the tickets' and the Text scan's rows tickets.py
 compare lists, instructions an element 0.2%; a module's allocation 0.1% and
 size 0.2%, a compiler process's instructions 1%. A label's random test is
@@ -202,8 +204,8 @@ def comp(outdir, a, b):
 
 def perf(work, outdir, a, b):
     argv = [sys.executable, os.path.join(HERE, 'perfcmp.py'), '--work', work, '--out', outdir, a, b]
-    if os.path.isdir(os.path.join(work, 'ghc-g', 'testsuite')):
-        argv.append('g')
+    if os.path.isdir(os.path.join(work, f'ghc-{b}', 'testsuite')):
+        argv.append(b)
     rc, text = run_tool(argv)
     return ['perf and size tests'] + ['  ' + x for x in text.rstrip('\n').split('\n')]
 

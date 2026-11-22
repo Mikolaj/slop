@@ -1,0 +1,11 @@
+cabal-version: 2.4
+name:          criterion
+version:       1.6.99
+synopsis:      criterion's API, as far as megaparsec's bench-speed uses it,
+               measured by tasty-papi (allocation and instruction counts)
+build-type:    Simple
+
+library
+  exposed-modules:  Criterion.Main
+  build-depends:    base, deepseq, tasty, tasty-papi >= 0.1.2.0
+  default-language: Haskell2010

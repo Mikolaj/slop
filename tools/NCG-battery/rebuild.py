@@ -15,8 +15,8 @@ the whole run is pinned, hadrian's -j being how many CPUs it names. The base is
 label fr00, the Nth commit above it frNN, tree and label alike: `nbcmp.py
 cfr00-fr00 cfr01-fr01`, `o1-fr00 o1-fr01` at -O1. A step:
 
-1. The tree ghc-frNN from nothing: a clone of the work directory's ghc-g, the
-   commit fetched from ~/slop/ghc, the submodules from ghc-g's, nofib left out,
+1. The tree ghc-frNN from nothing: a clone of ~/slop/ghc (--repo), the commit
+   fetched from it, the submodules from its .git/modules, nofib left out,
    ./boot, ./configure, hadrian's default target in battery.py's flavour with
    --docs=none and -V, which logs every compiler command, under perf stat,
    with HADRIAN_SETTINGS in _build/hadrian.settings, which every hadrian run
@@ -61,7 +61,8 @@ WORK/battery/rebuild (LOGS) holds rebuild.log, the lines it prints; steps.txt;
 for each step build-LABEL.log, boot-LABEL.log, configure-LABEL.log,
 hadrian-LABEL.log.gz, hperf-LABEL.csv (perf stat's) and battery-LABEL.log;
 LABEL.done or LABEL.failed, holding what the log's line says; the report.
---repo, --battery, --timeout and --min-free are the self-test's.
+Before the first step, inputs.py's ensure puts battery.py's inputs in place.
+--battery, --timeout and --min-free are the self-test's, and --repo too.
 
 --keep-nofib does step 3's part for nofib's runs alone, for each LABEL
 measured with the tree of the same name, whether the rebuild's or not, and
@@ -80,8 +81,9 @@ hadrian at -j their count, with ulimit -v ULIMIT_V, its lines in
 LOGS/build-TREE.log beside the script's other logs, LOGS the current
 directory unless --logs names one; it prints the log's last line and exits
 with the script's status. A tree named frNN, a label of the rebuild's, is
-refused. --build's --repo, --min-free, --min-mem, --meminfo and --poll are
-the self-test's.
+refused. --build's --repo is the repository cloned, ~/slop/ghc by default,
+the commit built being the pin; its --min-free, --min-mem, --meminfo
+and --poll are the self-test's.
 """
 
 import fcntl
@@ -98,10 +100,10 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from battery import (A2T_CELLS, A2T_SRC, CONTAINERS_CABAL, FLAVOUR, MBB,  # noqa: E402
-                     NOFIB_RUN, PAPIPKG, PERF_TESTS, PKGS, SPECTRAL_MAKEFILE, WORK,
-                     Failures, cpu_list, q, run_self_test)
+from battery import (A2T_SRC, FLAVOUR, PKGS, WORK, Failures, cpu_list, q,  # noqa: E402
+                     run_self_test)
 import bstats  # noqa: E402
+import inputs  # noqa: E402
 import nbcmp  # noqa: E402
 import runreport  # noqa: E402
 
@@ -143,7 +145,7 @@ def steps_of(repo, base, tip):
 def build_script(work, repo, logs, tree, commit, jobs, patches=(), target=None, settings=()):
     """The build of ghc-TREE at COMMIT, step 1; the patches, the target and
     the settings lines are --build's."""
-    t, g = f'{work}/ghc-{tree}', f'{work}/ghc-g'
+    t = f'{work}/ghc-{tree}'
     tgt = f' {q(target)}' if target else ''
     stamp, hlog = f'{logs}/stamp-{tree}', f'{logs}/hadrian-{tree}.log'
     hperf = f'{logs}/hperf-{tree}.csv'
@@ -151,7 +153,7 @@ def build_script(work, repo, logs, tree, commit, jobs, patches=(), target=None, 
         'set -u',
         f'echo "start {tree} $(date +%T)"',
         f'[ -e {q(t)} ] && {{ echo "tree STOP {tree}, {t} exists"; exit 1; }}',
-        f'git clone -q --no-checkout {q(g)} {q(t)}'
+        f'git clone -q --no-checkout {q(repo)} {q(t)}'
         f' || {{ echo "tree STOP {tree}, clone failed"; exit 2; }}',
         f'cd {q(t)} || exit 2',
         f'git fetch -q {q(repo)} {commit} && git checkout -q --detach {commit}'
@@ -159,7 +161,7 @@ def build_script(work, repo, logs, tree, commit, jobs, patches=(), target=None, 
         "git config -f .gitmodules --get-regexp '^submodule\\..*\\.path$' | while read -r k p; do",
         '  n=${k#submodule.}; n=${n%.path}',
         '  [ "$p" = nofib ] && continue',
-        f'  git config submodule.$n.url {q(g)}/.git/modules/$n',
+        f'  git config submodule.$n.url {q(repo)}/.git/modules/$n',
         '  git -c protocol.file.allow=always submodule update -q --init -- "$p" 2>/dev/null'
         ' || echo "submodule $p failed"',
         'done',
@@ -527,13 +529,14 @@ def main(argv):
     except ValueError as e:
         print(f'{e}; nothing run', file=sys.stderr)
         return 2
-    missing = [x for x in (NOFIB_RUN, PAPIPKG, PERF_TESTS, MBB, SPECTRAL_MAKEFILE,
-                           CONTAINERS_CABAL, A2T_SRC + '/orthotope.cabal', A2T_CELLS,
-                           'ghc-g/.git/modules')
-               if not os.path.exists(f'{o["work"]}/{x}')]
-    if missing and o['battery'] == BATTERY:
-        print(f'no {" ".join(missing)} under {o["work"]}; nothing run', file=sys.stderr)
+    real = o['battery'] == BATTERY
+    missing = [] if dry or not real else inputs.ensure(o['work'], inputs.needs([]))
+    if missing:
+        print(f'inputs.py: {"; ".join(missing)}; nothing run', file=sys.stderr)
         return 2
+    absent = inputs.absent(o['work'], inputs.needs([])) if dry and real else []
+    if absent:
+        print(f'inputs inputs.py is to put in place: {" ".join(absent)}')
     if dry:
         for label, commit in ([steps[0], steps[-1]] if o.get('pair') else steps):
             print(label, commit)
@@ -626,8 +629,6 @@ def plant(d):
             fh.write(f'{i}\n')
         sh('git', 'add', 'c', cwd=r)
         sh(*ident, 'commit', '-qm', f'commit {i}', cwd=r)
-    sh(*ident, 'clone', '-q', r, f'{w}/ghc-g', cwd=d)
-    sh(*ident, 'submodule', 'update', '-q', '--init', 'libs/x', cwd=f'{w}/ghc-g')
     for rel in ('nofib-r/co', 'vpapi/ctr', 'vpapi/cres', 'vpapi/mres', 'battery'):
         os.makedirs(f'{w}/{rel}', exist_ok=True)
     with open(f'{d}/battery.py', 'w') as fh:
@@ -679,8 +680,9 @@ def self_test():
             bad.append(f'--dry --pair: {p.returncode}, {p.stdout[:120]!r}')
         p = subprocess.run([sys.executable, os.path.abspath(__file__), '--work', w, '--repo', r,
                             '--dry', base, tip, spec], capture_output=True, text=True)
-        if p.returncode != 2 or NOFIB_RUN not in p.stderr:
-            bad.append(f'a work directory lacking what the battery reads: {p.returncode}')
+        if p.returncode or 'inputs inputs.py is to put in place: a2t a2t-cells mbb nofib' \
+                not in p.stdout:
+            bad.append(f'--dry over a work directory lacking the inputs: {p.returncode}')
         for args, word in (((tip, base, spec), 'not an ancestor'), ((base, 'nosuch', spec), 'no commit'),
                            ((base, tip, '1'), 'fewer than three'), ((base, base, spec), 'no commit between')):
             p, lines = go(args)

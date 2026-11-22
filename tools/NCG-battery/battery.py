@@ -55,8 +55,11 @@ the free space nothing runs without, setting 14. --wrap-rts OPTS, RTS options
 such as -A3G -V0, puts OPTS in place of WRAP_RTS for the run, and --cabal-j N
 N in place of CABAL_J, settings 12 and 6.
 The battery is a bash script; --dry prints it, every file it generates written
-out in it, and runs nothing. Run it unsandboxed. It exits 0 when every part ran
-and 2 when it stopped over the tree's flavour, the label's results or the disk's
+out in it, and runs nothing. Before the script, battery.py runs inputs.py's
+ensure over the inputs of the parts named, which the script's second line
+names and --dry does not run. Run it unsandboxed. It exits 0 when every part ran
+and 2 when it stopped over an input inputs.py could not put in place or found
+other than its pin, the tree's flavour, the label's results or the disk's
 free space or a part failed: a compiler missing, or a build, nofib-run, a benchmark run, an A2T
 count, compile-cost.py, a perf or size test, a probe or utf8.py failing,
 tickets.py measuring nothing or a seed of the random test failing, the part's
@@ -68,8 +71,10 @@ of whose programs GHC rejects.
 
 The work directory (--work, dist-ghcho by default) holds the trees, nofib-r
 (the nofib checkout and its built nofib-run), vpapi (the packages' sources
-and tasty-papi-settle2, the tasty-papi built in place of Hackage's), ghc-g's
-testsuite and the ManyBasicBlocks.cmm the compilations read; OUT (--out,
+and tasty-papi-settle2, the tasty-papi built in place of Hackage's) and the
+ManyBasicBlocks.cmm the compilations read, each put in place from its pin,
+or checked against it once, by inputs.py, whose table says where each comes
+from, before any part that reads it runs; OUT (--out,
 WORK/battery by default) the log and the files of the compilations, the perf
 tests and the probes. The layout, perf and scale apart, is that of the scripts
 this replaces, so that their results stay comparable through nbcmp.py
@@ -127,6 +132,11 @@ The settings, each stated here and nowhere else:
 4. The fifteen compilations are counted by tools/compile-cost.py with its
    own defaults: its cells, its rounds and its RTS options, -A3G -V0 after
    GHC's own; `compile-cost.py compare` compares two labels' .runs files.
+   Its perf tests are testsuite/tests/perf/compiler of the source of the GHC
+   under test (Mikolaj's ruling 457, 2026-11-22: "don't pin GHC's perf
+   tests"): GHC0's tree where GHC0 lies in a build directory of hadrian's,
+   TREE/_build..., else --build's parent, else ghc-TREE; and its ManyBasicBlocks.cmm the output of inputs.py's
+   generator, pins/gen-ManyBasicBlocks.py.
 5. nofib's compiler wrapper passes +RTS -A3G -V0 -RTS before nofib-run's
    arguments, for the reason compile-cost.py runs under them: under GHC's
    own options (-H) the collections fall elsewhere from one run to the next
@@ -164,9 +174,9 @@ The settings, each stated here and nowhere else:
     perf+no_profiled_libs+no_dynamic_libs, that of the trees the battery's
     results compare across, so nothing runs if its _build/flavour names another
     or none.
-11. A2T is orthotope's benchmark specialisation at bcbba7e959
-    of its toVectorListT checkout, archived into vpapi/a2t from the local
-    checkout until the code is on a stable branch upstream, and built
+11. A2T is orthotope's benchmark specialisation at bcbba7e959, the branch
+    ncg-benchmark-a2t of github.com/Mikolaj/orthotope (Mikolaj's ruling 456,
+    2026-11-22), which inputs.py archives into vpapi/a2t, and built
     under the project file of the full A2T runs, tests and benchmarks enabled,
     into the label's store. Its dependencies build first, alone, so
     that the packages' builds find those they share, such as primitive,
@@ -175,7 +185,8 @@ The settings, each stated here and nowhere else:
     runs were, so that GHC compiles the benchmark's modules side by side:
     without the semaphore its three largest took 9.5 minutes one after another,
     of a build of 11.7, and with it orthotope took 5.3 at -j4, after 0.7
-    for the dependencies into an empty store. Its sample, vpapi/a2t-cells.txt,
+    for the dependencies into an empty store. Its sample, pins/a2t-cells.txt
+    beside this script, which inputs.py copies to vpapi/a2t-cells.txt,
     is forced cells of small arrays whose call took 100 ns or less when the full
     runs were sized, so that each takes A2T_CALLS calls, in the full runs'
     order: the first of each view, operation and kind, then the second of each,
@@ -250,6 +261,8 @@ import sys
 import tempfile
 import time
 
+import inputs
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = '/home/mikolaj/slop/dist-ghcho'
 COMPILE_COST = os.path.join(os.path.dirname(HERE), 'compile-cost.py')
@@ -280,7 +293,8 @@ FUZZ_SECONDS = 3600  # 16
 NOFIB_RUN = ('nofib-r/nofib/dist-newstyle/build/x86_64-linux/ghc-9.12.4/'
              'nofib-0.1.0.0/x/nofib-run/build/nofib-run/nofib-run')
 PAPIPKG = 'vpapi/tasty-papi-settle2'
-PERF_TESTS = 'ghc-g/testsuite/tests/perf/compiler'
+# Under ghc-TREE, the source of the GHC under test (setting 4).
+PERF_TESTS = 'testsuite/tests/perf/compiler'
 SIZE_TESTS = 'testsuite/tests/perf/size'
 MBB = 'battery-inputs/ManyBasicBlocks.cmm'
 CONTAINERS_CABAL = 'vpapi/ctr/containers/containers-tests/containers-tests.cabal'
@@ -385,16 +399,23 @@ def containers_progs(work):
     return out
 
 
-Tree = collections.namedtuple('Tree', 'name build bin0 bin1')
+Tree = collections.namedtuple('Tree', 'name build bin0 bin1 src')
 
 
-def tree_of(work, name, build=None, bindir=None):
+def tree_of(work, name, build=None, bindir=None, ghc0=None):
     """TREE's build directory and the directories of the label's stage-1 and
     stage-2 compilers: ghc-TREE's _build and its stage0/bin and stage1/bin,
     or --build's; under --bin, --bin's for the stage-2 compiler and none for
-    the stage-1 copy."""
+    the stage-1 copy; and the source of the GHC under test, setting 4's."""
     g = build or f'{work}/ghc-{name}/_build'
-    return Tree(name, g, None if bindir else f'{g}/stage0/bin', bindir or f'{g}/stage1/bin')
+    src = os.path.dirname(os.path.normpath(g))
+    if ghc0 not in (None, 'full'):
+        up = os.path.normpath(ghc0).split('/')
+        at = [i for i, x in enumerate(up) if x.startswith('_build')]
+        if at:
+            src = '/'.join(up[:at[-1]])
+    return Tree(name, g, None if bindir else f'{g}/stage0/bin', bindir or f'{g}/stage1/bin',
+                src)
 
 
 def wrapper(tree, label, ghc):
@@ -596,13 +617,15 @@ def comp_part(work, t, label, stage, cpu, outdir, cc=COMPILE_COST):
     keep = f'{outdir}/p{label}' + ('' if stage == 1 else '-2')
     runs = f'{outdir}/comp{stage}-{label}.runs'
     txt = f'{outdir}/comp{stage}-{label}.txt'
-    argv = ['python3', cc, '--cpu', cpu, '--tests', f'{work}/{PERF_TESTS}',
+    tests = f'{t.src}/{PERF_TESTS}'
+    argv = ['python3', cc, '--cpu', cpu, '--tests', tests,
             '--cmm', f'{work}/{MBB}', '--keep-s', keep, '--out', runs,
             f'{label}={ghc}']
     return '\n'.join([
         f'# the compilations by the stage-{stage} compiler',
         f'[ -x {q(ghc)} ] || {{ echo "comp{stage} {label}: no {ghc}"; exit 2; }}',
         f'[ -e {q(runs)} ] && {{ echo "comp{stage} {label}: {runs} exists"; exit 2; }}',
+        f'[ -d {q(tests)} ] || {{ echo "comp{stage} {label}: no {tests}"; exit 2; }}',
         f'mkdir -p {q(outdir)}',
         f'{shlex.join(argv)} > {q(txt)} 2>&1',
         f'e=$?; echo "comp{stage} {label} exit $e:'
@@ -844,7 +867,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
     if not (isinstance(cabal_j, int) and cabal_j >= 1):
         raise ValueError(f'--cabal-j is a count of jobs, 1 or more: {cabal_j!r}')
     cpus = cpu_list(cpus_spec)
-    t = tree_of(work, tree, build, bindir)
+    t = tree_of(work, tree, build, bindir, ghc0)
     pin = f'taskset -cp {q(cpus_spec)} $BASHPID > /dev/null || exit 2'
     flavour = f'{t.build}/flavour'
     flavour_ok = (f'[ "$(cat {q(flavour)} 2>/dev/null)" = {q(FLAVOUR)} ]'
@@ -875,7 +898,8 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
                 'exit $f', f') & {pid}=$!']
     head = ['#!/bin/bash',
             f'# NCG-battery: tree {tree}, label {label}, CPUs {cpus_spec},'
-            f' work {work}, out {outdir}', 'set -u']
+            f' work {work}, out {outdir}; inputs {" ".join(inputs.needs(parts)) or "none"}',
+            'set -u']
     if parts:
         built = [n for n, _ in named if n in PKG_PARTS or n == 'a2t']
         setup = compilers(work, t, label, ghc0) if ghc0 is not None else []
@@ -984,6 +1008,10 @@ def main(argv):
     work = os.path.abspath(work)
     outdir = os.path.abspath(outdir or os.path.join(work, 'battery'))
     try:
+        parse_parts(argv[3:])
+        bad = [] if dry else inputs.ensure(work, inputs.needs(argv[3:]))
+        if bad:
+            raise ValueError('inputs.py: ' + '; '.join(bad))
         text = script(work, argv[0], argv[1], argv[2], outdir, argv[3:],
                       ghc0=ghc0, a2t_lock=lock, min_free=free, build=build, bindir=bindir,
                       wrap_rts=wrap_rts, cabal_j=cabal_j)
@@ -1105,7 +1133,7 @@ def plant(d):
     for x in (fb, f'{w}/nofib-r/nofib/spectral', f'{w}/vpapi/ctr',
               f'{w}/vpapi/src', f'{w}/vpapi/mtr', f'{w}/{A2T_SRC}',
               f'{w}/ghc-t/_build/stage0/bin', f'{w}/ghc-t/_build/stage1/bin',
-              f'{w}/ghc-t/hadrian',
+              f'{w}/ghc-t/hadrian', f'{w}/ghc-t/{PERF_TESTS}',
               os.path.dirname(f'{w}/{NOFIB_RUN}'),
               os.path.dirname(f'{w}/{CONTAINERS_CABAL}')):
         os.makedirs(x, exist_ok=True)
@@ -1228,7 +1256,7 @@ def self_test():
             extra = [x for x in runs if x not in want][:2]
             bad.append(f'benchmark runs: {len(runs)}, not {len(want)}; first'
                        f' unexpected {extra}')
-        want = [f'--cpu {c} --tests {w}/{PERF_TESTS} --cmm {w}/{MBB}'
+        want = [f'--cpu {c} --tests {w}/ghc-t/{PERF_TESTS} --cmm {w}/{MBB}'
                 f' --keep-s {o}/px{k} --out {o}/comp{s}-x.runs'
                 f' x={w}/ghc-t/_build/stage{s - 1}/bin/ghc-x'
                 for s, c, k in ((1, 5, ''), (2, 6, '-2'))]
@@ -1603,6 +1631,14 @@ def self_test():
                 bad.append(f'--build and --bin: exited {p.returncode}, wrapper {have!r},'
                            f' builds {"un" if files() == before else ""}changed, nofib {nofib},'
                            f' ran {ran("ghc0")} {ran("scale")}')
+        # The source of the GHC under test, whose perf tests the compilations
+        # read: ghc-TREE, --build's parent, or GHC0's tree in a hadrian build.
+        for args, want in (((), f'{w}/ghc-t'), ((b2,), d), ((b2, None, 'full'), d),
+                           ((b2, bn, f'{d}/g/_build-s/stage0/bin/ghc'), f'{d}/g'),
+                           ((b2, bn, f'{d}/g0/ghc'), d)):
+            if tree_of(w, 't', *args).src != want:
+                bad.append(f'the source of the GHC under test for {args}:'
+                           f' {tree_of(w, "t", *args).src}')
         # --a2t-lock: A2T's builds hold the lock and its count does not;
         # the builds wait for the memory with the lock held.
         lock, mi = f'{d}/a2t.lock', f'{d}/meminfo'
@@ -1653,6 +1689,29 @@ def self_test():
                 or '--compiler-arg -O1' not in p.stdout
                 or f'{o}/comp2-x.runs' not in p.stdout or '-o ct-x' in p.stdout):
             bad.append(f'--dry of two parts: {p.returncode} {p.stderr[-200:]}')
+        if not p.stdout.split('\n')[1].endswith('; inputs mbb nofib'):
+            bad.append(f'--dry of two parts names inputs {p.stdout.split(chr(10))[1]!r}')
+        # The compilations without the perf tests of the tree under test refuse.
+        os.rename(f'{w}/ghc-t/{PERF_TESTS}', f'{w}/ghc-t/perf-tests')
+        p = go('x', f'{d}/out-notests', ('comp1',), cc=f'{d}/cc.py')
+        os.rename(f'{w}/ghc-t/perf-tests', f'{w}/ghc-t/{PERF_TESTS}')
+        if p.returncode != 2 or f'no {w}/ghc-t/{PERF_TESTS}' not in p.stdout or ran('compile-cost'):
+            bad.append(f'comp1 without the tree\'s perf tests: exited {p.returncode}')
+        # The paths read here are those inputs.py puts in place.
+        dest = {x.name: x.dest for x in inputs.INPUTS}
+        for path, row in ((A2T_SRC, 'a2t'), (A2T_CELLS, 'a2t-cells'), (MBB, 'mbb'),
+                          (PAPIPKG, 'tasty-papi'), (NOFIB_RUN, 'nofib'),
+                          (SPECTRAL_MAKEFILE, 'nofib'), (CONTAINERS_CABAL, 'containers'),
+                          ('vpapi/' + PKGS['vector']['src'], 'vector')):
+            if path != dest[row] and not path.startswith(dest[row] + '/'):
+                bad.append(f'{path} is not under inputs.py\'s {row}, {dest[row]}')
+        if NOFIB_RUN != f'{dest["nofib"]}/{inputs.NOFIB_RUN}':
+            bad.append(f'NOFIB_RUN is not inputs.py\'s: {inputs.NOFIB_RUN}')
+        for k in ('containers', 'megaparsec'):
+            for pk in (PKGS[k]['packages'] + PKGS[k].get('unless_f', '')).split():
+                if f'vpapi/{PKGS[k]["src"]}/{pk}' not in dest.values() \
+                        and not pk.startswith('containers/'):
+                    bad.append(f'{k}\'s package {pk} is no input of inputs.py\'s')
         # Relative paths made absolute.
         here = os.getcwd()
         try:

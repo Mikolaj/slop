@@ -1,0 +1,55 @@
+diff -ruN a/Test/Tasty/PAPI.hs b/Test/Tasty/PAPI.hs
+--- a/Test/Tasty/PAPI.hs
++++ b/Test/Tasty/PAPI.hs
+@@ -94,6 +94,9 @@
+ import Control.Monad
+ import Control.DeepSeq
+ import Control.Concurrent.STM
++import Control.Concurrent (myThreadId, yield)
++import GHC.Conc (ThreadStatus(..), threadStatus)
++import GHC.Conc.Sync (listThreads)
+ import Data.List       (nub, intercalate)
+ import Data.Proxy
+ import Data.Foldable
+@@ -569,7 +572,12 @@
+             -- just because previous benchmarks allocated enough to
+             -- trigger it. This could bias measurement a lot since we
+             -- run bencmark only once
+-            performMajorGC
++            --
++            -- In the non-threaded RTS every Haskell thread runs on this OS
++            -- thread, so PAPI counts whatever runs between start and stop:
++            -- let the finalizers the GC schedules, and any other thread
++            -- with work pending, run before counting.
++            settle
+             n1 <- getAllocationCounter
+             -- Perform measurement
+             call "Failed to start measurements" $ papi_start evt
+@@ -593,6 +601,27 @@
+       n_threads = getNumThreads $ lookupOption opts
+       counters  = getCounterSet $ lookupOption opts
+ 
++-- | Run a major GC, and while another Haskell thread is runnable, yield until
++--   none is and run the GC again, yielding at most 1000 times in all; so
++--   that counting starts right after a GC, whatever ran before it.
++settle :: IO ()
++settle = do
++  me <- myThreadId
++  let busy = do
++        ts <- listThreads
++        st <- mapM threadStatus (filter (/= me) ts)
++        pure (ThreadRunning `elem` st)
++      drain :: Int -> IO Int
++      drain k = do
++        b <- busy
++        if b && k > 0 then yield >> drain (k - 1) else pure k
++      loop :: Int -> IO ()
++      loop k = do
++        performMajorGC
++        b <- busy
++        when (b && k > 0) $ yield >> drain (k - 1) >>= loop
++  loop 1000
++
+ showN :: CLLong -> String
+ showN n
+   | x < 1e4 = show n
