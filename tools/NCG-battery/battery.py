@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The measurement battery of the NCG series, for one compiler tree under one
 label: nofib at -O2, -O1 and -O0, the tasty-papi benchmarks of containers,
-vector and megaparsec at -O2 and -O1, a thin sample of orthotope's A2T, the
+vector and megaparsec at -O2 and -O1, a thin sample of orthotope's A2T (and,
+named, the whole of A2T or one cell of each of its groups), the
 fifteen compilations by the tree's stage-1 and stage-2 compilers, GHC's perf and
 size tests, the scaling probes, the tickets' reproducers, a Text scan over
 UTF-8 digits and a differential random test of code generation; or some
@@ -28,8 +29,8 @@ then at -O1; A2T's sample; and nofib; those ended, the compilations, the stage-1
 compiler's on CPUS' second CPU beside the stage-2 compiler's on its third;
 and then the perf and size tests. Its lines go to OUT/meas-LABEL.log. A PART --
 nofib-O2, nofib-O1, nofib-O0, containers-O2, containers-O1, vector-O2,
-vector-O1, megaparsec-O2, megaparsec-O1, a2t, comp1, comp2, perf, scale,
-tickets, utf8 or fuzz --
+vector-O1, megaparsec-O2, megaparsec-O1, a2t, a2t-full, a2t-groups, comp1,
+comp2, perf, scale, tickets, utf8 or fuzz --
 runs alone, in the order given, on CPUS, with ghc-LABEL already in place
 unless --compilers puts it there. A package's part may name its steps, build
 or run, and a2t its steps, deps, build or run, as NAME:STEP,STEP
@@ -91,8 +92,12 @@ and pkgcmp.py:
   megaparsec  vpapi/mres/cTREE-LABEL/bench-speed-I.csv, cTREE-o1-LABEL
   a2t         OUT/a2t-LABEL.tsv, a line a cell: its name, its instructions
               a call (- where none were counted), perf-per-call.py's exit
-              and its bytes allocated a call (-), for a2tcmp.py; built in
-              vpapi/adist-cTREE-LABEL, its log vpapi/ab-cTREE-LABEL.log
+              and its bytes allocated a call (- where none or negative),
+              for a2tcmp.py; built in vpapi/adist-cTREE-LABEL, its log
+              vpapi/ab-cTREE-LABEL.log
+  a2t-full    OUT/a2t-full-LABEL.tsv and OUT/a2t-groups-LABEL.tsv, a2t's
+  a2t-groups  form, a summed cell's name `summed:` and the cell; the
+              binary's tables in vpapi/at-cTREE-LABEL, the log a2t's
   comp        OUT/compN-LABEL.txt, compile-cost.py's table, OUT/compN-LABEL.runs,
               its --out file, and its first round's assembly in OUT/pLABEL
               (stage 1) and OUT/pLABEL-2 (stage 2)
@@ -117,7 +122,7 @@ The settings, each stated here and nowhere else:
    default RTS options and the RTS clock running, as Mikolaj ruled
    on 2026-10-30: "no -V0 in any benchmarks". The packages' ghc-options carry
    no -with-rtsopts=-V0, nothing here adds one, and perf-per-call.py gives A2T
-   the caller's GHCRTS, which the battery does not set.
+   the caller's GHCRTS, which the battery sets only for setting 17's tables.
 2. Every benchmark program runs with address-space randomisation off
    (setarch -R), with it on runs of one program having differed by tens of
    instructions: the packages' programs each, A2T's counts each, and nofib-run,
@@ -125,7 +130,7 @@ The settings, each stated here and nowhere else:
    rebuild; the scripts replaced ran vector's and nofib's with it on).
 3. Rounds: nofib runs each program once, nofib-run's default; containers'
    and vector's benchmark programs run 5 times and megaparsec's 10,
-   pkgcmp.py reading their spread; A2T counts each cell once, by
+   pkgcmp.py reading their spread; A2T's sample counts each cell once, by
    perf-per-call.py at A2T_CALLS calls and twice as many, with no run again
    of a cell that moved, its bytes allocated a call from the RTS's statistics
    of the same runs (--alloc), which left the instructions as they were.
@@ -243,6 +248,22 @@ The settings, each stated here and nowhere else:
     from compiler to compiler, so that no list of seeds passed over serves
     every commit's. On three otherwise idle CPUs it takes about ten minutes.
     FUZZ_SECONDS bounds a lane, which fails if stopped short of its seeds.
+17. a2t-full counts every cell of A2T's tables, as the full A2T runs did,
+    and a2t-groups one cell of each group of them, as a candidate was counted
+    first under Mikolaj's ruling 17 (2026-10-26: "for candidate fixup changes
+    such as F2' you may want to count one cell of each group, then count
+    in full only the groups where the sample, or the allocation figures,
+    show a move"), by a2tcells.py beside this script, whose docstring has the
+    cells, the groups and N. Each runs on the binary part a2t built for the
+    label, which a2t:deps,build or the whole battery builds first: it makes
+    the binary's two tables where absent, `GHCRTS=-V0 BIN` and its --summed,
+    on CPUS' first two CPUs at once, takes the cells from
+    them at run time, the rows being those of A2T's pinned source and each
+    cell's N sized by the binary's own times, and counts them, a lane a CPU
+    of CPUS, at N and 2N calls, --reps 1 --alloc, under setarch -R and with
+    the RTS clock running (settings 1 and 2). The two are no part of the whole
+    battery, whose duration and order the comparisons across labels rest on,
+    and take no lock of setting 13.
 """
 
 import collections
@@ -344,9 +365,13 @@ A2T_TARGET = 'orthotope:bench:specialisation'
 # whose dependencies are the benchmark's but orthotope itself, which none
 # of the packages' builds share
 A2T_LIB = 'orthotope:lib:orthotope'
+A2T_CELLS_PY = os.path.join(HERE, 'a2tcells.py')
 PARTS = ('nofib-O2', 'nofib-O1', 'nofib-O0', 'containers-O2', 'vector-O2',
          'megaparsec-O2', 'containers-O1', 'vector-O1', 'megaparsec-O1',
-         'a2t', 'comp1', 'comp2', 'perf', 'scale', 'tickets', 'utf8', 'fuzz')
+         'a2t', 'comp1', 'comp2', 'perf', 'scale', 'tickets', 'utf8', 'fuzz',
+         'a2t-full', 'a2t-groups')
+# setting 17's, by the name of their output
+A2T_COUNTS = {'a2t-full': 'full', 'a2t-groups': 'groups'}
 PKG_PARTS = PARTS[3:9]
 A2T_STEPS = ('deps', 'build', 'run')
 # the steps a PART may name, in the order they run
@@ -612,6 +637,38 @@ def a2t_part(work, t, label, outdir, steps=('deps', 'build', 'run'), pc=PER_CALL
         f'echo "ab {lab} DONE $(date +%T)"', 'exit $f'])
 
 
+def a2t_count_part(work, t, label, outdir, which, cpus, pc=PER_CALL, ac=A2T_CELLS_PY):
+    """a2t-full or a2t-groups (setting 17) over part a2t's binary."""
+    v = f'{work}/vpapi'
+    lab = f'c{t.name}-{label}'
+    tsv = f'{outdir}/a2t-{which}-{label}.tsv'
+    cabal = 'cabal --store-dir=' + q(f'{v}/store-{lab}')
+    opts = f'--project-file=cabal.project.{lab} --builddir=' + q(f'{v}/adist-{lab}')
+    tab = f'{v}/at-{lab}'
+    make = [f'[ -s {q(f"{tab}/{m}.txt")} ] || {{ GHCRTS=-V0 taskset -c {c} "$B"{arg}'
+            f' > {q(f"{tab}/{m}.txt.new")} && mv {q(f"{tab}/{m}.txt.new")} {q(f"{tab}/{m}.txt")};'
+            f' }} & {m}=$!'
+            for m, c, arg in (('forced', cpus[0], ''), ('summed', cpus[1], ' --summed'))]
+    return '\n'.join([
+        f'# A2T {which}, label {lab}',
+        'exec >> ' + q(f'{v}/ab-{lab}.log') + ' 2>&1',
+        f'echo "a2t-{which} start $(date +%T)"',
+        f'[ -e {q(tsv)} ] && {{ echo "a2t-{which} {label}: {tsv} exists"; exit 2; }}',
+        'cd ' + q(f'{work}/{A2T_SRC}') + ' || exit 2',
+        f'B=$({cabal} list-bin {A2T_TARGET} {opts})',
+        f'[ -x "$B" ] || {{ echo "a2t-{which} {label}: no binary of part a2t: $B"; exit 2; }}',
+        f'mkdir -p {q(tab)} {q(outdir)} || exit 2',
+        *make,
+        'wait $forced && wait $summed'
+        f' || {{ echo "a2t-{which} {label}: the tables failed"; exit 2; }}',
+        f'echo "a2t-{which} tables $(date +%T)"',
+        f'setarch -R python3 {q(ac)} count' + (' --groups' if which == 'groups' else '')
+        + f' --per-call {q(pc)} {",".join(cpus)} "$B" {q(f"{tab}/forced.txt")}'
+        f' {q(f"{tab}/summed.txt")} {q(tsv)} < /dev/null; e=$?',  # 2
+        f'echo "a2t-{which} {lab} exit $e $(date +%T)"',
+        '[ $e = 0 ] || exit 2'])
+
+
 def comp_part(work, t, label, stage, cpu, outdir, cc=COMPILE_COST):
     ghc = f'{t.bin0 if stage == 1 else t.bin1}/ghc-{label}'
     keep = f'{outdir}/p{label}' + ('' if stage == 1 else '-2')
@@ -753,6 +810,8 @@ def part_body(name, work, t, label, cpus, outdir, cc, sc, pc, steps=None, tk=TIC
         body = pkg_part(work, t, label, fam, int(lev), steps or ('build', 'run'), jobs)
     elif name == 'a2t':
         body = a2t_part(work, t, label, outdir, steps or ('deps', 'build', 'run'), pc, jobs)
+    elif name in A2T_COUNTS:
+        body = a2t_count_part(work, t, label, outdir, A2T_COUNTS[name], cpus, pc)
     elif name == 'perf':
         body = perf_part(work, t, label, len(cpus), outdir)
     elif name == 'scale':
@@ -901,7 +960,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
             f' work {work}, out {outdir}; inputs {" ".join(inputs.needs(parts)) or "none"}',
             'set -u']
     if parts:
-        built = [n for n, _ in named if n in PKG_PARTS or n == 'a2t']
+        built = [n for n, _ in named if n in PKG_PARTS or n == 'a2t' or n in A2T_COUNTS]
         setup = compilers(work, t, label, ghc0) if ghc0 is not None else []
         return '\n'.join(head + [flavour_ok, disk_ok(work, min_free)] + setup
                          + (wrap if built else [])
@@ -1071,7 +1130,10 @@ case $me in
                                      *adist-*) exit "${FAKEA2TBUILD:-0}";; esac
                         exit "${FAKECABAL:-0}";;
          esac;;
-  bench) echo "bench|$*" >> "$FAKELOG"; sleep "${FAKESLEEP:-0}"
+  bench) if [ $# = 0 ] || [ "$*" = --summed ]; then
+           echo "table|$*|${GHCRTS:-}" >> "$FAKELOG"; exec cat "$FAKEBIN/table$1"
+         fi
+         echo "bench|$*" >> "$FAKELOG"; sleep "${FAKESLEEP:-0}"
          case "$*" in *"${FAKEBENCH:-no such benchmark}"*) exit 3;; esac
          exit "${FAKEFAIL:-0}";;
   setarch) echo "setarch|$*" >> "$FAKELOG"; shift; exec "$@";;
@@ -1124,6 +1186,10 @@ FAKE_FZ = ('import os, sys, time\na = sys.argv[1:]\nlog = open(os.environ["FAKEL
            'log.write("fuzz-end|\\n")\n'
            'sys.exit(int(os.environ.get("FAKEFZ", "0")))\n')
 A2T_SAMPLE = ('Dynamic/size/small/dense/boxed', 'Ranked/<*>/small/runs/Unboxed')
+# the binary's tables, for a2t-full and a2t-groups: four cells in three groups
+A2T_TABLES = {'': 'Dynamic/size/small/dense   10.00  12.00  -   16  16  -\n'
+                  'Dynamic/size/small/runs    10.00  -      -   16  -   -\n',
+              '--summed': 'Dynamic/size/small/dense   10.00  -  -   8  -  -\n'}
 MAKEFILE = 'TOP = ..\nSUBDIRS = ansi \\\n  minimax \\\n  fish\n\ninclude x\n'
 CABAL = 'name: c\nbenchmark map-benchmarks\n  x\nbenchmark set-benchmarks\n'
 
@@ -1147,6 +1213,9 @@ def plant(d):
         os.chmod(path, 0o755)
     for s in ('stage0', 'stage1'):
         shutil.copy(f'{fb}/ghc', f'{w}/ghc-t/_build/{s}/bin/ghc')
+    for arg, text in A2T_TABLES.items():
+        with open(f'{fb}/table{arg}', 'w') as fh:
+            fh.write(text)
     for rel, text in ((SPECTRAL_MAKEFILE, MAKEFILE), (CONTAINERS_CABAL, CABAL),
                       (A2T_CELLS, ''.join(c + '\n' for c in A2T_SAMPLE))):
         with open(f'{w}/{rel}', 'w') as fh:
@@ -1382,6 +1451,46 @@ def self_test():
         if (p.returncode != 2 or 'a2t-x.tsv exists'
                 not in open(f'{w}/vpapi/ab-ct-x.log').read()):
             bad.append(f'A2T over its results exited {p.returncode}, not 2')
+        # a2t-full and a2t-groups (setting 17): the binary's tables made once,
+        # under -V0, the cells counted from them by a2tcells.py under setarch -R
+        # in a lane a CPU, OUT in a2t's form; neither in the whole battery,
+        # under the lock, nor over its results; a failed count fails the part.
+        oc = f'{d}/out-a2tc'
+        open(log, 'w').close()
+        p = subprocess.run(['bash', '-c', script(w, 't', 'x', '4-6', oc, ('a2t-full', 'a2t-groups'),
+                                                 pc=pc), 'test'],
+                           env=env, capture_output=True, text=True)
+        got = open(log).read().split('\n')[:-1]
+        full = ['Dynamic/size/small/dense/boxed', 'Dynamic/size/small/dense/Storable',
+                'Dynamic/size/small/runs/boxed', 'summed:Dynamic/size/small/dense/boxed']
+        have = {v: open(f'{oc}/a2t-{v}-x.tsv').read().split('\n')[:-1]
+                for v in ('full', 'groups') if os.path.isfile(f'{oc}/a2t-{v}-x.tsv')}
+        if p.returncode or have.get('full') != [f'{c}\t5.0\t0\t8.0' for c in full] \
+                or len(have.get('groups', [])) != 3 \
+                or not set(have['groups']) <= set(have['full']):
+            bad.append(f'a2t-full and a2t-groups exited {p.returncode}, wrote {have}')
+        if sorted(x for x in got if x.startswith('table|')) != ['table|--summed|-V0', 'table||-V0'] \
+                or sorted(x for x in got if x.startswith('taskset|-c ')) != ['taskset|-c 4',
+                                                                            'taskset|-c 5']:
+            bad.append(f'the tables were made by {[x for x in got if "table|" in x or "-c" in x]}')
+        cpus = {x.split()[1] for x in got if x.startswith('perf-per-call|--cpu ')}
+        counted = [x for x in got if x.startswith('perf-per-call|')]
+        if cpus != {'4', '5', '6'} or len(counted) != 7 \
+                or not all(' --reps 1 --alloc ' in x for x in counted) \
+                or sum(x.startswith(f'setarch|-R python3 {A2T_CELLS_PY} count ') for x in got) != 2:
+            bad.append(f'the cells were counted by {counted}, CPUs {cpus}')
+        if 'a2tcells' in text or ' a2t-full' in text or 'flock' in script(
+                w, 't', 'x', '4-6', oc, ('a2t-full',), a2t_lock=f'{d}/a2t.lock'):
+            bad.append('a2t-full in the whole battery or under the lock')
+        p = subprocess.run(['bash', '-c', script(w, 't', 'x', '4-6', oc, ('a2t-full',), pc=pc),
+                            'test'], env=env, capture_output=True, text=True)
+        if p.returncode != 2 or 'a2t-full-x.tsv exists' not in open(f'{w}/vpapi/ab-ct-x.log').read():
+            bad.append(f'a2t-full over its results exited {p.returncode}, not 2')
+        p = subprocess.run(['bash', '-c', script(w, 't', 'x', '4-6', f'{oc}-fail', ('a2t-groups',),
+                                                 pc=pc), 'test'],
+                           env=dict(env, FAKEPCFAIL='1'), capture_output=True, text=True)
+        if p.returncode != 2 or 'a2t-groups ct-x exit 2' not in open(f'{w}/vpapi/ab-ct-x.log').read():
+            bad.append(f'a2t-groups with failed counts exited {p.returncode}, not 2')
         # A perf test failing, a size test failing, a compiler rebuilt, a probe
         # failing and earlier results each fail their part.
         for name, extra, word in (('utf8', {'FAKEU8': '1'}, 'utf8 x exit 1'),

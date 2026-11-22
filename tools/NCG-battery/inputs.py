@@ -17,14 +17,22 @@ Usage: python3 tools/NCG-battery/inputs.py [--work DIR] [--cache DIR] ensure [NA
 
 ensure, for each NAME or every input, puts an absent destination in place:
 the pin's tree, fetched into the cache (--cache, WORK/battery-inputs/cache
-by default) where it is not there yet, the patch applied, then the stamp
-WORK/battery-inputs/stamps/NAME naming the pin; nofib's then builds
-nofib-run in it, by GHC 9.12.4, where its binary is absent. A destination
-present with its stamp is taken as it is. One present without it, such as
-the copies made before this script, is checked against the pin, as check
-does, and stamped once it passes; one stamped with another pin, a patch or
-a tracked file having changed since, is checked the same way, and moving
-it aside is left to whoever reads the failure. check compares each present
+by default) where it is not there yet, the patch applied, the row's files
+tracked in pins added, then the stamp WORK/battery-inputs/stamps/NAME naming
+the pin; nofib's then builds nofib-run in it, by GHC 9.12.4, where its binary
+is absent. nofib's added files are pins/nofib-run.project as the project file
+cabal.project.nofib-run, which nofib-run's build names and which imports
+nofib's cabal.project, and pins/nofib-run.freeze beside it as
+cabal.project.nofib-run.freeze: nofib-run's dependencies, their flags and the
+index-state, as its build plan resolved them on 2026-11-22. The freeze is not
+cabal.project.freeze, which nofib-run's own runs would read when they install
+the benchmarks' dependencies through cabal.project by the compiler under test,
+whose base it does not admit. A destination present with its stamp is taken
+as it is. One present without it, such as the copies made before this script,
+is checked against the pin, as check does, the row's added files put in place
+first where absent, and stamped once it passes; one stamped with another pin,
+a patch or a tracked file having changed since, is checked the same way, and
+moving it aside is left to whoever reads the failure. check compares each present
 destination with its pin, stamp or none: every file of the pin's tree there
 and equal, and no other file but the row's build products, and writes
 nothing under WORK but the cache. materialize puts NAME's pin at DIR, which must not
@@ -32,6 +40,10 @@ exist, and runs nothing of it but a generate row's script. generated runs
 SCRIPT, the generator a row names, into a scratch file and checks the
 output's sha256 against the row's pin. ensure, check and generated exit 0
 when every input named passed, 1 when one failed and 2 on bad usage.
+--self-test runs ensure and check over planted rows of each kind, with no
+network, a row's added files as nofib's freeze among them, and checks that
+the table's pins exist and that nofib-run's build names nofib's added project
+file.
 """
 
 import collections
@@ -55,7 +67,13 @@ STORE = 'battery-inputs'  # under WORK: cache/, stamps/ and lock
 # what nofib's row builds in its destination by NOFIB_RUN_BUILD, battery.py's NOFIB_RUN
 NOFIB_RUN = ('dist-newstyle/build/x86_64-linux/ghc-9.12.4/nofib-0.1.0.0/x/nofib-run/build/'
              'nofib-run/nofib-run')
-NOFIB_RUN_BUILD = ['cabal', 'build', '-w', 'ghc-9.12.4', 'nofib-run']
+# nofib-run's dependencies frozen (chat item 7968.3, Mikolaj's ruling 458): its
+# own project file, cabal reading PROJECT.freeze beside it, and not nofib's
+# cabal.project.freeze, which nofib-run's runs would read too, installing the
+# benchmarks' dependencies by the compiler under test through cabal.project
+NOFIB_PROJECT = 'cabal.project.nofib-run'
+NOFIB_RUN_BUILD = ['cabal', 'build', '-w', 'ghc-9.12.4', '--project-file=' + NOFIB_PROJECT,
+                   'nofib-run']
 # the placeholders the sessions' sandboxes leave in a destination, every row's
 PRODUCTS = ('.claude/*',)
 
@@ -63,8 +81,10 @@ PRODUCTS = ('.claude/*',)
 # PACKAGE-VERSION, ref the tarball's sha256; tracked: source a path under
 # pins; generate: source a script under pins run with the output's path,
 # ref the output's sha256. dest is under WORK, extra the globs of build
-# products a check passes over there.
-Input = collections.namedtuple('Input', 'name kind source ref patch dest extra')
+# products a check passes over there; add the files tracked under pins
+# put into the tree after the patch, each (source, path in the tree).
+Input = collections.namedtuple('Input', 'name kind source ref patch dest extra add',
+                               defaults=((),))
 INPUTS = (
     # A2T, battery.py's setting 11: the branch ncg-benchmark-a2t of the fork
     Input('a2t', 'git', 'https://github.com/Mikolaj/orthotope.git',
@@ -81,7 +101,8 @@ INPUTS = (
           'd4750745a96ee293612cef0fedd8ed2c9ae8d1a0', None, 'nofib-r/nofib',
           ('_make/*', 'dist-newstyle/*', '.git', '*.depend', '*.depend.bak', 'local.env',
            'runstdtest/runstdtest', '*.stdout', '*.stdin', '*.faststdin', '*.faststdout',
-           'real/ben-raytrace/out.ppm', 'real/maillist/runtime_files/*.tex')),
+           'real/ben-raytrace/out.ppm', 'real/maillist/runtime_files/*.tex'),
+          (('nofib-run.project', NOFIB_PROJECT), ('nofib-run.freeze', NOFIB_PROJECT + '.freeze'))),
     # GHC's submodule at the series' base
     Input('containers', 'git', 'https://github.com/haskell/containers.git',
           '953428ad079d5708df696442f9bdeaccd1acfc6c', None, 'vpapi/ctr/containers', ()),
@@ -114,7 +135,8 @@ NEEDS = {'nofib': ('nofib',),
          'containers': ('containers', 'tasty-bench-papi', 'tasty-papi'),
          'vector': ('vector', 'tasty-papi'),
          'megaparsec': ('megaparsec', 'case-insensitive', 'criterion-papi', 'tasty-papi'),
-         'a2t': ('a2t', 'a2t-cells'), 'comp1': ('mbb',), 'comp2': ('mbb',)}
+         'a2t': ('a2t', 'a2t-cells'), 'a2t-full': ('a2t',), 'a2t-groups': ('a2t',),
+         'comp1': ('mbb',), 'comp2': ('mbb',)}
 
 
 def needs(parts):
@@ -154,13 +176,15 @@ def tree_digest(top):
 
 
 def pin_id(x):
-    """The stamp's text: the pin, its patch's and a tracked source's digest."""
+    """The stamp's text: the pin, its patch's, a tracked source's and the added
+    files' digests."""
     src = os.path.join(PINS, x.source)
     ref = tree_digest(src) if x.kind == 'tracked' else x.ref
     if x.kind == 'generate':
         ref += ' ' + sha256(src)
     patch = sha256(os.path.join(PINS, x.patch)) if x.patch else '-'
-    return f'{x.name} {x.kind} {x.source} {ref} patch {patch}\n'
+    add = ''.join(f' add {d} {sha256(os.path.join(PINS, s))}' for s, d in x.add)
+    return f'{x.name} {x.kind} {x.source} {ref} patch {patch}{add}\n'
 
 
 def run(argv, **kw):
@@ -227,9 +251,20 @@ def materialize(x, cache, dest, hackage=HACKAGE):
         if x.patch:
             with open(os.path.join(PINS, x.patch)) as fh:
                 run(['patch', '-p1', '-s', '--forward', '--batch', '-d', new], stdin=fh)
+        put_added(x, new)
         os.rename(new, dest)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def put_added(x, top):
+    """x's added files put under top where absent; the paths put."""
+    out = []
+    for s, d in x.add:
+        if not os.path.lexists(os.path.join(top, d)):
+            shutil.copy2(os.path.join(PINS, s), os.path.join(top, d))
+            out.append(d)
+    return out
 
 
 def compare(x, pin, dest):
@@ -287,6 +322,8 @@ def ensure(work, names, cache=None, hackage=HACKAGE, say=print, build=NOFIB_RUN_
                     materialize(x, cache, dest, hackage)
                     say(f'inputs: {name} put at {dest}')
                 elif have != pid:
+                    for d in put_added(x, dest):
+                        say(f'inputs: {name}: {d} put in {dest}')
                     diff = check_one(x, work, cache, hackage)
                     if diff:
                         bad.append(f'{name}: {dest} is not its pin: {"; ".join(diff[:5])}'
@@ -374,7 +411,8 @@ def main(argv):
 
 
 # --- self-test: rows over a local repository, a tarball in the cache, files
-# tracked in a planted pins and a generator, no network.
+# tracked in a planted pins, one of them added to a row, and a generator,
+# no network.
 
 def self_test():
     global PINS
@@ -401,13 +439,15 @@ def self_test():
         tsha = sha256(f'{cache}/hackage/p-1.tar.gz')
         put(f'{pins}/p.patch', '--- a/x.cabal\n+++ b/x.cabal\n@@ -1 +1 @@\n-name: p\n+name: q\n')
         put(f'{pins}/pk/m.hs', 'module M where\n')
+        put(f'{pins}/fz', 'constraints: any.a ==1\n')
         put(f'{pins}/gen.py', 'import sys\nopen(sys.argv[1], "w").write("cmm\\n")\n')
         gsha = hashlib.sha256(b'cmm\n').hexdigest()
         rows = (Input('g', 'git', up, head, None, 'r/g', ('*.o',)),
                 Input('h', 'hackage', 'p-1', tsha, 'p.patch', 'r/h', ()),
                 Input('t', 'tracked', 'pk', None, None, 'r/t', ()),
                 Input('m', 'generate', 'gen.py', gsha, None, 'r/m.cmm', ()),
-                Input('nofib', 'tracked', 'pk', None, None, 'r/n', ()))
+                Input('nofib', 'tracked', 'pk', None, None, 'r/n', ('dist-newstyle/*',),
+                      (('fz', 'p.freeze'),)))
         saved = dict(BY_NAME), PINS
         BY_NAME.clear()
         BY_NAME.update({x.name: x for x in rows})
@@ -422,7 +462,8 @@ def self_test():
             # Absent: each materialized, patched and stamped; nofib-run built.
             r = go(('g', 'h', 't', 'm', 'nofib'))
             want = {'r/g/a.txt': 'one\n', 'r/g/sub/b.txt': 'two\n', 'r/h/x.cabal': 'name: q\n',
-                    'r/t/m.hs': 'module M where\n', 'r/m.cmm': 'cmm\n'}
+                    'r/t/m.hs': 'module M where\n', 'r/m.cmm': 'cmm\n',
+                    'r/n/p.freeze': 'constraints: any.a ==1\n'}
             have = {k: open(f'{w}/{k}').read() for k in want if os.path.isfile(f'{w}/{k}')}
             stamped = sorted(os.listdir(f'{w}/{STORE}/stamps'))
             if r or have != want or stamped != ['g', 'h', 'm', 'nofib', 't'] \
@@ -476,15 +517,44 @@ def self_test():
             shutil.rmtree(f'{w}/r/n/dist-newstyle')
             if len(go(('nofib',), build=['false'])) != 1:
                 bad.append('a failed nofib-run build passed')
+            # An added file absent from an unstamped copy is put in place
+            # before the check; check finds it missing; one of an older pin,
+            # the stamp moving with the pin, is refused.
+            frz = f'{w}/r/n/p.freeze'
+            os.unlink(f'{w}/{STORE}/stamps/nofib')
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(frz)
+            if go(('nofib',)) or f'inputs: nofib: p.freeze put in {w}/r/n' not in said \
+                    or not os.path.isfile(frz) or open(frz).read() != 'constraints: any.a ==1\n':
+                bad.append(f'an added file absent: {said}')
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(frz)
+            with contextlib.redirect_stdout(open(os.devnull, 'w')):
+                c = check(w, ['nofib'], cache)
+            if c != ['nofib: missing p.freeze']:
+                bad.append(f'check of an absent added file found {c}')
+            put(frz, 'constraints: any.a ==1\n')
+            put(f'{pins}/fz', 'constraints: any.a ==2\n')
+            r = go(('nofib',))
+            if len(r) != 1 or 'other p.freeze' not in r[0]:
+                bad.append(f'an added file of an older pin: {r}')
         finally:
             BY_NAME.clear()
             BY_NAME.update(saved[0])
             PINS = saved[1]
         # The table: every pin under pins, every part family's names rows.
         for x in INPUTS:
-            for rel in (x.source if x.kind in ('tracked', 'generate') else None, x.patch):
+            for rel in (x.source if x.kind in ('tracked', 'generate') else None, x.patch,
+                        *[s for s, _ in x.add]):
                 if rel and not os.path.exists(os.path.join(PINS, rel)):
                     bad.append(f'{x.name}: no {rel} under {PINS}')
+        # nofib-run's build names the project file nofib's row adds, beside its
+        # freeze, and no other.
+        adds = [d for _, d in BY_NAME['nofib'].add]
+        if adds != [NOFIB_PROJECT, NOFIB_PROJECT + '.freeze'] \
+                or [a for a in NOFIB_RUN_BUILD if a.startswith('--project-file')] \
+                != ['--project-file=' + NOFIB_PROJECT]:
+            bad.append(f'nofib adds {adds}, its build {NOFIB_RUN_BUILD}')
         if needs(['containers-O1:build', 'comp2']) != ['mbb', 'containers', 'tasty-bench-papi',
                                                          'tasty-papi'] \
                 or needs(['perf', 'scale']) != [] or len(needs([])) != len(INPUTS):

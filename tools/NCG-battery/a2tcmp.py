@@ -5,7 +5,10 @@ the cells counted in both, how many are worse by 0.2% and by 1% and the N
 and the best, and the cells either label has no count of; then the same of
 the bytes allocated a call, where both labels' tables carry them (a fourth
 column, from 2026-11-07). The thresholds are those the full A2T runs were
-read by.
+read by. A or B written VARIANT:LABEL, VARIANT full or groups, names
+OUT/a2t-VARIANT-LABEL.tsv, the counts of battery.py's part a2t-full
+or a2t-groups (its setting 17), so that two labels of one variant compare,
+or two variants on the cells they share.
 
 Usage: python3 tools/NCG-battery/a2tcmp.py [--out DIR] A B [N]
        python3 tools/NCG-battery/a2tcmp.py --self-test
@@ -21,6 +24,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from battery import WORK  # noqa: E402
 
 MOVE, BAR = 0.002, 0.01
+VARIANTS = ('full', 'groups')
+
+
+def path_of(out, x):
+    """The counts [VARIANT:]LABEL names under out."""
+    variant, colon, label = x.rpartition(':')
+    if colon and variant not in VARIANTS:
+        raise ValueError(f'{x}: a variant is one of {", ".join(VARIANTS)}')
+    return os.path.join(out, f'a2t-{variant}-{label}.tsv' if colon else f'a2t-{label}.tsv')
 
 
 def load(path, column=1):
@@ -90,6 +102,19 @@ def self_test():
                 '  no count under e: 1, the first z\n')
         if p.returncode or p.stdout != want:
             bad.append(f'allocation: exit {p.returncode}, printed {p.stdout!r}')
+        # A variant's counts against the sample's, on the cells they share.
+        with open(f'{d}/a2t-full-f.tsv', 'w') as fh:
+            fh.write('x\t110\t0\t80.0\nsummed:x\t50\t0\t8.0\n')
+        p = subprocess.run([sys.executable, os.path.abspath(__file__), '--out', d, 'c',
+                            'full:f'], capture_output=True, text=True)
+        want = ('c to full:f: cells counted in both 1 of 4\n  worse by 0.2%: 1, by 1%: 1\n'
+                '    1.1000  x  100.0 110.0\n')
+        if p.returncode or not p.stdout.startswith(want):
+            bad.append(f'a variant: exit {p.returncode}, printed {p.stdout!r}')
+        p = subprocess.run([sys.executable, os.path.abspath(__file__), '--out', d, 'c',
+                            'thin:f'], capture_output=True, text=True)
+        if p.returncode != 2 or 'a variant is one of' not in p.stderr:
+            bad.append(f'an unknown variant: exit {p.returncode}, {p.stderr!r}')
     for x in bad:
         print('FAIL', x)
     print('ok   a2tcmp.py self-test' if not bad else f'{len(bad)} failed')
@@ -108,9 +133,9 @@ def main(argv):
     a, b = argv[:2]
     n = int(argv[2]) if len(argv) == 3 else 20
     try:
-        ca, cb = (load(os.path.join(out, f'a2t-{x}.tsv')) for x in (a, b))
-        aa, ab = (load(os.path.join(out, f'a2t-{x}.tsv'), 3) for x in (a, b))
-    except OSError as e:
+        ca, cb = (load(path_of(out, x)) for x in (a, b))
+        aa, ab = (load(path_of(out, x), 3) for x in (a, b))
+    except (OSError, ValueError) as e:
         print(e, file=sys.stderr)
         return 2
     print(compare(a, b, ca, cb, n))
