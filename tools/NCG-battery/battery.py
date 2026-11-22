@@ -70,6 +70,11 @@ compile-cost.py's warnings fail nothing, nor does a case of tickets.py's
 failing, its row saying so, nor nofib-run's exit 1 over real/eff alone, some
 of whose programs GHC rejects.
 
+A launch that runs the fuzz part, the whole battery's included, is refused
+first, exit 2 with nothing run, where the random test's base compiler,
+ghc-FUZZ_BASE's _build/stage1/bin/ghc, is absent, the refusal naming the
+label.py launch that builds the base's tree; --dry prints it as a comment line.
+
 The work directory (--work, dist-ghcho by default) holds the trees, nofib-r
 (the nofib checkout and its built nofib-run), vpapi (the packages' sources
 and tasty-papi-settle2, the tasty-papi built in place of Hackage's) and the
@@ -307,6 +312,8 @@ A2T_MEM, A2T_POLL = 30, 30  # 13: GiB, seconds
 MEMINFO = '/proc/meminfo'
 MIN_FREE = 20  # 14: GiB
 FUZZ_BASE = 'rb'  # 16
+# the commit of FUZZ_BASE's tree, master 37ad471050, the series' base
+FUZZ_BASE_COMMIT = '37ad47105079d55e0da68f3c660f9bbd2e18047a'
 FUZZ_FIRST, FUZZ_PER_LANE, FUZZ_LANES = 1000000, 50, 3  # 16
 FUZZ_SECONDS = 3600  # 16
 
@@ -889,6 +896,22 @@ def parse_parts(parts):
     return out
 
 
+def runs_fuzz(named):
+    """Whether parse_parts' parts run the fuzz part, the whole battery's too."""
+    return not named or any(n == 'fuzz' for n, _ in named)
+
+
+def fuzz_base_missing(work, cpus):
+    """Why the fuzz part cannot run in work, its base's compiler absent, with
+    the launch that builds the base's tree; None where it is there."""
+    ghc = os.path.join(work, f'ghc-{FUZZ_BASE}', '_build', 'stage1', 'bin', 'ghc')
+    if os.path.isfile(ghc):
+        return None
+    return (f"no compiler of the random test's base, {ghc}; build its tree first,"
+            f" unsandboxed: env -u TMPDIR python3 {os.path.join(HERE, 'label.py')}"
+            f' --work {work} --steps build {FUZZ_BASE} {FUZZ_BASE_COMMIT} {cpus}')
+
+
 def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
            sc=SCALE_RUN, pc=PER_CALL, tk=TICKETS, ghc0=None, a2t_lock=None,
            meminfo=MEMINFO, poll=A2T_POLL, min_free=MIN_FREE, build=None, bindir=None,
@@ -1067,7 +1090,12 @@ def main(argv):
     work = os.path.abspath(work)
     outdir = os.path.abspath(outdir or os.path.join(work, 'battery'))
     try:
-        parse_parts(argv[3:])
+        named = parse_parts(argv[3:])
+        missing = fuzz_base_missing(work, argv[2]) if runs_fuzz(named) else None
+        if missing and not dry:
+            raise ValueError(missing)
+        if missing:
+            print(f'# {missing}', file=sys.stderr)
         bad = [] if dry else inputs.ensure(work, inputs.needs(argv[3:]))
         if bad:
             raise ValueError('inputs.py: ' + '; '.join(bad))
@@ -1451,6 +1479,24 @@ def self_test():
         if (p.returncode != 2 or 'a2t-x.tsv exists'
                 not in open(f'{w}/vpapi/ab-ct-x.log').read()):
             bad.append(f'A2T over its results exited {p.returncode}, not 2')
+        # The random test's base compiler absent: a launch running the fuzz
+        # part, the whole battery's included, refused before any input is put
+        # in place, naming the build that makes it; one of other parts not.
+        nb, hb = f'{d}/nobase', f'{d}/hasbase/ghc-{FUZZ_BASE}/_build/stage1/bin/ghc'
+        os.makedirs(os.path.dirname(hb))
+        open(hb, 'w').close()
+        build_rb = (f'label.py --work {nb} --steps build {FUZZ_BASE} {FUZZ_BASE_COMMIT} 4-6')
+        if fuzz_base_missing(f'{d}/hasbase', '4-6') is not None \
+                or build_rb not in (fuzz_base_missing(nb, '4-6') or '') \
+                or [runs_fuzz(parse_parts(x)) for x in ([], ['perf'], ['perf', 'fuzz'])] \
+                != [True, False, True]:
+            bad.append('the check of the random test\'s base compiler')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = main(['--work', nb, 't', 'x', '4-6'])
+        if rc != 2 or build_rb not in err.getvalue() or 'nothing run' not in err.getvalue() \
+                or os.path.exists(nb):
+            bad.append(f'a battery without the base compiler: exit {rc}, {err.getvalue()!r}')
         # a2t-full and a2t-groups (setting 17): the binary's tables made once,
         # under -V0, the cells counted from them by a2tcells.py under setarch -R
         # in a lane a CPU, OUT in a2t's form; neither in the whole battery,

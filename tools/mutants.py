@@ -3097,6 +3097,20 @@ MUTANTS = [
     ('NCG-battery label package builds compared above ghc-VERSION', 'NCG-battery/label.py',
      "            da, db = f'{da}/build/x86_64-linux/{ga[0]}', f'{db}/build/x86_64-linux/{gb[0]}'\n",
      "            da, db = da, db\n", ST),
+    # A launch running the fuzz part refused, naming the base's build, where
+    # the random test's base compiler is absent (Mikolaj, 2026-11-22).
+    ('NCG-battery fuzz base unchecked', 'NCG-battery/battery.py',
+     "        missing = fuzz_base_missing(work, argv[2]) if runs_fuzz(named) else None\n",
+     "        missing = None\n", ST),
+    ('NCG-battery fuzz base checked for other parts', 'NCG-battery/battery.py',
+     "    return not named or any(n == 'fuzz' for n, _ in named)\n",
+     "    return True\n", ST),
+    ('NCG-battery label fuzz base unchecked', 'NCG-battery/label.py',
+     "        missing = fuzz_base_missing(self.work, cpus) if 'battery' in steps else None\n",
+     "        missing = None\n", ST),
+    ('NCG-battery label fuzz base checked without battery', 'NCG-battery/label.py',
+     "        missing = fuzz_base_missing(self.work, cpus) if 'battery' in steps else None\n",
+     "        missing = fuzz_base_missing(self.work, cpus)\n", ST),
     # A label's runs found under the tree they name (NCG-battery-18).
     ("NCG-battery runreport runs taken under the label's tree", 'NCG-battery/runreport.py',
      "    return f'c{trees[0] if len(trees) == 1 else label}-{o1}{label}'\n",

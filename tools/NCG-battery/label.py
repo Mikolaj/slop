@@ -39,7 +39,11 @@ A launch other than --dry is refused, exit 2 with nothing run, from inside
 the inner sandbox (SANDBOX_RUNTIME set) or with TMPDIR set: the sandbox sets
 TMPDIR and more variables, which move compile allocation and short programs'
 instruction counts against labels launched outside it. Run it unsandboxed, with
-TMPDIR unset. It exits 0 when every step it ran succeeded, 1 when one failed, 2
+TMPDIR unset. A launch whose steps include battery is refused likewise, after
+--after's wait, where the random test's base compiler is absent (battery.py's
+FUZZ_BASE), its chain getting its first step's FAILED and ALL FAILED lines, the
+refusal naming the launch that builds the base's tree; --dry prints that as a
+comment line. It exits 0 when every step it ran succeeded, 1 when one failed, 2
 when refused, on a usage error or after --after's step failed.
 
 --cmp A B compares the objects of labels A and B, each measured on the tree
@@ -66,7 +70,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from battery import PKGS, WORK, Failures, cpu_list, run_self_test  # noqa: E402
+from battery import PKGS, WORK, Failures, cpu_list, fuzz_base_missing, run_self_test  # noqa: E402
 
 TOOLS = {'rebuild': os.path.join(HERE, 'rebuild.py'), 'battery': os.path.join(HERE, 'battery.py'),
          'bstats': os.path.join(HERE, 'bstats.py'), 'runreport': os.path.join(HERE, 'runreport.py'),
@@ -185,6 +189,14 @@ class Launch:
             os.makedirs(self.logs, exist_ok=True)
         if after and not self.wait(after):
             self.say(f'{label}-{steps[0]} FAILED (skipped: {after} failed)')
+            self.say(f'{label} ALL FAILED at {steps[0]}')
+            return 2
+        missing = fuzz_base_missing(self.work, cpus) if 'battery' in steps else None
+        if missing and self.dry:
+            print(f'# {missing}')
+        elif missing:
+            print(f'label.py: {missing}; nothing run', file=sys.stderr)
+            self.say(f'{label}-{steps[0]} FAILED (refused: {missing})')
             self.say(f'{label} ALL FAILED at {steps[0]}')
             return 2
         for s in steps:
@@ -334,6 +346,10 @@ def self_test():
                 fh.write(FAKE)
         w, fakelog = f'{d}/w', f'{d}/fake.log'
         os.makedirs(w)
+        # the random test's base compiler, which a launch with battery needs
+        rb = f'{w}/ghc-rb/_build/stage1/bin/ghc'
+        os.makedirs(os.path.dirname(rb))
+        open(rb, 'w').close()
         mi = f'{d}/meminfo'
         with open(mi, 'w') as fh:
             fh.write('MemTotal: 1 kB\nMemAvailable:   52000000 kB\n')
@@ -389,6 +405,26 @@ def self_test():
                 rc, ran = launch(['M', 'abc123', '4-6', 'B1'], env)
                 if rc != 2 or ran or os.path.exists(f'{w}/battery/label/rebuild-build-M.out'):
                     bad.append(f'a launch under {env}: {rc}, ran {ran}')
+            # The random test's base compiler absent: a launch with battery
+            # refused before its first step, the chain saying so with the
+            # build that makes it; one building that tree runs; --dry notes it.
+            os.rename(rb, rb + '.away')
+            rc, ran = launch(['R', 'abc123', '4-6', 'B1'])
+            c = chain()
+            build_rb = f'label.py --work {w} --steps build rb 37ad47105079d55e0da68f3c660f9bbd2e18047a 4-6'
+            if rc != 2 or ran or c[-1:] != ['R ALL FAILED at build'] \
+                    or not c[-2].startswith('R-build FAILED (refused: ') or build_rb not in c[-2]:
+                bad.append(f'a launch without the base compiler: {rc}, ran {ran}, chain {c[-2:]}')
+            rc, ran = launch(['--steps', 'build', 'rb', '37ad47105079d55e0da68f3c660f9bbd2e18047a',
+                              '4-6'])
+            if rc != 0 or [x.split('|')[0] for x in ran] != ['rebuild', 'bstats']:
+                bad.append(f'the base\'s own build refused: {rc}, ran {ran}')
+            buf = io.StringIO()
+            rc, ran = launch(['--dry', 'S', 'abc123', '4-6', 'B1'], out=buf)
+            if rc != 0 or not any(x.startswith('# ') and build_rb in x
+                                  for x in buf.getvalue().splitlines()):
+                bad.append(f'--dry without the base compiler: {rc}, printed {buf.getvalue()!r}')
+            os.rename(rb + '.away', rb)
             # A failed build stops the launch; --a2t-lock and --logs move.
             rc, ran = launch(['--logs', f'{d}/lg2', 'N', 'abc123', '4-6', 'B1'], fail='rebuild')
             if rc != 1 or len(ran) != 1 or chain(f'{d}/lg2')[-2:] != ['N-build FAILED',
