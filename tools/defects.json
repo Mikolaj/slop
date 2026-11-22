@@ -9432,6 +9432,26 @@
    "bug_exit": 2,
    "bug_text": "'heron' in 0 transcripts, not one",
    "plant": "A plant's background writer is no fixture here: under defect-run's strace -f the plant returns only once the writer has written, and the late entry is then on time."
+  },
+  {
+   "id": "compile-cost-01",
+   "program": "compile-cost.py",
+   "name": "a cell's source went to ghc by its path under --tests, which GHC writes into the code of a pattern-match failure, so one source in two trees' testsuites compiled to different assembly and allocation",
+   "family": "environment-decides",
+   "fix_rev": "self",
+   "trigger": "one x.hs in two directories, t1 and t2, compiled by one ghc whose assembly carries the source's path as given",
+   "ok": "each compile gets a copy of the source as x.hs in compile-cost's work directory, and the two assembly hashes agree",
+   "bug": "each compile got its own absolute path, and the two hashes differ",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-22: the NCG battery's label p103 against t103, one compiler, read 'asm DIFFERS' in T783 at -O0, -O and -O2 and moved its .hs cells' allocation by -3.4 to +6.8 kB, MBB's, its .cmm's path unmoved, equal, t103's tests having come from the deleted ghc-g and p103's from ghc-t103 since 147b013 took them from the tree under test; T783's .s carries the path in a pattern-match failure's message.",
+   "plant_cmd": "mkdir t1 t2 && printf 'main = pure ()\\n' > t1/x.hs && cp t1/x.hs t2/x.hs",
+   "unit": "(globals().update(PERF=['{tmp}/perf'], SETARCH=[]), [(__import__('pathlib').Path(p).write_text(s), os.chmod(p, 0o755)) for p, s in (('{tmp}/perf', FAKE_PERF), ('{tmp}/A', FAKE_GHC.replace(\"open(out, 'w').write(asm)\", \"open(out, 'w').write(asm + src)\")))], 'shas %d' % len({measure([('A', '{tmp}/A', None)], sources('x:-O0', '{tmp}/' + t, None), 1, '', None, None, None)[('x', '-O0', 'A')][0][-1] for t in ('t1', 't2')}))[2]",
+   "expect_exit": 0,
+   "expect_text": "'shas 1'",
+   "bug_exit": 0,
+   "bug_text": "'shas 2'"
   }
  ]
 }

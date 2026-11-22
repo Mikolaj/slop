@@ -14,19 +14,21 @@ Usage: python3 tools/compile-cost.py [--cpu CPU] [--rounds R] [--rts OPTS]
        python3 tools/compile-cost.py --self-test
 
 Each LABEL=GHC is a compiler, such as a hadrian tree's bootstrapped
-_build/stage1/bin/ghc or a copy of it, with `-B LIBDIR` passed where
-@LIBDIR is given (a copied binary does not find its tree's libdir). Each
-cell of CELLS, a comma-separated list of NAME:LEVEL, compiles NAME.hs of
---tests DIR (a GHC checkout's testsuite/tests/perf/compiler) or, for the
-name MBB, the --cmm FILE (!16269's generated ManyBasicBlocks.cmm), at
-LEVEL with -S: by default the fifteen of the NCG series' measurements, T3294,
-T12707, T783 and T9961 at -O0, -O and -O2 and MBB at -O0, -O1 and -O2.
-Every compile runs under `perf stat -e instructions:u`, with address-space
-randomisation off (`setarch -R`) and, with --cpu, pinned to CPU, its RTS
-options GHC's own followed by OPTS, `-A3G -V0` by default, and its RTS
-statistics read from `+RTS -t --machine-readable`. R rounds (3 by
-default), the compilers' order rotated by one from round to round, each
-cell compiled by every compiler before the next cell.
+_build/stage1/bin/ghc or a copy of it, with `-B LIBDIR` passed where @LIBDIR is
+given (a copied binary does not find its tree's libdir). Each cell of CELLS,
+a comma-separated list of NAME:LEVEL, compiles NAME.hs of --tests DIR (a GHC
+checkout's testsuite/tests/perf/compiler) or, for the name MBB, the --cmm
+FILE (!16269's generated ManyBasicBlocks.cmm), at LEVEL with -S: by default
+the fifteen of the NCG series' measurements, T3294, T12707, T783 and T9961 at
+-O0, -O and -O2 and MBB at -O0, -O1 and -O2. Each source is compiled as a copy
+under its bare name in a scratch directory, the path GHC writes into the code
+of a pattern-match failure being then the same in every tree. Every compile
+runs under `perf stat -e instructions:u`, with address-space randomisation
+off (`setarch -R`) and, with --cpu, pinned to CPU, its RTS options GHC's own
+followed by OPTS, `-A3G -V0` by default, and its RTS statistics read from `+RTS
+-t --machine-readable`. R rounds (3 by default), the compilers' order rotated by
+one from round to round, each cell compiled by every compiler before the next
+cell.
 
 Why -A3G: with GHC's own RTS options (-H, the heap sized after each major
 collection), the collections fall at different points from one run to
@@ -178,6 +180,14 @@ def measure(ghcs, cells, rounds, opts, cpu, keep, out):
     by round."""
     runs = defaultdict(list)
     with tempfile.TemporaryDirectory(prefix='compile-cost-') as wdir:
+        # each source compiled as a copy under its bare name: GHC writes the
+        # path it is given into the code of a pattern-match failure, so one
+        # source in two trees can otherwise compile to different code
+        bare = {src: os.path.basename(src) for _, _, src in cells}
+        if len(set(bare.values())) != len(bare):
+            raise ValueError(f'two sources share a name: {sorted(bare)}')
+        for src, b in bare.items():
+            shutil.copy(src, os.path.join(wdir, b))
         for r in range(rounds):
             order = ghcs[r % len(ghcs):] + ghcs[:r % len(ghcs)]
             for name, level, src in cells:
@@ -188,7 +198,7 @@ def measure(ghcs, cells, rounds, opts, cpu, keep, out):
                         if os.path.exists(os.path.join(wdir, f)):
                             os.remove(os.path.join(wdir, f))
                     p = subprocess.run(
-                        command(ghc, lib, level, src, wdir, opts, cpu),
+                        command(ghc, lib, level, bare[src], wdir, opts, cpu),
                         cwd=wdir, stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, text=True)
                     if p.returncode != 0:
