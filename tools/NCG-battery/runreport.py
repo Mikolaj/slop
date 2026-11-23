@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Every comparison of battery.py's label B against label A, written to one
 report: nofib's (nbcmp.py), containers', megaparsec's and vector's (pkgcmp.py),
-A2T's (a2tcmp.py), the fifteen compilations' (compile-cost.py compare, comp1
-and comp2), GHC's perf and size tests' (perfcmp.py), the scaling probes'
-(NCG-scale/report.py), the tickets' and the Text scan's (tickets.py compare),
-each label's random test (NCG-fuzz/run.py's results) and the builds' (bstats.py
-compare); each section's summary, then every row moving by its threshold, up
-and down. rebuild.py writes it for the last label against the base's, fr00.
+A2T's sample's and groups' (a2tcmp.py), the fifteen compilations'
+(compile-cost.py compare, comp1 and comp2), GHC's perf and size tests'
+(perfcmp.py), the scaling probes' (NCG-scale/report.py), the tickets' and the
+Text scan's (tickets.py compare), each label's random test (NCG-fuzz/run.py's
+results) and the builds' (bstats.py compare); each section's summary, then
+every row moving by its threshold, up and down. rebuild.py writes it for the
+last label against the base's, fr00.
 
 Usage: python3 tools/NCG-battery/runreport.py [--work DIR] A B OUT
        python3 tools/NCG-battery/runreport.py [--work DIR] --check [LABEL...]
@@ -197,11 +198,13 @@ def packages(work, a, b):
     return out
 
 
-def a2t(outdir, a, b):
-    out = ['A2T']
+def a2t(outdir, a, b, variant=''):
+    """The sample's counts, or with variant groups those of part a2t-groups."""
+    out = [f'A2T {variant}'.rstrip()]
+    pre = f'a2t-{variant}-' if variant else 'a2t-'
     try:
-        ca, cb = (a2tcmp.load(os.path.join(outdir, f'a2t-{x}.tsv')) for x in (a, b))
-        aa, ab = (a2tcmp.load(os.path.join(outdir, f'a2t-{x}.tsv'), 3) for x in (a, b))
+        ca, cb = (a2tcmp.load(os.path.join(outdir, f'{pre}{x}.tsv')) for x in (a, b))
+        aa, ab = (a2tcmp.load(os.path.join(outdir, f'{pre}{x}.tsv'), 3) for x in (a, b))
     except OSError as e:
         return out + [f'  not compared: {e}']
     out.append(a2tcmp.compare(a, b, ca, cb, 0))
@@ -336,7 +339,8 @@ def report(work, a, b, path, outdir=None):
     outdir = outdir or os.path.join(work, 'battery')
     lines = [f'{b} against {a}, work directory {work}', '']
     for sec in (lambda: nofib(work, a, b, outdir), lambda: packages(work, a, b),
-                lambda: a2t(outdir, a, b), lambda: comp(outdir, a, b),
+                lambda: a2t(outdir, a, b), lambda: a2t(outdir, a, b, 'groups'),
+                lambda: comp(outdir, a, b),
                 lambda: perf(work, outdir, a, b), lambda: scale(outdir, a, b),
                 lambda: tix(outdir, a, b), lambda: tix(outdir, a, b, 'utf8 Text scan', 'utf8'),
                 lambda: fuzz(outdir, a, b), lambda: builds(outdir, a, b)):
@@ -419,6 +423,8 @@ def self_test():
                     pkgcmp.write_csv(f'{w}/vpapi/res-{lb}-{i}.csv', [('All.v', int(100 * k), 2000)])
             with open(f'{o}/a2t-{lab}.tsv', 'w') as fh:
                 fh.write(f'c\t{100 * k}\t0\t{50 * k * k}\nd\t{100 * (2 - k)}\t0\t20\n')
+            with open(f'{o}/a2t-groups-{lab}.tsv', 'w') as fh:
+                fh.write(f'summed:c\t{200 * k}\t0\t30\n')
             with open(f'{o}/tix-{lab}.tsv', 'w') as fh:
                 fh.write(f'27799 -O2\tinner\t{"fused" if lab == "A" else "split"}\n')
             with open(f'{o}/ghcb-{lab}.tsv', 'w') as fh:
@@ -487,6 +493,9 @@ def self_test():
                       '  bytes allocated a call by 0.20%: 1 up, 0 down\n    +2.010%  c  50 51',
                       '  instructions a call by 0.20%: 1 up, 1 down\n    +1.000%  c  100 101\n'
                       '    -1.000%  d  100 99',
+                      'A2T groups\nA to B: cells counted in both 1 of 1\n  worse by 0.2%: 1, by 1%: 1\n'
+                      '  better by 0.2%: 0\n  instructions a call by 0.20%: 1 up, 0 down\n'
+                      '    +1.000%  summed:c  200 202\n',
                       'megaparsec -O2\n  not compared:',
                       '  27799 -O2: inner fused -> split',
                       '  alloc by 0.1%: 1 up, 0 down\n      +1.000%  M.o  1000 1010',
@@ -506,6 +515,11 @@ def self_test():
                       f'  C: FAIL, no results in {o}/fuzz-C'):
             if piece not in text:
                 bad.append(f'the report lacks {piece!r}')
+        # a label without groups, as any before ruling 473: not compared
+        got = a2t(o, 'A', 'S', 'groups')
+        if got[:1] != ['A2T groups'] or got[1:2] != [f'  not compared: [Errno 2] No such file'
+                                                      f' or directory: {o + "/a2t-groups-S.tsv"!r}']:
+            bad.append(f'groups against a label without them: {got}')
     # --check: a label K with every record, nofib's tables kept in battery/,
     # passes; each record emptied in turn fails it, naming the record; a
     # label with none fails by every section.

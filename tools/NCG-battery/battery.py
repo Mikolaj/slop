@@ -24,9 +24,10 @@ beside them, with only the probes and then the tickets' reproducers beside
 the builds, on its first CPU, and beside those the Text scan, on the same CPU,
 and then the random test, on its last three; then, all built and tested, runs
 six lanes at once:
-containers' rounds at -O2; containers' at -O1; vector's at -O2, then at -O1; megaparsec's at -O2,
-then at -O1; A2T's sample; and nofib; those ended, the compilations, the stage-1
-compiler's on CPUS' second CPU beside the stage-2 compiler's on its third;
+containers' rounds at -O2; containers' at -O1; vector's at -O2, then at -O1;
+megaparsec's at -O2, then at -O1; A2T's sample, then its groups on CPUS' first
+CPU; and nofib; those ended, the compilations, the stage-1 compiler's on CPUS'
+second CPU beside the stage-2 compiler's on its third;
 and then the perf and size tests. Its lines go to OUT/meas-LABEL.log. A PART --
 nofib-O2, nofib-O1, nofib-O0, containers-O2, containers-O1, vector-O2,
 vector-O1, megaparsec-O2, megaparsec-O1, a2t, a2t-full, a2t-groups, comp1,
@@ -206,17 +207,18 @@ The settings, each stated here and nowhere else:
     --iters A2T_CALLS`, a cell after another in its one process, at N and 2N
     calls, the instructions of the process's own thread by perf_event_open and
     the bytes by its allocation counter, once `BIN --cells thin --list` has
-    printed the sample as the pin has it. The lane counts one cell at a time
-    (Mikolaj, 2026-11-05: "a single thread, so that it ends when the longest of
-    the other package benchmarks ends"). Labels counted before ruling 471, p103
-    the last, were counted by tools/perf-per-call.py in two fresh processes a
-    cell, their bytes from the RTS's statistics, and compare with a later label
-    only through the change of method, which p105 against p103 on ghc-t103
-    measured: the binary's own instructions a call about 0.2% lower on the small
-    and empty cells and, on the large ones, a geometric mean 0.7% lower, a
-    twentieth of them by 4.4% or more and 33 of 13832 higher by 1% or more; its
-    bytes a call each a whole number, where p103's were whole on a sixth of the
-    cells and off by up to 4.8 bytes a call on the small and empty ones.
+    printed the sample as the pin has it. The lane counts one cell at a time,
+    the sample and then the groups of setting 17 (Mikolaj, 2026-11-05: "a single
+    thread, so that it ends when the longest of the other package benchmarks
+    ends"). Labels counted before ruling 471, p103 the last, were counted by
+    tools/perf-per-call.py in two fresh processes a cell, their bytes from the
+    RTS's statistics, and compare with a later label only through the change of
+    method, which p105 against p103 on ghc-t103 measured: the binary's own
+    instructions a call about 0.2% lower on the small and empty cells and, on
+    the large ones, a geometric mean 0.7% lower, a twentieth of them by 4.4% or
+    more and 33 of 13832 higher by 1% or more; its bytes a call each a whole
+    number, where p103's were whole on a sixth of the cells and off by up to 4.8
+    bytes a call on the small and empty ones.
 12. The packages and A2T build with -ddump-timings -ddump-to-file on the
     packages under test, a ghc-options in each one's stanza, cabal 3.18
     applying a top-level one to none of the local packages; the flags left
@@ -284,9 +286,12 @@ The settings, each stated here and nowhere else:
     says, `BIN --cells full` or `groups` `--count --reps 1 --tables` with the
     pinned tables, in a2tcells.py's fixed number of shards dealt to lanes a CPU
     of CPUS, so that a cell is counted after the same cells in every label,
-    under setarch -R and with the RTS clock running (settings 1 and 2). The two
-    are no part of the whole battery, whose duration and order the comparisons
-    across labels rest on, and take no lock of setting 13.
+    under setarch -R and with the RTS clock running (settings 1 and 2). The
+    whole battery counts a2t-groups too, in A2T's lane after the sample, its
+    shards one after another on CPUS' first CPU, so that the lane stays one
+    thread (Mikolaj's ruling 473, 2026-11-23); a2t-full is no part of the whole
+    battery, whose duration and order the comparisons across labels rest on.
+    Neither takes a lock of setting 13.
 """
 
 import collections
@@ -964,9 +969,9 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
     flavour_ok = (f'[ "$(cat {q(flavour)} 2>/dev/null)" = {q(FLAVOUR)} ]'
                   f' || {{ echo "battery STOP, {flavour} does not name {FLAVOUR}"; exit 2; }}')
 
-    def p(name, steps=None):
+    def p(name, steps=None, on=None):
         if name != 'a2t' or a2t_lock is None:
-            return part(name, work, t, label, cpus, outdir, cc, sc, steps, tk, u8, fz,
+            return part(name, work, t, label, on or cpus, outdir, cc, sc, steps, tk, u8, fz,
                         cabal_j)
         steps = steps or A2T_STEPS
         held = tuple(x for x in A2T_STEPS[:2] if x in steps)
@@ -1007,6 +1012,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
             f'{outdir}/comp1-{label}.txt', f'{outdir}/comp1-{label}.runs',
             f'{outdir}/comp2-{label}.runs', f'{outdir}/perf-{label}.tsv',
             f'{outdir}/scale-{label}.txt', f'{outdir}/a2t-{label}.tsv',
+            f'{outdir}/a2t-groups-{label}.tsv',
             f'{outdir}/tix-{label}.tsv', f'{outdir}/utf8-{label}.tsv',
             f'{outdir}/fuzz-{label}']
     logs = ' '.join([q(f'{v}/{PKGS[k]["log"]}-c{tree}{o}-{label}.log')
@@ -1038,7 +1044,7 @@ def script(work, tree, label, cpus_spec, outdir, parts=(), cc=COMPILE_COST,
         *lane('c1', 'containers -O1', p('containers-O1', run)),
         *lane('vec', 'vector', p('vector-O2', run), p('vector-O1', run)),
         *lane('mega', 'megaparsec', p('megaparsec-O2', run), p('megaparsec-O1', run)),
-        *lane('a2t', 'A2T', p('a2t', run)),
+        *lane('a2t', 'A2T', p('a2t', run), p('a2t-groups', on=cpus[:1])),
         *lane('nb', 'nofib', p('nofib-O2'), p('nofib-O1'), p('nofib-O0')),
         'wait $c2 || s=2; wait $c1 || s=2; wait $vec || s=2; wait $mega || s=2;'
         ' wait $a2t || s=2; wait $nb || s=2',
@@ -1359,10 +1365,23 @@ def self_test():
         if ([x for x in builds if x not in (a2td, a2tb)] != want or builds[:1] != [a2td]
                 or builds.count(a2td) != 1 or builds.count(a2tb) != 1):
             bad.append(f'cabal built {builds}')
+        # A2T's lane: the sample, then the groups, a shard after another
+        # on CPUS' first CPU (ruling 473)
         want = ['--cells thin --list',
                 f'--cells thin --count --reps 1 --iters {A2T_CALLS} --out {o}/a2t-x.tsv']
-        if of('cells') != want or of('setarch').count(f'-R {fb}/bench {want[1]}') != 1:
+        tabs = f'--tables {w}/{A2T_PINNED}/forced.txt {w}/{A2T_PINNED}/summed.txt'
+        groups = [f'--cells groups --list {tabs}'] + [
+            f'--cells groups --count --reps 1 {tabs} --shard {i}/{a2tcells.SHARDS}'
+            f' --out {o}/a2t-groups-x.tsv.part{i} --cpu 4' for i in range(a2tcells.SHARDS)]
+        if of('cells') != want + groups or of('setarch').count(f'-R {fb}/bench {want[1]}') != 1 \
+                or sum(x.startswith(f'setarch|-R python3 {A2T_CELLS_PY} count --groups 4 ')
+                       for x in got) != 1:
             bad.append(f'A2T counted {of("cells")}')
+        tsv = f'{o}/a2t-groups-x.tsv'
+        have = open(tsv).read().split('\n')[:-1] if os.path.isfile(tsv) else []
+        if len(have) != 3 or not all(x.endswith('\t5.0\t0\t8.0') for x in have) \
+                or glob.glob(f'{tsv}.part*'):
+            bad.append(f'a2t-groups-x.tsv is {have}')
         for r in ('ct-x', 'o1-x', 'o0-x'):  # nofib's tables kept beside the others
             k, t = f'{o}/nofib-{r}.tsv', f'{nb}/nofib/_make/{r}/spectral/x/Main.perf.results.tsv'
             have = open(k).read() if os.path.isfile(k) else ''
@@ -1374,7 +1393,7 @@ def self_test():
         if have != ''.join(f'{c}\t5.0\t0\t8.0\n' for c in A2T_SAMPLE):
             bad.append(f'a2t-x.tsv is {have!r}')
         runs = [x for x in got if x.startswith(('setarch|', 'bench|'))
-                and NOFIB_RUN not in x and ' --cells ' not in x]
+                and NOFIB_RUN not in x and ' --cells ' not in x and A2T_CELLS_PY not in x]
         want = []
         for o1 in ('', 'o1-'):
             for prog in ('map-benchmarks', 'set-benchmarks'):
@@ -1547,7 +1566,8 @@ def self_test():
         # pinned tables, the label's binary printing none, counted by
         # a2tcells.py under setarch -R in ten shards over a lane a CPU, OUT
         # in a2t's form;
-        # neither in the whole battery, under the lock, nor over its results;
+        # a2t-full not in the whole battery; neither under the lock nor over its
+        # results;
         # a failed count fails the part, and so do absent tables.
         oc = f'{d}/out-a2tc'
         open(log, 'w').close()
@@ -1575,7 +1595,7 @@ def self_test():
                            in x for x in counted) \
                 or sum(x.startswith(f'setarch|-R python3 {A2T_CELLS_PY} count ') for x in got) != 2:
             bad.append(f'the cells were counted by {counted}, CPUs {cpus}')
-        if 'a2tcells' in text or ' a2t-full' in text or 'flock' in script(
+        if ' a2t-full' in text or 'flock' in script(
                 w, 't', 'x', '4-6', oc, ('a2t-full',), a2t_lock=f'{d}/a2t.lock'):
             bad.append('a2t-full in the whole battery or under the lock')
         p = subprocess.run(['bash', '-c', script(w, 't', 'x', '4-6', oc, ('a2t-full',)),
@@ -1593,6 +1613,17 @@ def self_test():
                            capture_output=True, text=True)
         if p.returncode != 2 or 'a2t-groups ct-x exit 2' not in open(f'{w}/vpapi/ab-ct-x.log').read():
             bad.append(f'a2t-groups with failed counts exited {p.returncode}, not 2')
+        # The whole battery over a label's groups stops and runs nothing.
+        o5 = f'{d}/out-stop'
+        os.makedirs(o5)
+        open(f'{o5}/a2t-groups-y.tsv', 'w').close()
+        open(log, 'w').close()
+        p = subprocess.run(['bash', '-c', script(w, 't', 'y', '4-6', o5), 'test'],
+                           env=env, capture_output=True, text=True)
+        said = open(f'{o5}/meas-y.log').read() if os.path.isfile(f'{o5}/meas-y.log') else ''
+        if p.returncode != 2 or f'meas STOP, {o5}/a2t-groups-y.tsv exists' not in said \
+                or open(log).read():
+            bad.append(f'the whole battery over a2t-groups-y.tsv exited {p.returncode}: {said[-200:]!r}')
         # A perf test failing, a size test failing, a compiler rebuilt, a probe
         # failing and earlier results each fail their part.
         for name, extra, word in (('utf8', {'FAKEU8': '1'}, 'utf8 x exit 1'),

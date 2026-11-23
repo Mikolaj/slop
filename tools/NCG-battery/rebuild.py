@@ -212,7 +212,8 @@ def label_paths(work, label):
         ps += sorted(glob.glob(f'{v}/res-{glob.escape(lab)}-*.csv'))
     ps += [f'{v}/adist-{c}', f'{work}/{A2T_SRC}/cabal.project.{c}', f'{v}/ab-{c}.log']
     ps += [sdir for _, _, sdir in bstats.builds(work, label, label)]
-    for s in (f'a2t-{label}.tsv', f'tix-{label}.tsv', f'ghcb-{label}.tsv', f'pkgb-{label}.tsv',
+    for s in (f'a2t-{label}.tsv', f'a2t-groups-{label}.tsv', f'tix-{label}.tsv',
+              f'ghcb-{label}.tsv', f'pkgb-{label}.tsv',
               f'comp1-{label}.txt', f'comp1-{label}.runs', f'comp2-{label}.txt',
               f'comp2-{label}.runs', f'perf-{label}.tsv', f'perf-{label}.log',
               f'perf-{label}-summary.txt', f'perf-{label}-size.log',
