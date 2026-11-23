@@ -95,10 +95,10 @@ def listing(title, rs, bar):
             + [f'  {r * 100:+.3f}%  {k}  {x:.0f} {y:.0f}' for r, k, x, y in m])
 
 
-def nofib_runs(label):
+def nofib_runs(label, tree=None):
     """Label's nofib runs, by level, as battery.py names them, its tree
-    named as the label, as rebuild.py's are."""
-    return (('-O2', f'c{label}-{label}'), ('-O1', f'o1-{label}'), ('-O0', f'o0-{label}'))
+    named as the label, as rebuild.py's are, unless tree is given."""
+    return (('-O2', f'c{tree or label}-{label}'), ('-O1', f'o1-{label}'), ('-O0', f'o0-{label}'))
 
 
 def run_name(names, label, o1=''):
@@ -354,12 +354,14 @@ def report(work, a, b, path, outdir=None):
     return path
 
 
-def missing(work, label, outdir=None, sections=None):
+def missing(work, label, outdir=None, sections=None, tree=None):
     """What of label's records the report reads is absent or empty, a line
-    each, of the sections named or of all."""
+    each, of the sections named or of all, its runs on ghc-TREE, the label's
+    own name unless given."""
     outdir = outdir or os.path.join(work, 'battery')
     n, v = os.path.join(work, 'nofib-r'), os.path.join(work, 'vpapi')
-    c, o1, e = f'c{label}-{label}', f'c{label}-o1-{label}', glob.escape
+    t = tree or label
+    c, o1, e = f'c{t}-{label}', f'c{t}-o1-{label}', glob.escape
     out = []
 
     def need(section, pattern):
@@ -371,7 +373,7 @@ def missing(work, label, outdir=None, sections=None):
             out.append(f'{section}: no {pattern}')
         elif empty:
             out.append(f'{section}: {len(empty)} of {len(files)} {pattern} empty, the first {empty[0]}')
-    for lev, r in nofib_runs(label):
+    for lev, r in nofib_runs(label, tree):
         if not sections or 'nofib' in sections:
             try:
                 nbcmp.load(n, r, outdir)

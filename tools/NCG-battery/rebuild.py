@@ -4,7 +4,7 @@ another, each built from nothing in a tree of its own and then measured by
 battery.py with the machine to itself (Mikolaj, 2026-11-03: "you sequentially
 build and benchmark each commit in turn").
 
-Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--pair] [--work DIR] BASE TIP CPUS
+Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--pair] [--tests NAMES] [--work DIR] BASE TIP CPUS
        python3 tools/NCG-battery/rebuild.py --build [--patch P]... [--target T]
            [--setting L]... [--logs DIR] [--max-wait S] [--work DIR] TREE COMMIT CPUS
        python3 tools/NCG-battery/rebuild.py [--work DIR] --keep-nofib LABEL...
@@ -54,13 +54,39 @@ under the labels the chain gives them, steps.txt naming the whole chain, so
 that a later run of the chain takes them up where their commits are the same.
 At the end, when the base and the last label are measured, runreport.py's
 report of the last label against fr00, LOGS/report-fr00-frNN.txt, which
-the run's last line names. --dry prints the steps and the first step's
-commands, and runs nothing. Run it unsandboxed.
+the run's last line names, a step measured as another label standing as
+that label. --dry prints the steps, each with what a run would do with it,
+and the first step's commands, and runs nothing. Run it unsandboxed.
+
+LOGS/measured.txt, where it exists, names labels measured outside the
+rebuild that stand for its steps, a line `COMMIT LABEL [TREE]` each, `#`
+starting a comment: COMMIT the commit the label's tree was built at, test
+patches aside, and TREE its tree, the label's name unless given. Each step
+whose commit agrees with COMMIT outside testsuite/, their trees' top-level
+entries but testsuite being the same, counts as measured by LABEL, and is
+neither built nor measured nor tested, when LABEL lacks none of the records
+a step of its own would need, its runs named by TREE, and WORK/ghc-TREE,
+where it still exists, agrees with the step's commit outside testsuite/,
+its HEAD and its uncommitted changes alike; where the tree is gone, COMMIT
+stands for it. Such a step's frNN.named in LOGS holds the line saying so. Where
+the label lacks a record or its tree differs, the run says which, and
+measures the step as any other. A line it cannot take, or a commit it
+cannot resolve, stops the run before anything is done.
+
+--tests NAMES (words of GHC tests) runs, in each step's tree after its build
+and before its battery, those of NAMES its testsuite's .T files define, by
+hadrian/build -jN --flavour --docs=none --freeze1 test --only=..., once
+--test-way=normal and once optasm, as the battery's perf part runs hadrian's
+tests; each way's summary is LOGS/tests-LABEL-WAY-summary.txt, which outlives
+the tree, its log LOGS/tests-LABEL-WAY.log, and rebuild.log gets a line naming
+its unexpected results. A step whose tree has none of NAMES runs no tests,
+and a test's unexpected result fails neither the step nor the run.
 
 WORK/battery/rebuild (LOGS) holds rebuild.log, the lines it prints; steps.txt;
 for each step build-LABEL.log, boot-LABEL.log, configure-LABEL.log,
 hadrian-LABEL.log.gz, hperf-LABEL.csv (perf stat's) and battery-LABEL.log;
-LABEL.done or LABEL.failed, holding what the log's line says; the report.
+LABEL.done, LABEL.failed or LABEL.named, holding what the log's line says;
+the report.
 Before the first step, inputs.py's ensure puts battery.py's inputs in place.
 --battery, --timeout and --min-free are the self-test's, and --repo too.
 
@@ -262,16 +288,16 @@ def prune(work, label):
         remove(p)
 
 
-def unrecorded(work, label):
+def unrecorded(work, label, tree=None):
     """The records a measured step of this label lacks: those added on
     2026-11-07, and the utf8 and fuzz parts' of 2026-11-09, which steps
     measured before then lack; and nofib's tables and compile counts, as
-    runreport.py --check requires them."""
+    runreport.py --check requires them, its runs on ghc-TREE where given."""
     out = f'{work}/battery'
     miss = [f'{out}/{s}' for s in (f'ghcb-{label}.tsv', f'pkgb-{label}.tsv', f'tix-{label}.tsv',
                                    f'utf8-{label}.tsv', f'fuzz-{label}.txt')
             if not os.path.exists(f'{out}/{s}')]
-    miss += runreport.missing(work, label, sections=('nofib',))
+    miss += runreport.missing(work, label, sections=('nofib',), tree=tree)
     a2t = f'{out}/a2t-{label}.tsv'
     with open(a2t) if os.path.exists(a2t) else open(os.devnull) as fh:
         first = fh.readline()
@@ -280,17 +306,66 @@ def unrecorded(work, label):
     return miss
 
 
+def outside_testsuite(repo, rev):
+    """The top-level entries of rev's tree but testsuite, which two commits
+    share where their sources agree outside testsuite/; None for no commit."""
+    p = git(repo, 'ls-tree', rev)
+    return None if p.returncode else [x for x in p.stdout.splitlines() if not x.endswith('\ttestsuite')]
+
+
+def named_steps(o, steps):
+    """{step label: (LABEL, why or None, the line)} of the steps measured.txt
+    names; a ValueError for a line it cannot take."""
+    path = f'{o["logs"]}/measured.txt'
+    if not os.path.exists(path):
+        return {}
+    keys = {lab: outside_testsuite(o['repo'], h) for lab, h in steps}
+    out = {}
+    with open(path) as fh:
+        for n, line in enumerate(fh, 1):
+            f = line.split('#')[0].split()
+            if not f:
+                continue
+            if len(f) not in (2, 3) or re.fullmatch(r'fr\d+', f[1]) \
+                    or not all(re.fullmatch(r'[A-Za-z0-9_.]+', x) for x in f[1:]):
+                raise ValueError(f'{path}:{n}: not COMMIT LABEL [TREE] of a label not the rebuild\'s')
+            key = outside_testsuite(o['repo'], f[0] + '^{commit}')
+            if key is None:
+                raise ValueError(f'{path}:{n}: no commit {f[0]} in {o["repo"]}')
+            lab, tree = f[1], f[-1]
+            t = f'{o["work"]}/ghc-{tree}'
+            for step_label, h in steps:
+                if keys[step_label] != key or step_label in out and not out[step_label][1]:
+                    continue
+                miss, why = unrecorded(o['work'], lab, tree), None
+                if os.path.isdir(t):
+                    head = git(t, 'rev-parse', 'HEAD').stdout.strip()
+                    st = git(t, '--no-optional-locks', 'status', '--porcelain').stdout
+                    edits = [x[3:] for x in st.splitlines()
+                             if not x[3:].startswith('testsuite/') and x[3:] != 'nofib']
+                    if outside_testsuite(t, 'HEAD') != key or edits:
+                        why = f'ghc-{tree} differs from {h[:10]} outside testsuite/'
+                    where = f'ghc-{tree} at {head[:10]}'
+                else:
+                    where = f'ghc-{tree} gone, {f[0]}'
+                if miss:
+                    why = f'lacks {len(miss)} records, the first {miss[0]}'
+                out[step_label] = (lab, why, f'{step_label} measured as {lab}: its records complete,'
+                                   f' {where} agreeing with {h[:10]} outside testsuite/')
+    return out
+
+
 def free_gb(work):
     s = os.statvfs(work)
     return s.f_bavail * s.f_frsize / 1e9
 
 
-def run_logged(argv, log, timeout):
+def run_logged(argv, log, timeout, cwd=None):
     """The status of argv, stdout and stderr in log; on the timeout its whole
     session killed, as `timeout`, which the perf part runs under, leads a group
     of its own."""
     with open(log, 'ab') as fh:
-        p = subprocess.Popen(argv, stdout=fh, stderr=subprocess.STDOUT,
+        p = subprocess.Popen(argv, stdout=fh, stderr=subprocess.STDOUT, cwd=cwd,
                              stdin=subprocess.DEVNULL, start_new_session=True)
         try:
             return p.wait(timeout)
@@ -301,7 +376,60 @@ def run_logged(argv, log, timeout):
             return 'killed after the timeout'
 
 
-def step(o, label, commit, jobs):
+TEST_WAYS = ('normal', 'optasm')
+
+
+def present_tests(tree, names):
+    """Those of names a .T file under tree's testsuite defines."""
+    text = []
+    for root, _, files in os.walk(f'{tree}/testsuite'):
+        for f in files:
+            if f.endswith('.T'):
+                with open(os.path.join(root, f), errors='replace') as fh:
+                    text.append(fh.read())
+    text = '\n'.join(text)
+    return [x for x in names if re.search(rf'test\s*\(\s*[\'"]{re.escape(x)}[\'"]', text)]
+
+
+def unexpected(summary):
+    """The summary's counts of unexpected results and framework failures
+    that are not 0, and the lines naming them; none, or no summary."""
+    if not os.path.exists(summary):
+        return 'no summary'
+    with open(summary) as fh:
+        lines = fh.read().split('\n')
+    out, inside = [], False
+    for x in lines:
+        m = re.fullmatch(r'\s*(\d+) (caused framework failures|unexpected .*)', x)
+        if m and m.group(1) != '0':
+            out.append(f'{m.group(1)} {m.group(2)}')
+        if re.fullmatch(r'(Unexpected|Framework) .*:', x):
+            inside = True
+        elif inside and x.startswith('    '):
+            out.append(x.strip())
+        else:
+            inside = False
+    return '; '.join(out) or 'none'
+
+
+def run_tests(o, label, jobs, say):
+    """--tests: those of its names the tree has, at each of TEST_WAYS."""
+    t, logs = f'{o["work"]}/ghc-{label}', o['logs']
+    names = present_tests(t, o['tests'].split())
+    for way in TEST_WAYS:
+        remove(f'{logs}/tests-{label}-{way}-summary.txt')
+    if not names:
+        say(f'{label} tests: none of {o["tests"]} in the tree')
+        return
+    for way in TEST_WAYS:
+        summary = f'{logs}/tests-{label}-{way}-summary.txt'
+        st = run_logged(['hadrian/build', f'-j{jobs}', f'--flavour={FLAVOUR}', '--docs=none', '--freeze1',
+                         'test', f'--only={" ".join(names)}', f'--test-way={way}', f'--summary={summary}'],
+                        f'{logs}/tests-{label}-{way}.log', o['timeout'], cwd=t)
+        say(f'{label} tests {" ".join(names)} {way}: exit {st}, unexpected: {unexpected(summary)}')
+
+
+def step(o, label, commit, jobs, say=print):
     """None and the line for a measured step, or what failed and the line."""
     logs, t0 = o['logs'], time.time()
     build = f'{logs}/build-{label}.log'
@@ -322,6 +450,8 @@ def step(o, label, commit, jobs):
     hlog = f'{logs}/hadrian-{label}.log'
     if os.path.exists(hlog):
         subprocess.run(['gzip', '-f', hlog])
+    if o.get('tests'):
+        run_tests(o, label, jobs, say)
     st = run_logged([sys.executable, o['battery'], '--work', o['work'], label, label, o['cpus']],
                     f'{logs}/battery-{label}.log', o['timeout'])
     if st != 0:
@@ -364,11 +494,17 @@ def run(o, steps):
         if there:
             say(f'rebuild STOP, {len(there)} results exist, the first {there[0]}')
             return 2
+    try:
+        stood = named_steps(o, steps)
+    except ValueError as e:
+        say(f'rebuild STOP, {e}')
+        return 2
     with open(path, 'w') as fh:
         fh.write(listing)
     for lab in changed:  # its commit is another now: its results are stale
         say(f'{lab} names another commit than before, {had[lab][:10]}: measured again')
-        for p in label_paths(work, lab) + [f'{logs}/{lab}.done', f'{logs}/{lab}.failed']:
+        for p in label_paths(work, lab) + [f'{logs}/{lab}.done', f'{logs}/{lab}.failed',
+                                           f'{logs}/{lab}.named']:
             remove(p)
     os.sched_setaffinity(0, {int(c) for c in cpu_list(o['cpus'])})
     jobs = len(cpu_list(o['cpus']))
@@ -378,6 +514,16 @@ def run(o, steps):
         f' CPUs {o["cpus"]}')
     for label, commit in todo:
         mark = f'{logs}/{label}'
+        lab, why, line = stood.get(label, (None, None, ''))
+        if lab and not why:
+            with open(mark + '.named', 'w') as fh:
+                fh.write(line + '\n')
+            remove(mark + '.failed')
+            say(line)
+            done += 1
+            continue
+        if lab:
+            say(f'{label} named {lab}, which {why}: not standing for it')
         if os.path.exists(mark + '.done'):
             miss = unrecorded(work, label)
             if not miss:
@@ -391,9 +537,9 @@ def run(o, steps):
             return 2
         say(f'{label} {commit[:10]} {git(o["repo"], "log", "-1", "--format=%s", commit).stdout.strip()}')
         try:
-            for p in label_paths(work, label) + [mark + '.failed']:
+            for p in label_paths(work, label) + [mark + '.failed', mark + '.named']:
                 remove(p)
-            bad, line = step(o, label, commit, jobs)
+            bad, line = step(o, label, commit, jobs, say)
         except Exception as e:  # recorded like any failed step
             bad, line = f'{type(e).__name__}: {e}', ''
         line = f'{label} FAILED, {bad}' if bad else f'{label} done, {line}, {free_gb(work):.0f} GB free'
@@ -409,8 +555,11 @@ def run(o, steps):
         else:
             done += 1
             row = 0
-    a, b = steps[0][0], steps[-1][0]
-    if all(os.path.exists(f'{logs}/{x}.done') for x in (a, b)):
+    # a step measured outside stands as its label in the report
+    ends = [(stood[x][0], f'{logs}/{x}.named') if x in stood and not stood[x][1]
+            else (x, f'{logs}/{x}.done') for x in (steps[0][0], steps[-1][0])]
+    (a, _), (b, _) = ends
+    if all(os.path.exists(mark) for _, mark in ends):
         try:
             rep = '; report ' + runreport.report(work, a, b, f'{logs}/report-{a}-{b}.txt')
         except Exception as e:  # the run's own figures stand
@@ -420,6 +569,28 @@ def run(o, steps):
     say(f'rebuild DONE: {done} of {len(todo)} steps measured,'
         f' failed: {" ".join(failed) or "none"}; {free_gb(work):.0f} GB free{rep}')
     return 2 if failed else 0
+
+
+def dry_word(o, label, commit, stood):
+    """What a run would do with a step, for --dry."""
+    logs, mark = o['logs'], f'{o["logs"]}/{label}'
+    had = {}
+    if os.path.exists(f'{logs}/steps.txt'):
+        with open(f'{logs}/steps.txt') as fh:
+            had = dict(line.split() for line in fh if line.strip())
+    old = had.get(label, commit) != commit
+    lab, why, _ = stood.get(label, (None, None, ''))
+    gone = f', its results of {had.get(label, "")[:10]} deleted' if old else ''
+    if lab and not why:
+        return f'measured as {lab}, skipped{gone}'
+    word = f'named {lab}, which {why}: ' if lab else ''
+    if old:
+        return word + f'another commit than steps.txt\'s: to be measured{gone}'
+    if os.path.exists(mark + '.done'):
+        miss = unrecorded(o['work'], label)
+        return word + (f'measured without {len(miss)} records: to be measured again' if miss
+                       else 'measured already, skipped')
+    return word + 'to be measured'
 
 
 def mem_gb(path):
@@ -504,7 +675,8 @@ def main(argv):
             print(__doc__.split('\n\n')[1], file=sys.stderr)
             return 2
         return 1 if [r for lab in rest[1:] for r in keep_nofib(work, lab)] else 0
-    o = {'work': WORK, 'repo': REPO, 'battery': BATTERY, 'timeout': TIMEOUT, 'min_free': MIN_FREE}
+    o = {'work': WORK, 'repo': REPO, 'battery': BATTERY, 'timeout': TIMEOUT, 'min_free': MIN_FREE,
+         'tests': ''}
     dry = False
     while argv[:1] and argv[0].startswith('--'):
         name = argv[0][2:].replace('-', '_')
@@ -539,9 +711,18 @@ def main(argv):
     if absent:
         print(f'inputs inputs.py is to put in place: {" ".join(absent)}')
     if dry:
+        try:
+            stood = named_steps(o, steps)
+        except ValueError as e:
+            print(f'{e}; nothing run', file=sys.stderr)
+            return 2
         for label, commit in ([steps[0], steps[-1]] if o.get('pair') else steps):
-            print(label, commit)
+            print(label, commit, dry_word(o, label, commit, stood))
         print(build_script(o['work'], o['repo'], o['logs'], steps[0][0], steps[0][1], jobs))
+        if o['tests']:
+            print(f'then in ghc-{steps[0][0]}, of {o["tests"]} those it has, at each of {" ".join(TEST_WAYS)}:'
+                  f' hadrian/build -j{jobs} --flavour={FLAVOUR} --docs=none --freeze1 test --only=...'
+                  ' --test-way=WAY')
         print(shlex.join([sys.executable, o['battery'], '--work', o['work'],
                           steps[0][0], steps[0][0], o['cpus']]))
         return 0
@@ -560,6 +741,14 @@ echo "123456,,instructions:u,9,100.00,," > "$o"; exit $e
 '''
 HADRIAN = r'''#!/bin/bash
 t=$(basename "$PWD")
+case " $* " in *" test "*)  # --tests: a summary, failing where FAKETESTFAIL names the tree and way
+  for a in "$@"; do case "$a" in --summary=*) s=${a#*=};; --test-way=*) w=${a#*=};; --only=*) o=${a#*=};; esac; done
+  echo "test|$t|$w|$o" >> "$FAKELOG"
+  if [ "${FAKETESTFAIL:-}" = "$t/$w" ]; then
+    printf '   0 expected passes\n   1 unexpected failures\n\nUnexpected failures:\n    tests/x  T1 [bad exit code] (%s)\n' "$w" > "$s"; exit 1
+  fi
+  printf '   1 expected passes\n   0 unexpected failures\n' > "$s"; exit 0;;
+esac
 echo "hadrian|$t|$(git rev-parse HEAD)|$*|$(taskset -cp $$ | sed 's/.*: //')|$(ls -d ../ghc-fr* | wc -l)|$(cat libs/x/f)|$(paste -sd';' _build/hadrian.settings)|$(ulimit -v)" >> "$FAKELOG"
 mkdir -p _build/stage1/compiler/build/compiler/GHC _build/stage1/compiler/build/GHC; touch _build/a.o
 printf 'P [GHC.X]: alloc=100 time=2.0\n' > _build/stage1/compiler/build/compiler/GHC/X.dump-timings
@@ -628,6 +817,11 @@ def plant(d):
     for i in range(1, 5):
         with open(f'{r}/c', 'a') as fh:
             fh.write(f'{i}\n')
+        if i == 3:  # the test --tests looks for, from commit 3 on
+            os.makedirs(f'{r}/testsuite/tests/x')
+            with open(f'{r}/testsuite/tests/x/all.T', 'w') as fh:
+                fh.write("test('T1', normal, compile, [''])\n")
+            sh('git', 'add', 'testsuite', cwd=r)
         sh('git', 'add', 'c', cwd=r)
         sh(*ident, 'commit', '-qm', f'commit {i}', cwd=r)
     for rel in ('nofib-r/co', 'vpapi/ctr', 'vpapi/cres', 'vpapi/mres', 'battery'):
@@ -894,6 +1088,71 @@ def self_test():
             time.sleep(0.01)
         else:
             bad.append("a hung battery's child survived it")
+
+        # measured.txt: fr02 named by label xa of tree tx, standing at a commit
+        # whose sources differ from fr02's in testsuite/ alone, a test patch on
+        # it; fr04, the last, by xc, its tree gone; fr03 by xb, lacking a record,
+        # and fr01 by xd, its tree differing outside testsuite/, both measured.
+        # --tests runs T1, which commit 3 brings, in fr03's tree alone, at both
+        # ways, its unexpected failure failing nothing; T9 is in no tree.
+        def side(h):  # h's sources, its testsuite another
+            def gi(*args, text=''):
+                return subprocess.run(['git', '-C', r, *args], input=text, capture_output=True,
+                                      text=True, check=True).stdout.strip()
+            blob = gi('hash-object', '-w', '--stdin', text="test('T2', normal, compile, [''])\n")
+            ts = gi('mktree', text=f'100644 blob {blob}\tall.T\n')
+            for name in ('y', 'tests'):  # testsuite/tests/y/all.T
+                ts = gi('mktree', text=f'040000 tree {ts}\t{name}\n')
+            top = [x for x in gi('ls-tree', h).split('\n') if not x.endswith('\ttestsuite')]
+            tree = gi('mktree', text='\n'.join(top + [f'040000 tree {ts}\ttestsuite']) + '\n')
+            return gi('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit-tree', tree, '-p', h, '-m', 'side')
+        w9 = fresh('w9')
+        s2, s4 = side(hashes[2]), side(hashes[4])
+        for lab, tree in (('xa', 'tx'), ('xb', 'xb'), ('xc', 'xc'), ('xd', 'xd')):
+            subprocess.run([sys.executable, f'{d}/battery.py', '--work', w9, tree, lab, spec],
+                           env=dict(os.environ, FAKELOG=log), check=True)
+            for rec in ('ghcb', 'pkgb'):
+                if (lab, rec) != ('xb', 'pkgb'):
+                    open(f'{w9}/battery/{rec}-{lab}.tsv', 'w').write('x\n')
+        for tree, h in (('tx', s2), ('xd', hashes[1])):
+            t = f'{w9}/ghc-{tree}'
+            subprocess.run(['git', 'clone', '-q', '--no-checkout', r, t], check=True)
+            subprocess.run(['git', '-C', t, 'fetch', '-q', r, h], check=True)
+            subprocess.run(['git', '-C', t, 'checkout', '-q', '--detach', h], check=True)
+        open(f'{w9}/ghc-tx/testsuite/tests/y/T2.hs', 'w').write('main = pure ()\n')
+        open(f'{w9}/ghc-xd/c', 'a').write('patched\n')
+        os.makedirs(f'{w9}/battery/rebuild')
+        open(f'{w9}/battery/rebuild/measured.txt', 'w').write(
+            f'# outside labels\n{s2[:10]} xa tx\n{hashes[3]} xb\n{s4} xc  # gone\n{hashes[1]} xd\n')
+        p, lines = go(work=w9, opts=('--dry',))
+        if p.returncode or lines or f'fr02 {hashes[2]} measured as xa, skipped' not in p.stdout \
+                or f'fr03 {hashes[3]} named xb, which lacks 1 records' not in p.stdout:
+            bad.append(f'--dry over measured.txt: {p.returncode} {p.stdout[:600]!r}')
+        p, lines = go(work=w9, opts=('--tests', 'T1 T9'), FAKETESTFAIL='ghc-fr03/optasm')
+        rep = f'{w9}/battery/rebuild/report-fr00-xc.txt'
+        if p.returncode != 0 or measured(lines) != ['fr00', 'fr01', 'fr03'] \
+                or 'fr02 measured as xa: its records complete, ghc-tx at' not in p.stdout \
+                or 'fr04 measured as xc: its records complete, ghc-xc gone' not in p.stdout \
+                or 'fr01 named xd, which ghc-xd differs from' not in p.stdout \
+                or not os.path.exists(f'{w9}/battery/rebuild/fr02.named') \
+                or not p.stdout.rstrip('\n').endswith(f'; report {rep}') or 'xc against fr00' not in open(rep).read():
+            bad.append(f'named steps: {p.returncode} {measured(lines)} {p.stdout[-900:]}')
+        tests = ['|'.join(x.split('|')[1:]) for x in lines if x.startswith('test|')]
+        if tests != ['ghc-fr03|normal|T1', 'ghc-fr03|optasm|T1'] \
+                or 'fr03 tests T1 optasm: exit 1, unexpected: 1 unexpected failures;' \
+                   ' tests/x  T1 [bad exit code] (optasm)' not in p.stdout \
+                or 'fr00 tests: none of T1 T9 in the tree' not in p.stdout \
+                or not os.path.exists(f'{w9}/battery/rebuild/tests-fr03-normal-summary.txt') \
+                or not os.path.exists(f'{w9}/battery/rebuild/fr03.done'):
+            bad.append(f'--tests: {tests} {p.stdout[-900:]}')
+        p, lines = go(work=w9)
+        if p.returncode != 0 or measured(lines) or 'rebuild DONE: 5 of 5' not in p.stdout:
+            bad.append(f'named steps run again: {p.returncode} {measured(lines)} {p.stdout[-300:]}')
+        with open(f'{w9}/battery/rebuild/measured.txt', 'a') as fh:
+            fh.write('nosuch xe\n')
+        p, lines = go(work=w9)
+        if p.returncode != 2 or lines or 'no commit nosuch' not in p.stdout:
+            bad.append(f'measured.txt naming no commit: {p.returncode} {p.stdout[-300:]}')
 
         # --build: one tree, at a commit named short, with two patches the
         # second of which needs the first, a target and two settings lines, on
