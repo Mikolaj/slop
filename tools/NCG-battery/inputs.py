@@ -86,9 +86,9 @@ PRODUCTS = ('.claude/*',)
 Input = collections.namedtuple('Input', 'name kind source ref patch dest extra add',
                                defaults=((),))
 INPUTS = (
-    # A2T, battery.py's setting 11: the branch ncg-benchmark-a2t of the fork
+    # A2T, battery.py's setting 11: the branch ncg-benchmark-a2t-cells of the fork
     Input('a2t', 'git', 'https://github.com/Mikolaj/orthotope.git',
-          'bcbba7e959146f5916eb0ad2685050d7a86cbe66', None, 'vpapi/a2t',
+          'b96e3f0c59c2734e693ac340867cbc21fae7352d', None, 'vpapi/a2t',
           ('cabal.project.*',)),
     Input('a2t-cells', 'tracked', 'a2t-cells.txt', None, None, 'vpapi/a2t-cells.txt', ()),
     # the two tables p103's A2T binary printed, battery.py's setting 17,

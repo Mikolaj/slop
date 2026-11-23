@@ -4,8 +4,8 @@ a2t-groups count (its setting 17), taken from an A2T binary's tables,
 and their count.
 
 Usage: python3 tools/NCG-battery/a2tcells.py cells [--groups] FORCED SUMMED
-       python3 tools/NCG-battery/a2tcells.py count [--groups] [--per-call PC]
-           [--meminfo FILE] CPUS BIN FORCED SUMMED OUT
+       python3 tools/NCG-battery/a2tcells.py count [--groups] [--meminfo FILE]
+           CPUS BIN FORCED SUMMED OUT
        python3 tools/NCG-battery/a2tcells.py --self-test
 
 FORCED and SUMMED are the tables an A2T binary prints, `GHCRTS=-V0 BIN`
@@ -24,22 +24,28 @@ random.Random(1)'s choice over the groups in sorted order. cells prints them,
 a line a cell, a summed cell's name `summed:` and the cell, then the count
 of cells and groups.
 
-count counts each cell by tools/perf-per-call.py (--per-call PC) at N and 2N
-calls, --reps 1 --alloc, N by count3.py's rule from the table of the cell's
+count counts the cells by the binary BIN itself, orthotope's
+bench:specialisation from the branch ncg-benchmark-a2t-cells on: in its own
+process, `BIN --cells full` or `groups` `--count --reps 1 --tables FORCED
+SUMMED`, at N and 2N calls, N by count3.py's rule from the table of the cell's
 mode: N calls take about 20 ms, a call taken at 100 ns at least, N at least 10
-and at most 300000; a summed cell runs through a script passing --summed, as
-census.py's count. The cells are dealt to lanes, one a CPU of CPUS (a comma
-list), every run of a lane pinned to its CPU (perf-per-call.py's --cpu), and
-before each cell a lane waits while MemAvailable (--meminfo, /proc/meminfo by
-default) is under 8 GiB, as count3.py did. Each count is appended to OUT.part
-as it ends, and a cell OUT.part has figures for is not counted again, so a
-count stopped resumes; OUT is then written in the cells' order, battery.py's
-a2t-LABEL.tsv form, a line a cell: its name, its instructions a call (-
-where none were counted), perf-per-call.py's exit and its bytes allocated a
-call (- where none or negative), and OUT.part removed where every cell was
-counted. Address-space randomisation is the caller's (battery.py runs count
-under setarch -R). count exits 0 when every cell was counted and 2 when one was
-not or an input is missing or unreadable.
+and at most 300000. First `BIN --cells ... --list --tables FORCED SUMMED` must
+print the cells and their N as above, a line a cell, or nothing is counted. The
+cells are counted in SHARDS processes, BIN's --shard I/SHARDS, a number fixed
+whatever CPUS is, so that every label counts a cell after the same cells: a
+large cell's figure moved by 4% with the cells counted before it in the one
+process. The shards are dealt to lanes, one a CPU of CPUS (a comma list), each
+process pinned to its lane's CPU (BIN's --cpu), and before each shard a lane
+waits while MemAvailable (--meminfo, /proc/meminfo by default) is under 8 GiB,
+as count3.py did. Shard I appends its cells' lines to OUT.partI as they end and
+passes over those it has counted, so that a count stopped resumes; OUT is then
+written in the cells' order, battery.py's a2t-LABEL.tsv form, a line a cell: its
+name, its instructions a call (- where none were counted), BIN's status, 0 where
+counted and 2 where not, and its bytes allocated a call (- where none or
+negative), and OUT.partI removed where every cell was counted. Address-space
+randomisation is the caller's (battery.py runs count under setarch -R). count
+exits 0 when every cell was counted and 2 when one was not, BIN's list differs
+or an input is missing or unreadable.
 """
 
 import collections
@@ -47,7 +53,6 @@ import contextlib
 import io
 import os
 import random
-import re
 import subprocess
 import sys
 import tempfile
@@ -58,9 +63,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import census  # noqa: E402
 
-PER_CALL = census.PER_CALL
 MEMINFO = '/proc/meminfo'
 MEM_FLOOR_KB = 8 * 1024 * 1024
+SHARDS = 10
 SEED = 1
 SUMMED = 'summed:'
 
@@ -127,55 +132,52 @@ def mem_available_kb(meminfo):
     return 0
 
 
-def parse(text):
-    """(instructions, bytes) a call of build A in perf-per-call.py's output,
-    None where absent, as battery.py's part a2t reads them."""
-    n = re.search(r'^A instructions ([0-9.]+) ', text, re.M)
-    a = re.search(r'^A .*  alloc ([0-9.]+) ', text, re.M)
-    return n and n.group(1), a and a.group(1)
-
-
-def count(cpus, binary, forced, summed, out, groups=False, pc=PER_CALL, meminfo=MEMINFO,
+def count(cpus, binary, forced, summed, out, groups=False, shards=SHARDS, meminfo=MEMINFO,
           poll=30):
     tabs, want, _ = wanted(forced, summed, groups)
-    sized = {mc: calls(tabs[mc[0]], mc[1]) for mc in want}
-    part = out + '.part'
-    done = {}
-    if os.path.exists(part):
-        for line in census.lines_of(part):
-            f = line.split('\t')
-            if len(f) == 4:
-                done[f[0]] = line
-    names = {mc: name(*mc) for mc in want}
-    todo = [mc for mc in want if done.get(names[mc], '\t-').split('\t')[1] == '-']
-    lock = threading.Lock()
-    with tempfile.TemporaryDirectory(prefix='a2tcells-') as td, open(part, 'a') as fo:
-        run = census.wrappers(td, [binary])
+    sel = 'groups' if groups else 'full'
+    tables = ['--tables', forced, summed]
+    listed = [f'{name(*mc)}\t{calls(tabs[mc[0]], mc[1])}' for mc in want]
+    r = subprocess.run([binary, '--cells', sel, '--list', *tables],
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    have = r.stdout.split('\n')[:-1]
+    if r.returncode or have != listed:
+        first = next((f'{a!r} where {b!r}' for a, b in zip(have, listed) if a != b),
+                     f'{len(have)} cells where {len(listed)}')
+        print(f'{binary} --cells {sel} --list: exit {r.returncode}, {first}'
+              + ''.join(f'; {x}' for x in r.stderr.split('\n')[:3] if x), file=sys.stderr)
+        return 2
+    parts = [f'{out}.part{i}' for i in range(shards)]
 
-        def work(mc, cpu):
-            while mem_available_kb(meminfo) < MEM_FLOOR_KB:
-                time.sleep(poll)
-            mode, cell = mc
-            r = subprocess.run([sys.executable, pc, '--cpu', cpu, '--reps', '1', '--alloc',
-                                run[mode][0], cell, str(sized[mc])],
-                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
-            n, a = parse(r.stdout)
-            line = f'{names[mc]}\t{n or "-"}\t{r.returncode}\t{a or "-"}'
-            with lock:
-                fo.write(line + '\n')
-                fo.flush()
-                done[names[mc]] = line
-            if r.returncode or not n:
-                text = (r.stdout + r.stderr).replace('\n', ' ')[-300:]
-                print(f'{names[mc]}: exit {r.returncode}: {text}', file=sys.stderr)
-            return r.returncode == 0 and n is not None
-        ok = census.lanes(todo, cpus, work)
+    def work(i, cpu):
+        while mem_available_kb(meminfo) < MEM_FLOOR_KB:
+            time.sleep(poll)
+        r = subprocess.run([binary, '--cells', sel, '--count', '--reps', '1', *tables,
+                            '--shard', f'{i}/{shards}', '--out', parts[i]]
+                           + (['--cpu', cpu] if cpu is not None else []),
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if r.returncode:
+            text = r.stderr.strip().replace('\n', '; ')[-300:]
+            print(f'shard {i}/{shards}: exit {r.returncode}: {text}', file=sys.stderr)
+        return r.returncode == 0
+    ok = census.lanes(list(range(shards)), cpus, work)
+    done = {}
+    for p in parts:
+        if os.path.exists(p):
+            for line in census.lines_of(p):
+                f = line.split('\t')
+                if len(f) == 4:
+                    done[f[0]] = line
+    rows = [done.get(n, f'{n}\t-\t2\t-') for n in (name(*mc) for mc in want)]
+    ok = ok and all(x.split('\t')[2] != '2' for x in rows)
     with open(out, 'w') as fh:
-        fh.write(''.join(done[names[mc]] + '\n' for mc in want))
+        fh.write(''.join(x + '\n' for x in rows))
     if ok:
-        os.unlink(part)
-    print(f'{len(want)} cells, {len(todo)} counted now into {out}'
-          + ('' if ok else f', some without figures: {part} kept'))
+        for p in parts:
+            if os.path.exists(p):
+                os.unlink(p)
+    print(f'{len(want)} cells in {shards} shards into {out}'
+          + ('' if ok else f', some without figures: {out}.part0 to .part{shards - 1} kept'))
     return 0 if ok else 2
 
 
@@ -183,13 +185,12 @@ def main(argv):
     if argv == ['--self-test']:
         return self_test()
     cmd, a = (argv[0], argv[1:]) if argv else (None, [])
-    groups, pc, meminfo = False, PER_CALL, MEMINFO
-    while a[:1] and a[0] in ('--groups', '--per-call', '--meminfo'):
+    groups, meminfo = False, MEMINFO
+    while a[:1] and a[0] in ('--groups', '--meminfo'):
         if a[0] == '--groups':
             groups, a = True, a[1:]
         elif len(a) > 1:
-            pc, meminfo = (a[1], meminfo) if a[0] == '--per-call' else (pc, a[1])
-            a = a[2:]
+            meminfo, a = a[1], a[2:]
         else:
             break
     try:
@@ -199,7 +200,7 @@ def main(argv):
             print(f'{len(want)} cells, {ngroups} groups', file=sys.stderr)
             return 0
         if cmd == 'count' and len(a) == 5:
-            return count(a[0].split(','), *a[1:], groups=groups, pc=pc, meminfo=meminfo)
+            return count(a[0].split(','), *a[1:], groups=groups, meminfo=meminfo)
     except census.Unreadable as e:
         print(e, file=sys.stderr)
         return 2
@@ -208,7 +209,7 @@ def main(argv):
 
 
 # --- self-test: planted tables, the cells and groups read from them, and
-# a count by a fake perf-per-call.py.
+# a count by a fake binary.
 
 HEADER = '                          ns, then bytes\n'
 FORCED = HEADER + '''\
@@ -222,16 +223,42 @@ Shaped/fold/small/dense       12.00      -      -   48    -    -
 SUMMED_T = HEADER + '''\
 Dynamic/fold/small/dense      10.00      -      -   16    -    -
 '''
-# the fake: its arguments logged, A's figures from the cell's name, failing
-# a cell named in FAKEFAIL
-FAKE_PC = '''import os, sys
+# the fake binary: its arguments logged; --list printing the file list-SEL
+# beside it, one N wrong where FAKELISTBAD; a count appending to --out
+# a line for each cell of its shard that the file has no figures for, its
+# instructions the length of the cell's name, the cell FAKEFAIL names
+# failing, and a line `counted CELL` to the log for each
+FAKE_BIN = '''#!/usr/bin/env python3
+import os, sys
 a = sys.argv[1:]
-open(os.environ['FAKELOG'], 'a').write(' '.join(a) + '\\n')
-if a[-2] == os.environ.get('FAKEFAIL'):
-    sys.exit(2)
-print(a[-2] + ', per call:')
-print('A instructions %d.0 [1..2]  cycles 3.0 [3.0..3.0]  alloc 8.0 [8.0..8.0]  ' % len(a[-2])
-      + a[-3])
+log = open(os.environ['FAKELOG'], 'a')
+log.write(' '.join(a) + '\\n')
+sel = a[a.index('--cells') + 1]
+listed = open(os.path.join(os.path.dirname(sys.argv[0]), 'list-' + sel)).read().split('\\n')[:-1]
+if '--list' in a:
+    if os.environ.get('FAKELISTBAD'):
+        listed[-1] += '0'
+    print('\\n'.join(listed))
+    sys.exit(0)
+i, k = map(int, a[a.index('--shard') + 1].split('/'))
+out = a[a.index('--out') + 1]
+have = open(out).read().split('\\n')[:-1] if os.path.exists(out) else []
+kept = [x for x in have if x.split('\\t')[2] != '2']
+done = {x.split('\\t')[0] for x in kept}
+e = 0
+with open(out, 'w') as fh:
+    fh.write(''.join(x + '\\n' for x in kept))
+    for j, x in enumerate(listed):
+        c = x.split('\\t')[0]
+        if j % k != i or c in done:
+            continue
+        log.write('counted ' + c + '\\n')
+        if c == os.environ.get('FAKEFAIL'):
+            fh.write(c + '\\t-\\t2\\t-\\n')
+            e = 2
+        else:
+            fh.write('%s\\t%d.0\\t0\\t8.0\\n' % (c, len(c)))
+sys.exit(e)
 '''
 
 
@@ -239,10 +266,11 @@ def self_test():
     bad = []
     with tempfile.TemporaryDirectory(prefix='a2tcells-') as d, \
             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        for f, t in (('forced', FORCED), ('summed', SUMMED_T), ('pc.py', FAKE_PC),
-                     ('meminfo', 'MemAvailable:   9000000 kB\n'), ('bin', '')):
+        for f, t in (('forced', FORCED), ('summed', SUMMED_T), ('bin', FAKE_BIN),
+                     ('meminfo', 'MemAvailable:   9000000 kB\n')):
             with open(f'{d}/{f}', 'w') as fh:
                 fh.write(t)
+        os.chmod(f'{d}/bin', 0o755)
         try:
             tabs, full, ngroups = wanted(f'{d}/forced', f'{d}/summed', False)
         except census.Unreadable as e:
@@ -274,48 +302,65 @@ def self_test():
         if group('forced', 'Dynamic//=/small/dense/boxed') != \
                 ('forced', 'Dynamic', '/=', 'small', 'boxed'):
             bad.append('a slashed operation grouped wrong')
-        # count: every cell counted on its lane's CPU, a summed one through
-        # the wrapper, OUT in the cells' order and OUT.part gone.
+        for sel, g in (('full', False), ('groups', True)):
+            t, cs, _ = wanted(f'{d}/forced', f'{d}/summed', g)
+            with open(f'{d}/list-{sel}', 'w') as fh:
+                fh.write(''.join(f'{name(*mc)}\t{calls(t[mc[0]], mc[1])}\n' for mc in cs))
         out, log = f'{d}/out.tsv', f'{d}/log'
         os.environ['FAKELOG'] = log
+
+        def parts():
+            return [p for p in os.listdir(d) if p.startswith('out.tsv.part')]
+
+        def logged():
+            return open(log).read().split('\n')[:-1]
         try:
+            # count: the binary's list checked, then every cell counted once
+            # in ten shards over the lanes' CPUs, a summed cell by its name,
+            # OUT in the cells' order and the shards' files gone.
             argv = ['3,5', f'{d}/bin', f'{d}/forced', f'{d}/summed', out]
-            r = main(['count', '--per-call', f'{d}/pc.py', '--meminfo', f'{d}/meminfo', *argv])
+            r = main(['count', '--meminfo', f'{d}/meminfo', *argv])
             rows = open(out).read().split('\n')[:-1] if os.path.isfile(out) else []
-            ran = open(log).read().split('\n')[:-1]
             if r or [x.split('\t')[0] for x in rows] != [name(*mc) for mc in want] \
-                    or rows[0] != f'Dynamic/fold/small/dense/boxed\t{30}.0\t0\t8.0' \
-                    or os.path.exists(out + '.part'):
+                    or rows[0] != f'Dynamic/fold/small/dense/boxed\t{30}.0\t0\t8.0' or parts():
                 bad.append(f'count exited {r}, wrote {rows}')
-            cpus = sorted({x.split()[1] for x in ran})
-            if cpus != ['3', '5'] or len(ran) != len(want) or not all(
-                    x.startswith('--cpu ') and ' --reps 1 --alloc ' in x for x in ran):
-                bad.append(f'perf-per-call ran {ran}')
-            summed = [x for x in ran if 'A-summed' in x]
-            if len(summed) != 1 or not summed[0].endswith(
-                    ' Dynamic/fold/small/dense/boxed 200000'):
-                bad.append(f'the summed cell ran {summed}')
-            # A failed cell fails the count and keeps OUT.part; counting again
-            # counts that cell alone.
+            ran = logged()
+            runs = [x for x in ran if ' --count ' in x]
+            cpus = sorted({x.split('--cpu ')[1] for x in runs})
+            shards = sorted(int(x.split('--shard ')[1].split('/')[0]) for x in runs)
+            tables = f' --tables {d}/forced {d}/summed '
+            if cpus != ['3', '5'] or shards != list(range(10)) or not all(
+                    x.startswith('--cells full --count --reps 1' + tables) for x in runs) \
+                    or [x for x in ran if ' --list ' in x] != [f'--cells full --list{tables[:-1]}'] \
+                    or sorted(x for x in ran if x.startswith('counted ')) \
+                    != sorted(f'counted {name(*mc)}' for mc in want):
+                bad.append(f'the binary ran {ran}')
+            # A failed cell fails the count and keeps the shards' files;
+            # counting again counts that cell alone.
             os.unlink(out)
             os.environ['FAKEFAIL'] = 'Dynamic/fold/large/dense/Unboxed'
             open(log, 'w').close()
-            r = main(['count', '--groups', '--per-call', f'{d}/pc.py', '--meminfo',
-                      f'{d}/meminfo', *argv])
+            r = main(['count', '--groups', '--meminfo', f'{d}/meminfo', *argv])
             rows = open(out).read().split('\n')[:-1] if os.path.isfile(out) else []
             if r != 2 or len(rows) != 9 or 'Dynamic/fold/large/dense/Unboxed\t-\t2\t-' not in rows \
-                    or not os.path.isfile(out + '.part'):
+                    or not parts():
                 bad.append(f'a failed cell: exit {r}, rows {rows}')
             del os.environ['FAKEFAIL']
             open(log, 'w').close()
-            r = main(['count', '--groups', '--per-call', f'{d}/pc.py', '--meminfo',
-                      f'{d}/meminfo', *argv])
-            ran = open(log).read().split('\n')[:-1]
-            if r or len(ran) != 1 or 'Dynamic/fold/large/dense/Unboxed' not in ran[0] \
-                    or os.path.exists(out + '.part'):
-                bad.append(f'resumed: exit {r}, ran {ran}')
+            r = main(['count', '--groups', '--meminfo', f'{d}/meminfo', *argv])
+            counted = [x for x in logged() if x.startswith('counted ')]
+            if r or counted != ['counted Dynamic/fold/large/dense/Unboxed'] or parts():
+                bad.append(f'resumed: exit {r}, counted {counted}')
+            # A list that differs from the tables' counts nothing.
+            os.environ['FAKELISTBAD'] = '1'
+            os.unlink(out)
+            open(log, 'w').close()
+            r = main(['count', '--meminfo', f'{d}/meminfo', *argv])
+            if r != 2 or [x for x in logged() if ' --count ' in x] or os.path.exists(out):
+                bad.append(f'a wrong list: exit {r}, ran {logged()}')
         finally:
             os.environ.pop('FAKEFAIL', None)
+            os.environ.pop('FAKELISTBAD', None)
         # The memory floor: a lane waits while MemAvailable is under it.
         with open(f'{d}/meminfo', 'w') as fh:
             fh.write('MemAvailable:   100 kB\n')
@@ -325,15 +370,14 @@ def self_test():
             early.append(open(log).read())
             with open(f'{d}/meminfo', 'w') as fh:
                 fh.write('MemAvailable:   9000000 kB\n')
-        os.unlink(out)
         open(log, 'w').close()
         early = []
         th = threading.Thread(target=free)
         th.start()
-        r = count(['3'], f'{d}/bin', f'{d}/forced', f'{d}/summed', out, pc=f'{d}/pc.py',
+        r = count(['3'], f'{d}/bin', f'{d}/forced', f'{d}/summed', out, shards=1,
                   meminfo=f'{d}/meminfo', poll=0.05)
         th.join()
-        if r or early != ['']:
+        if r or len(early) != 1 or ' --count ' in early[0] or ' --list ' not in early[0]:
             bad.append(f'counted under the memory floor: exit {r}, {early}')
     for x in bad:
         print('FAIL', x)
