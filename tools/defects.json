@@ -9554,6 +9554,21 @@
    "bug_exit": 0,
    "bug_text": "/vpapi/at-ct-x/forced.txt",
    "bug_absent": "a2t-tables"
+  },
+  {
+   "id": "NCG-battery-21",
+   "program": "NCG-battery/rebuild.py",
+   "name": "rebuild.py failed every step whose battery failed only in the scaling probes, the join probe panicking on makeMove's mem->mem move (GHC #27638) at every commit below the series' fix, and stopped after three such steps in a row, so a full rebuild of the series could not pass master",
+   "family": "other:proxy-for-property",
+   "fix_rev": "self",
+   "trigger": "a step whose battery exits 2, every part measured and only the scale part's join rows FAILED on the makeMove panic, as at master 37ad471050 and the series' commits below its GHC #27638 fix",
+   "ok": "with --accept naming a check of that failure, the step done, its line 'battery: 2, accepted: ' and the check's last line; without it, or where the check refuses, the step failed as before",
+   "bug": "'frNN FAILED, battery: 2' at fr00 and fr01, each step to be measured again from nothing by the next run, and the run stopping once MAX_FAILED steps had failed in a row",
+   "proved": "ran",
+   "harm": "fired",
+   "discovery": "in-use",
+   "notes": "2026-11-24: the rebuild launched at 02:57 on for-review-master 98a1ba29d9 failed fr00 at 04:28 and fr01 at 05:36 so; the session's labels had been accepted by its own check of that failure, run by hand after label.py's battery (c01, c11, c12, the tip variants), which the rebuild had no way to run. The planted chain the case runs on is the self-test's.",
+   "no_audit": "other:the-planted-chain-lives-in-the-tools-own-self-test"
   }
  ]
 }

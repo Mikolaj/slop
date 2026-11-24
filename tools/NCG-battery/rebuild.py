@@ -4,7 +4,8 @@ another, each built from nothing in a tree of its own and then measured by
 battery.py with the machine to itself (Mikolaj, 2026-11-03: "you sequentially
 build and benchmark each commit in turn").
 
-Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--pair] [--tests NAMES] [--work DIR] BASE TIP CPUS
+Usage: python3 tools/NCG-battery/rebuild.py [--dry] [--pair] [--tests NAMES] [--accept CMD]
+           [--work DIR] BASE TIP CPUS
        python3 tools/NCG-battery/rebuild.py --build [--patch P]... [--target T]
            [--setting L]... [--logs DIR] [--max-wait S] [--work DIR] TREE COMMIT CPUS
        python3 tools/NCG-battery/rebuild.py [--work DIR] --keep-nofib LABEL...
@@ -82,10 +83,19 @@ the tree, its log LOGS/tests-LABEL-WAY.log, and rebuild.log gets a line naming
 its unexpected results. A step whose tree has none of NAMES runs no tests,
 and a test's unexpected result fails neither the step nor the run.
 
+--accept CMD (words, the label appended) runs where a step's battery exits
+otherwise than 0 and was not killed, its output in LOGS/accept-LABEL.log:
+exiting 0, it counts the battery as measured, the step's line naming
+the battery's exit and the last line CMD printed, and the step goes on as one
+whose battery passed; exiting otherwise, it leaves the step failed. It is for
+a part known to fail at the steps below some commit of the chain, as a scaling
+probe panicking on an upstream bug that commit fixes.
+
 WORK/battery/rebuild (LOGS) holds rebuild.log, the lines it prints; steps.txt;
 for each step build-LABEL.log, boot-LABEL.log, configure-LABEL.log,
 hadrian-LABEL.log.gz, hperf-LABEL.csv (perf stat's) and battery-LABEL.log;
-LABEL.done, LABEL.failed or LABEL.named, holding what the log's line says;
+accept-LABEL.log where --accept ran; LABEL.done, LABEL.failed or LABEL.named,
+holding what the log's line says;
 the report.
 Before the first step, inputs.py's ensure puts battery.py's inputs in place.
 --battery, --timeout and --min-free are the self-test's, and --repo too.
@@ -454,13 +464,26 @@ def step(o, label, commit, jobs, say=print):
         run_tests(o, label, jobs, say)
     st = run_logged([sys.executable, o['battery'], '--work', o['work'], label, label, o['cpus']],
                     f'{logs}/battery-{label}.log', o['timeout'])
-    if st != 0:
+    acc = accepted(o, label) if st != 0 and isinstance(st, int) and o.get('accept') else None
+    if st != 0 and acc is None:
         return f'battery: {st}', ''
     t2 = time.time()
     bstats.write(f'{o["work"]}/battery/pkgb-{label}.tsv', bstats.pkg_rows(o['work'], label, label))
     prune(o['work'], label)
     return None, (f'built in {(t1 - t0) / 60:.0f} min with {warnings} warnings,'
-                  f' measured in {(t2 - t1) / 60:.0f} min')
+                  f' measured in {(t2 - t1) / 60:.0f} min'
+                  + (f', battery: {st}, accepted: {acc}' if acc is not None else ''))
+
+
+def accepted(o, label):
+    """The last line --accept's command prints given label, where it exits 0,
+    accepting the step's failed battery; None where it exits otherwise."""
+    log = f'{o["logs"]}/accept-{label}.log'
+    if run_logged(shlex.split(o['accept']) + [label], log, o['timeout']) != 0:
+        return None
+    with open(log) as fh:
+        lines = [x for x in fh.read().split('\n') if x.strip()]
+    return lines[-1] if lines else ''
 
 
 def run(o, steps):
@@ -676,7 +699,7 @@ def main(argv):
             return 2
         return 1 if [r for lab in rest[1:] for r in keep_nofib(work, lab)] else 0
     o = {'work': WORK, 'repo': REPO, 'battery': BATTERY, 'timeout': TIMEOUT, 'min_free': MIN_FREE,
-         'tests': ''}
+         'tests': '', 'accept': ''}
     dry = False
     while argv[:1] and argv[0].startswith('--'):
         name = argv[0][2:].replace('-', '_')
@@ -725,6 +748,9 @@ def main(argv):
                   ' --test-way=WAY')
         print(shlex.join([sys.executable, o['battery'], '--work', o['work'],
                           steps[0][0], steps[0][0], o['cpus']]))
+        if o['accept']:
+            print('where it exits otherwise than 0, not killed:',
+                  shlex.join(shlex.split(o['accept']) + [steps[0][0]]))
         return 0
     return run(o, steps)
 
@@ -1023,6 +1049,24 @@ def self_test():
         if p.returncode != 0 or measured(lines) != ['fr01'] or os.path.exists(f'{w2}/ghc-fr01') \
                 or os.path.exists(f'{w2}/battery/rebuild/fr01.failed'):
             bad.append(f'taking up the failed step: {p.returncode} {measured(lines)}')
+        # A battery failing only as --accept's command allows counts as measured,
+        # the command's last line in the step's; one it refuses fails the step
+        # (NCG-battery-21).
+        with open(f'{d}/accept', 'w') as fh:
+            fh.write('#!/bin/bash\necho "accept|$1" >> "$FAKELOG"\n'
+                     '[ "$1" = "${FAKEACCEPT:-}" ] || { echo "accept $1: refused"; exit 1; }\n'
+                     'echo checked; echo "accept $1: accepted"\n')
+        os.chmod(f'{d}/accept', 0o755)
+        wa = fresh('wa')
+        p, lines = go(work=wa, opts=('--accept', f'{d}/accept'), FAKEBATTERY='fr01 fr03',
+                      FAKEACCEPT='fr01')
+        if p.returncode != 2 or 'battery: 3, accepted: accept fr01: accepted' not in p.stdout \
+                or 'fr01 done, ' not in p.stdout or 'fr03 FAILED, battery: 3\n' not in p.stdout \
+                or 'failed: fr03;' not in p.stdout or measured(lines) != all_labels \
+                or [x for x in lines if x.startswith('accept|')] != ['accept|fr01', 'accept|fr03'] \
+                or os.path.exists(f'{wa}/ghc-fr01') or not os.path.isdir(f'{wa}/ghc-fr03') \
+                or 'checked' not in open(f'{wa}/battery/rebuild/accept-fr01.log').read():
+            bad.append(f'--accept: {p.returncode} {measured(lines)} {p.stdout[-400:]}')
         # A step whose nofib tables could not be kept fails and keeps its files.
         w8 = fresh('w8')
         p, lines = go(work=w8, FAKENOTABLES='fr02')
