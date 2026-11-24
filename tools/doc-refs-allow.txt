@@ -69,6 +69,13 @@ d/../src/
 # ~/slop.
 Amode.hs
 
+# Names in docs/ghc-issue-i386-vector-cfg-order.md, never files of ~/slop:
+# its reproducers, written into the reader's own scratch directory from
+# the issue's text.
+T_vecorder.hs
+T_vecorderP.hs
+T_vecloop.hs
+
 # Names in docs/ghc-issue-i386-high-half-unique.md, never files of ~/slop:
 # its Haskell reproducer, written into the reader's own scratch directory from
 # the issue's text, and two files of GHC's tree, a link's text and a header

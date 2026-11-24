@@ -13,3 +13,12 @@ PUBLISHED_REF = "origin/master"
 # own in its checkout.
 FOREIGN = {"https://gitlab.haskell.org/ghc/ghc/-/blob/": "ghc",
            "https://github.com/Mikolaj/horde-ad/blob/": "horde-ad"}
+# A filed issue's body stays as filed: in that of
+# https://gitlab.haskell.org/ghc/ghc/-/work_items/28179, [line 1558] reaches
+# the name beside it only through a chain.
+NAMES_WAIVED = {
+    ("docs/ghc-issue-i386-vector-cfg-order.md",
+     "compiler/GHC/CmmToAsm/X86/CodeGen.hs#L1558"):
+        "the MO_V_Add case calls vector_int_op_sse, which calls"
+        " vector_op_sse, which calls vector_op_sse_reg",
+}

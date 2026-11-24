@@ -345,6 +345,13 @@ MUTANTS = [
      '    return False\n', ST),
     ('check-plan-citations enclosing definitions and Notes ignored', 'check-plan-citations.py',
      "                             + enclosing(lines, lo))\n", "                             + [])\n", ST),
+    # check-plan-citations: a NAMES_WAIVED link, waived in its own document alone
+    ('check-plan-citations names waiver ignored', 'check-plan-citations.py',
+     "                if why is not None:\n", "                if False:\n", ST),
+    ('check-plan-citations names waiver taken for every document', 'check-plan-citations.py',
+     '                why = NAMES_WAIVED.get((doc, f"{path}#{span}"))\n',
+     '                why = next((r for (_d, k), r in NAMES_WAIVED.items()\n'
+     '                            if k == f"{path}#{span}"), None)\n', ST),
     # heading-outline: "a closing fence is not a heading's text ... reported '## ```'"
     # (2026-08-28)
     # (the headings are common.headings' since 2026-10-19, the judges still

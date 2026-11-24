@@ -89,7 +89,8 @@ cited file's own path and those the file does not hold as a whole word are
 dropped, and one of the rest must occur within NAME_WINDOW lines of the
 cited ones or in a definition or Note enclosing them. The drop is what lets
 a clause name the program a draft is about, while a link whose lines moved
-still fails.
+still fails. NAMES_WAIVED, another setting, exempts one document's link
+from that rule, printing the reason with an ok.
 
 Non-vacuity: run `python3 ~/slop/tools/check-plan-citations.py
 --self-test`. It builds a scratch git repository -- files, commits, an
@@ -177,8 +178,13 @@ PUBLISHED_REF = "origin/master"
 # the URL up to the commit: the clone's path from the root. A commit there
 # counts as published when one of the clone's remote-tracking refs holds it.
 FOREIGN = {}
+# Links exempt from the names-beside rule, keyed by the document's path
+# from the root and the link's `path#Lspan` as a failure prints it: the
+# reason. For a filed text, which stays as filed, whose cited line reaches
+# the name beside it only through a chain of definitions.
+NAMES_WAIVED = {}
 # --- end per-repo configuration --------------------------------------
-SETTINGS = ("SEARCH_ROOTS", "PUBLISHED_REF", "FOREIGN")
+SETTINGS = ("SEARCH_ROOTS", "PUBLISHED_REF", "FOREIGN", "NAMES_WAIVED")
 # FOREIGN with this run's --foreign= additions, which main() sets.
 FOREIGN_RUN = dict(FOREIGN)
 
@@ -450,12 +456,12 @@ def names_path(code, path):
     return bool(code) and ("/" + path).endswith("/" + code)
 
 
-def check_links(text, own, foreign):
+def check_links(text, own, foreign, doc):
     """The links' own claims, apart from where their targets are: every
     label used is defined; a path-like link text is the end of its
     permalink; a `#L` continuation stays in the file its paragraph last
     named; and at least one name beside a permalink occurs near the line it
-    cites. Returns the failures."""
+    cites, unless NAMES_WAIVED exempts DOC's link. Returns the failures."""
     defs = {}
     for line, kind, _info in common.fence_scan(text.split("\n")):
         m = DEF_RE.match(line) if kind is None else None
@@ -550,6 +556,11 @@ def check_links(text, own, foreign):
                                  f"Note [{n}]" if n else f'"{q}"'
                                  for (c, n, q), _keys in names)
                 span = f"L{lo}" if lo == hi else f"L{lo}-L{hi}"
+                why = NAMES_WAIVED.get((doc, f"{path}#{span}"))
+                if why is not None:
+                    print(f"ok   {path}#{span} @ {sha[:9]} --- none of"
+                          f" {said} within {NAME_WINDOW} lines, waived: {why}")
+                    continue
                 print(f"FAIL {path}#{span} @ {sha[:9]} --- none of {said}"
                       f" beside the link is within {NAME_WINDOW} lines of"
                       f" it")
@@ -822,6 +833,20 @@ def self_test():
                           f"#L{hello} @ {fa[:9]} --- none"):
                 if quiet in p.stdout:
                     bad.append(f"foreign kitchen sink: {quiet!r} reported")
+            # A waiver exempts one document's link from the names-beside
+            # rule, and no other document's.
+            open(cfg, "w").write("NAMES_WAIVED = {('w.md', 'src/M.hs#L4'):"
+                                 " 'reached through a chain'}\n")
+            open("w.md", "w").write("A far name: [src/M.hs#L4][f1] (`baz`).\n\n"
+                                    f"[f1]: {pre}{defs['f1']}\n")
+            p = run("w.md", fmap)
+            expect("a waived link passes", p.returncode, 0)
+            contains("a waived link passes", p.stdout,
+                     "waived: reached through a chain")
+            p = run("f.md", fmap)
+            contains("a waiver binds its own document alone", p.stdout,
+                     "none of `baz`", "7 failed")
+            os.unlink(cfg)
             open("nd.md", "w").write(
                 "Sources [7][9], beside a numeric label.\n\n"
                 "[1]: https://example.com/\n")
@@ -1099,7 +1124,7 @@ def check(doc):
                   f" permalink(s) pinning it were not checked; fetch it,"
                   f" `git -C {clone} fetch origin`, and re-run",
                   file=sys.stderr)
-    failures += check_links(flat, own, FOREIGN_RUN)
+    failures += check_links(flat, own, FOREIGN_RUN, os.path.normpath(doc))
     print(f"\n{len(numbers) + len(anchors) + len(urlcites) + len(foreign)}"
           f" citations checked,"
           f" {failures} failed"
