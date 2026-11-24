@@ -19,7 +19,7 @@ cfr00-fr00 cfr01-fr01`, `o1-fr00 o1-fr01` at -O1. A step:
 1. The tree ghc-frNN from nothing: a clone of ~/slop/ghc (--repo), the commit
    fetched from it, the submodules from its .git/modules, nofib left out,
    ./boot, ./configure, hadrian's default target in battery.py's flavour with
-   --docs=none and -V, which logs every compiler command, under perf stat,
+   --docs=none and -V (a line a compile, no command line), under perf stat,
    with HADRIAN_SETTINGS in _build/hadrian.settings, which every hadrian run
    in the tree loads; then bstats.py's table of the build, WORK/battery/
    ghcb-frNN.tsv: each module's compile time, allocation and object size,
